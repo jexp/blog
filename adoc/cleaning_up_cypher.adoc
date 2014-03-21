@@ -1,0 +1,39 @@
+== Cleaning Out Your Graph
+
+If you want to delete lots of data from a Neo4j database with Cypher
+
+=== Just stop the server and delete the directory and start again
+
+Fastest way with no leftovers, just delete +db/data/graph.db+ and you're done.
+
+=== Cypher Statement before 2.1
+
+"Unknown Error" or +OutOfMemoryException+ is a symptom that your transaction size gets too big and consumes too much memory.
+
+That is unrelated to your config, you just have to keep in in check.
+
+If you want to delete elements in a batched way use something like this:
+
+[source,cypher]
+----
+MATCH (a)
+WITH a
+LIMIT 10000
+OPTIONAL MATCH (a)-[r]-()
+DELETE a,r
+RETURN COUNT(*)
+----
+
+Run until the result stays 0. This query will find at most 10000 nodes then find all their rels and then delete both.
+
+=== Cypher 2.1 and beyond
+
+You can make use of the new +PERIODIC COMMIT+ feature that takes care of batching behind the scenes. Try this:
+
+[source,cypher]
+----
+USING PERIODIC COMMIT
+MATCH (a)
+OPTIONAL MATCH (a)-[r]-()
+DELETE a,r;
+----

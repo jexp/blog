@@ -1,0 +1,114 @@
+<p>With the addition of node labels, the property graph model that is the foundation of Neo4j was changed for the first. It has been already thirteen years, since the founders (<a href="http://twitter.com/emileifrem">Emil</a>, Johan and <a href="http://twitter.com/peterneubauer">Peter</a>) sketched the original property graph model over some beers.</p>
+
+<p>With the new node-label feature you can assign any number of types from your domain to a node. Imagine labels like Person, Location, Product, Project, User etc. Adding, querying and removing labels is supported in all Neo4j-APIs: Cypher, Java-API and REST-API (Batch-Inserter is in the works).</p>
+
+<p>Starting with Neo4j 2.0 a last missing piece to Cypher functionality was added too. The new labels allow to provide label-based indexes which are handled automatically by the database. That means after an index is created all existing nodes with the label and properties are added to it behind the scenes and after the completion of that task the index will be updated transactionally.</p>
+
+<p>These indexes are used by Cypher to perform index based lookups based on the label and properties that are part of the index. That either happens automatically for simple expressions or with an explicit index hint.</p>
+
+<p>In this quick presentation the team outlines the basic ideas behind the node lables:</p>
+
+<iframe src="https://docs.google.com/presentation/d/14-_0rzxQAPgnk5HlqswaDT7QEuPgdvDpLZcbpb1puQU/embed?start=false&loop=false&delayms=3000" frameborder="0" width="960" height="749" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true"></iframe>
+
+<p>Introducing labels caused a change the store format of Neo4j. As always, if you want to upgrade an older installation to Neo4j 2.0 the store will be automatically upgraded if you provide the configuration option “<code>allow_store_upgrade=true</code>” to either <code>conf/neo4j.properties</code> or the configuration passed in to the embedded API.</p>
+
+Mattias shows some of these new features in action:
+
+Embed screencast.
+
+If you want to know how labels work, look no further, here are some examples:
+
+<h3>CREATE a node with a label</h3>
+
+<pre>CREATE (project:Project {name: "Cypher"})
+RETURN project,labels(project);
+</pre>
+
+
+<h3>Find the node via a label expression and property check</h3>
+
+<pre>MATCH (project:Project)
+WHERE project.name="Cypher"
+RETURN project;
+</pre>
+
+<h3>CREATE INDEX to speed up the previous query</h3>
+
+<pre>CREATE INDEX ON :Project(name);</pre>
+
+<h3>Create a second labeled node and a relationship</h3>
+
+<pre>CREATE (person:Person {name: "Andres"})
+WITH person
+MATCH (project:Project)
+WHERE project.name="Cypher"
+CREATE (person)-[job:WORKS_ON]->(project)
+RETURN person,job,project;
+</pre>
+
+<h3>Find the labeled nodes using only the MATCH expression</h3>
+
+<pre>MATCH (person:Person)-[job:WORKS_ON]->(project:Project)
+WHERE project.name = "Cypher"
+RETURN person,job,project;</pre>
+
+<h3>Force USING the created index</h3>
+
+<pre>MATCH (person:Person)-[job:WORKS_ON]->(project:Project)
+USING INDEX project:Project(name)
+WHERE project.name = "Cypher"
+RETURN person,job,project;</pre>
+
+<p>There is much more to indexes. Make sure to check out the documentation of Cypher, 
+the <a href="http://api.neo4j.org/2.0.M01/org/neo4j/graphdb/Label.html">Java-API</a>, 
+<a href="http://docs.neo4j.org/chunked/preview/rest-api-node-labels.html">REST-API</a>.</p>
+
+<p>Besides that major new feature set there are some more niceties in the Neo4j 2.0 Milestone 1 release:</p>
+
+<h2>Cypher</h2>
+
+<p>You can now merge multiple query results with <code>UNION [ALL]</code>:</p>
+
+<pre>MATCH n:Person RETURN n
+UNION
+MATCH n WHERE n.age > 12 RETURN n
+</pre>
+
+<p>For computing different values depending on an expression or value two versions of the well known <code>CASE ... WHEN ... ELSE</code> statement were added to Cypher:</p>
+
+<pre>MATCH n RETURN CASE n.type
+WHEN "cool" THEN 1
+WHEN "awesome" THEN 2
+ELSE 3
+END</pre>
+
+<pre>MATCH n RETURN CASE
+WHEN n.age > 35 THEN "senior"
+WHEN n.age < 18 THEN "junior"
+ELSE "adult"
+END</pre>
+
+<h2>Neo4j-Shell</h2>
+<h3>Import, Export, Parameters</h3>
+
+<p>This is something I worked on and had much fun with, didn't dive into the shell internals before.</p>
+
+<p>The Neo4j shell can now <code>DUMP</code> the contents of the database or the result of a Cypher statement as a single big Cypher <code>CREATE</code> statement (not yet with labels). This can then be piped or pasted into another shell to create that (sub)graph. The shell can now also read commands directly from a file using the <code>-f file</code> option.</p>
+
+<pre>bin/neo4j-shell -path data/graph.db -c "dump" | bin/neo4j-shell -path data/new.db</pre>
+
+<pre>bin/neo4j-shell -path data/graph.db -c "dump bin/neo4j-shell -path data/new.db -f love.cql
+START n=node(*) match n-[r:LOVES]->m return n,r,m;" > love.cql</pre>
+
+<p>I also added support for executing parameterized statements by automatically passing shell variables (set with <code>EXPORT</code>) to a cypher statement. So you can run your parameterized queries without rewriting them for the shell.</p>
+
+<pre>EXPORT name=”Andres”
+
+MATCH n:Person WHERE n.name = {name};
+</pre>
+
+
+<h2>Neo4j Console</h2>
+
+I also updated the <a href="http://console.neo4j.org">Neo4j console</a> to the new 2.0 milestone and changed the default graph to use labels (<code>:Crew</code> and <code>:Matrix</code> for the characters).
+To be new and shiny it also got the light theme as default that we already used on <a href="http://neo4j.org/learn/cypher">Neo4j.org</a>

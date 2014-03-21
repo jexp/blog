@@ -1,0 +1,96 @@
+== Spring Data Neo4j 3.0 - Configuration Changes
+
+With the 3.0.0 release of Spring Data Neo4j the label based type representation and indexing became the default. If you want to use it with some existing data you have to do some manual work.
+
+=== Mandatory "base-package" declaration
+
+The +base-package+ attribute of +neo4j:config+ became mandatory, as Neo4j's new schema based indexes can't be created in data transactions, so we have to pull the index-creating into the startup phase of the application lifecycle.
+
+=== TypeRepresentationStrategy Configuration
+
+The Label based strategy for representing types became the default, at least for new databases.
+
+For existing ones the +TypeRepresentationStrategyFactory+ checks for the +__types__+ index or the subreference nodes to correctly select the previously used TRS. 
+
+If you want to force the use of the label-based strategy though you have to configure that explicitely.
+
+Here are two configuration examples.
+
+=== XML-Configuration
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:neo4j="http://www.springframework.org/schema/data/neo4j"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+http://www.springframework.org/schema/context
+http://www.springframework.org/schema/context/spring-context-3.0.xsd
+http://www.springframework.org/schema/data/neo4j
+http://www.springframework.org/schema/data/neo4j/spring-neo4j.xsd">
+    <context:annotation-config/>
+
+    <bean id="typeRepresentationStrategyFactory" class="org.springframework.data.neo4j.support.typerepresentation.TypeRepresentationStrategyFactory">
+        <constructor-arg index="0" ref="graphDatabase"/>
+        <constructor-arg index="1" value="Labeled"/>
+    </bean>
+
+    <neo4j:config storeDirectory="graph.db" base-package="com.example.domain,com.example.domain2"/>
+    <neo4j:repositories base-package="com.example.repositories"/>
+</beans>
+----
+
+=== Java-Configuration
+
+[source,java]
+----
+@Configuration
+@EnableNeo4jRepositories(basePackage="com.example.repositories")
+public class MyAppConfig extends Neo4jConfiguration {
+    MyAppConfig() throws ClassNotFoundException {
+        setBasePackage("com.example.domain");
+    }
+
+    @Bean @Override
+    public TypeRepresentationStrategyFactory typeRepresentationStrategyFactory() throws Exception {
+        return new TypeRepresentationStrategyFactory(graphDatabase(), Strategy.Labeled, indexProvider());
+    }
+}
+----
+
+=== Migration of Type-Representation
+
+That's a bit more tricky and will be supported by a migration tool in one of the next minor releases.
+
+For now you can do something like this for each type.
+
+[source,cypher]
+----
+   start n=node:__types__(className="com.example.domain.Person")
+   set n:Person
+----
+
+From Java you would do something like this, after configuring the Label-based TRS as the default:
+
+[source,java]
+----
+Iterator<Node> nodes = template.lookup("__types__","className","*");
+for (Node node : nodes) {
+   if (!node.hasProperty("__type__")) continue;
+   String labelName = node.getProperty("__type__").lastIndexOf(".");
+   node.addLabel(DynamicLabel.label(labelName));
+}
+----
+
+alternatively:
+
+[source,java]
+----
+Iterator<Node> nodes = template.lookup("__types__","className",Person.class.getName());
+for (Node node : nodes) {
+   template.postEntityCreation(n,Person.class);
+}
+----

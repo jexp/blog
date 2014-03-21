@@ -1,0 +1,4 @@
+Lufthansa speichert Metainformationen über Medien für die Entertainment-Systeme im Graphen um Verteilung, Optimierungen, Was-wäre-wenn Analysen und rechtliche Abhängigkeiten zu verwalten (https://vimeo.com/80502008)
+
+jQAssistant ist ein open source Werkzeug zur Softwareanalyse, das Programmcode im Buildprozess in den Graph überführt, dort mit Architektur-Konzepten anreichert und dann Metric-Abfragen und Constraints auf diesen Informationen erlaubt (https://github.com/buschmais/jqassistant/wiki)
+

@@ -1,0 +1,428 @@
+use load csv for unwind
+
+generate a local csv file with the lookup information and use load-csv to connect the values
+
+== Quickly create a 100k Neo4j graph data model with Cypher only
+
+We want to run some test queries on an existing graph model but have no sample data at hand and also no input files (CSV,GraphML) that would provide it.
+
+Why not create quickly it on our own just using cypher. First I thought about using Cypher to generate CSV files and loading them back, but it is much easier.
+
+The domain is simple (:User)-[:OWN]->(:Product) but good enough for collaborative filtering or demographic analysis.
+
+=== Nodes: Users and Products
+
+Let's start with Users, we create 100k of them in one go:
+
+We create an array of names and go over a range of 100k with the +FOREACH+ clause, taking the counter as id and a name from the array.
+
+[source,cypher]
+----
+WITH ["Andres","Wes","Rik","Mark","Peter","Kenny","Michael","Stefan","Max","Chris"] AS names
+FOREACH (r IN range(0,100000) | CREATE (:User {id:r, name:names[r % size(names)]+" "+r}));
+----
+
+This finishes quickly, and tells us how many ndoes, labels and properties were created.
+
+----
++-------------------+
+| No data returned. |
++-------------------+
+Nodes created: 100001
+Properties set: 200002
+Labels added: 100001
+5788 ms
+----
+
+Same for products. As names I just used a few of my shiny geek things.
+
+[source,cypher]
+----
+with ["Mac","iPhone","Das Keyboard","Kymera Wand","HyperJuice Battery","Peachy Printer","HexaAirBot","AR-Drone","Sonic Screwdriver","Zentable","PowerUp"] as names
+foreach (r in range(0,50) | create (:Product {id:r, name:names[r % size(names)]+" "+r}));
+----
+
+Please note that I only created 50 products. I initially started with 3000 but then the cross product between users and products to sample relationships from grows really 
+large (300M) which is not pulled through so quickly. So I decided to stick with a cross product of 5M which is good enough for our purposes.
+
+----
++-------------------+
+| No data returned. |
++-------------------+
+Nodes created: 51
+Properties set: 102
+Labels added: 51
+46 ms
+----
+
+=== Relationships: OWN
+
+The general idea is to create the cross product between users and products and sample a percentage of that to create the relationships. For sampling we use +rand+, for the cross product +MATCH+ of two independent labels.
+
+My first approach didn't really work as the +WHERE+ clause belongs to the +MATCH+ and is pulled into the path finding and causes it to sample only users, not user-product pairs. 
+So for one user that was selected all +OWN+ relationships were created. Not what I wanted :)
+
+[source,cypher]
+----
+// don't do this
+match (u:User),(p:Product)
+where rand() < 0.1
+with u,p
+limit 50000
+merge (u)-[:OWN]->(p);
+----
+
+So we have to detach the +WHERE+ clause from +MATCH+ with a +WITH+ statement that passes on the user, product pairs. We still limit the cross-product results to 5M just as a safeguard in case we have miscalculated the cross product.
+A +rand() < 0.1+ samples 10% of the total amount, which is in our case 500k combinations. With those we then can create relationships either with +CREATE+ which is faster and doesn't check for duplicates. 
+
+
+[source,cypher]
+----
+match (u:User),(p:Product)
+with u,p
+limit 5000000
+where rand() < 0.1
+create (u)-[:OWN]->(p);
+----
+
+
+----
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 509898
+11684 ms
+----
+
+We could also use +MERGE+ which makes sure that at most one relationship between two nodes exists. 
+If we use +MERGE+ we should limit the amount of nodes that is created in one execution to avoid exponential time build-up. 
+If we introduce this limit, we also have to move the window of node-pairs to be considered by the percentage of rels we create.
+A limit of 100k is 1/5 of the total of 500k relationships, so we have to advance the total window also by 20% of 5M, i.e. 1M
+
+[source,cypher]
+----
+match (u:User),(p:Product)
+with u,p
+// increase skip value from 0 to 4M in 1M steps
+skip 1000000 
+limit 5000000
+where rand() < 0.1
+with u,p
+limit 100000
+merge (u)-[:OWN]->(p);
+----
+
+Which results in.
+
+----
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 100000
+51428 ms
+----
+
+If you have more memory for your Neo4j server than my 4G heap, you can also merge larger segments of relationships in a single transaction (200k or more).
+
+We also create an index for :User and product.
+
+[source,cypher]
+----
+create index on :User(id);
+create index on :Product(id);
+----
+
+Now we can run some of the test-queries we wanted to check:
+
+==== Find similar users that own the same stuff that I do.
+
+[source,cypher]
+----
+match (u:User {id:1})-[:OWN]->()<-[:OWN]-(other)
+return other.id,count(*)
+order by count(*) desc
+limit 5;
+----
+
++---------------------+
+| other.id | count(*) |
++---------------------+
+| 23404    | 6        |
+| 38967    | 5        |
+| 30991    | 5        |
+| 21436    | 5        |
+| 8119     | 5        |
++---------------------+
+5 rows
+173 ms
+
+=== Collaborative filtering - product suggestions
+
+[source,cypher]
+----
+match (u:User {id:3})-[:OWN]->()<-[:OWN]-(other)-[:OWN]->(p)
+return p.id,count(*)
+order by count(*) desc
+limit 5;
+----
+
+----
++-----------------+
+| p.id | count(*) |
++-----------------+
+| 37   | 2894     |
+| 9    | 2872     |
+| 3    | 2865     |
+| 31   | 2863     |
+| 35   | 2847     |
++-----------------+
+5 rows
+410 ms
+----
+
+
+
+match (u:User {id:3})-[:OWN]->()<-[:OWN]-(other)-[:OWN]->(p)
+return count(*);
+
+return p.id,count(*) as cnt
+order by cnt desc
+limit 5;
+
+where not (u)-[:OWN]->(p)
+
+match (u:User {id:3})-[:OWN]->()<-[:OWN]-(other)
+WITH other,count(*) as cnt
+MATCH (other)-[:OWN]->(p)
+return p.id,count(*) * cnt as mentions
+order by mentions desc
+limit 5;
+
+
+
+// what do my friends have that I don't
+match (u:User {id:3})-[:FOLLOW]->(friend)-[:OWN]->(p)
+where not (u)-[:OWN]->(p)
+return p.id,count(*)
+order by count(*) desc
+limit 5;
+
+
+// and 2 levels out?
+match (u:User {id:3})-[:FOLLOW]->(friend)-[:FOLLOW]->(foaf)-[:OWN]->(p)
+where not (u)-[:OWN]->(p)
+return p.id,count(*)
+order by count(*) desc
+limit 5;
+
+// or my whole network
+match (u:User {id:3})-[:FOLLOW*..2]->(foaf)-[:OWN]->(p)
+where not (u)-[:OWN]->(p)
+return p.id,count(*)
+order by count(*) desc
+limit 5;
+
+// or 3
+match (u:User {id:3})-[:FOLLOW*..3]->(foaf)-[:OWN]->(p)
+where not (u)-[:OWN]->(p)
+return p.id,count(*)
+order by count(*) desc
+limit 5;
+
+
+
+
+match (u:User),(p:Product)
+with u,p
+limit 5000000
+where rand() < 0.1
+with u,p
+limit 100000
+merge (u)-[:OWN]->(p);
+
+
+match (u:User),(p:Product)
+with u,p
+skip 1500000 limit 10000000
+where rand() < 0.1
+with u,p
+limit 100000
+merge (u)-[:OWN]->(p);
+
+
+
+
+with ["Andres","Wes","Rik","Mark","Peter","Kenny","Michael","Stefan","Max","Chris"] as names
+foreach (r in range(0,100000) | create (:User {id:r, name:names[r % size(names)]+" "+r}));
+
++-------------------+
+| No data returned. |
++-------------------+
+Nodes created: 100001
+Properties set: 200002
+Labels added: 100001
+5788 ms
+
+with ["Mac","iPhone","Das Keyboard","Kymera Wand","HyperJuice Battery","Peachy Printer","HexaAirBot","AR-Drone","Sonic Screwdriver","Zentable","Occulus Rift"] as names
+foreach (r in range(0,50) | create (:Product {id:r, name:names[r % size(names)]+" "+r}));
+
+
+match (u:User),(p:Product)
+where rand() < 0.1
+with u,p
+limit 100000
+merge (u)-[:OWN]->(p);
+
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 100000
+7032 ms
+
+match (u:User),(p:Product)
+with u,p
+limit 10000000
+where rand() < 0.1
+merge (u)-[:OWN]->(p);
+
+
+match (u:User),(p:Product) with u,p where rand() < 0.1 return count(*);
++----------+
+| count(*) |
++----------+
+| 510793   |
++----------+
+1 row
+8711 ms
+
+500k rels, i.e. 10% of the potential total
+
+500k rels are a bit much to create in a single tx, so we limit it to 50k at a time, 
+we can run this statement multiple times to create more 50k blocks of relationships
+
+match (u:User),(p:Product)
+with u,p
+limit 10000000 
+where rand() < 0.1
+with u,p
+limit 50000
+merge (u)-[:OWN]->(p);
+
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 50000
+17191 ms
+
+second run
+
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 44958
+36378 ms
+
+third run
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 36590
+67716 ms
+
+match (u:User),(p:Product)
+with u,p
+limit 10000000 
+where rand() < 0.1
+with u,p
+merge (u)-[:OWN]->(p)
+with u,p
+limit 50000
+return count(*);
+
+
+match (u:User),(p:Product)
+with u,p
+limit 10000000
+WHERE rand() < 0.1
+OPTIONAL match (u)-[r:OWN]->(p)
+with u,p,r
+WHERE r is null
+with u,p
+limit 50000
+merge (u)-[:OWN]->(p);
+
+
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 50000
+89605 ms
+
+match (u:User),(p:Product)
+with u,p
+limit 10000000 
+OPTIONAL match (u)-[r:OWN]->(p)
+where rand() < 0.1 and r is null
+with u,p
+limit 50000
+merge (u)-[:OWN]->(p);
+
+first run
++-------------------+
+| No data returned. |
++-------------------+
+Relationships created: 50000
+12987 ms
+
+second run
+
+nothing
+
+// too slow
+match (u:User),(p:Product)
+with u,p
+limit 10000000 
+WHERE rand() < 0.1 and NOT (u)-[:OWN]->(p)
+with u,p
+limit 50000
+merge (u)-[:OWN]->(p);
+
+==> +-------------------+
+==> | No data returned. |
+==> +-------------------+
+==> Relationships created: 50000
+==> 150404 ms
+
+match (u:User),(p:Product)
+with u,p
+limit 10000000
+where rand() < 0.1
+return p.id, count(*)
+limit 100;
+
+match (u:User),(p:Product)
+return count(*);
+
+match (u:User),(p:Product)
+with u,p
+limit 100000
+return count(*);
+
+where rand() < 0.01
+return count(*);
+
+
+match (u:User),(p:Product)
+with u,p
+where rand() < 0.01
+return count(*);
+
+
+match (u:User)-[r:OWN]->(p:Product)
+delete r;
+
+==> +-------------------+
+==> | No data returned. |
+==> +-------------------+
+==> Relationships deleted: 94958
+==> 4351 ms
