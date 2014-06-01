@@ -1,0 +1,182 @@
+== Play with Words
+
+:author: Michael Hunger
+:twitter: @mesirii
+:neo4j-version: 2.0.0
+:tags: nlp
+
+When I came across this http://stackoverflow.com/questions/22924769/create-unique-and-merge-slow[Stackoverflow issue], I was at first apalled by the Cypher import statements that were used to import the data. But I was intrigued by the idea:
+
+====
+I'm playing with a neo4j database consisting of ~ 275,000 English words linked to the letters they contain.
+
+This graph is mainly to provide a hands on prototype to help understand Neoj4 features and functions in a domain of interest: language stucture, word statistics, queries useful for word games (crossword puzzles, scrabble, words with friends, hangman, ...).
+====
+
+----
+BEGIN
+MATCH (A:Letter {token:"A"}),
+(B:Letter {token:"B"}),
+(C:Letter {token:"C"}),
+(D:Letter {token:"D"}),
+(E:Letter {token:"E"}),
+(F:Letter {token:"F"}),
+(G:Letter {token:"G"}),
+(H:Letter {token:"H"}),
+(I:Letter {token:"I"}),
+(J:Letter {token:"J"}),
+(K:Letter {token:"K"}),
+(L:Letter {token:"L"}),
+(M:Letter {token:"M"}),
+(N:Letter {token:"N"}),
+(O:Letter {token:"O"}),
+(P:Letter {token:"P"}),
+(Q:Letter {token:"Q"}),
+(R:Letter {token:"R"}),
+(S:Letter {token:"S"}),
+(T:Letter {token:"T"}),
+(U:Letter {token:"U"}),
+(V:Letter {token:"V"}),
+(W:Letter {token:"W"}),
+(X:Letter {token:"X"}),
+(Y:Letter {token:"Y"}),
+(Z:Letter {token:"Z"})
+// Create Words and link to proper letters
+MERGE (w1:Word {string:"WHOSE", length:5})
+ON MATCH SET w1.s_enable1=TRUE
+ON CREATE SET w1.s_enable1=TRUE
+// create the letter->word relationships if necessary
+CREATE UNIQUE (w1) <-[:IN_WORD {position:1}]- (W)
+CREATE UNIQUE (w1) <-[:IN_WORD {position:2}]- (H)
+CREATE UNIQUE (w1) <-[:IN_WORD {position:3}]- (O)
+CREATE UNIQUE (w1) <-[:IN_WORD {position:4}]- (S)
+CREATE UNIQUE (w1) <-[:IN_WORD {position:5}]- (E)
+MERGE (w2:Word {string:"WHOSESOEVER", length:11})
+ON MATCH SET w2.s_enable1=TRUE
+ON CREATE SET w2.s_enable1=TRUE
+CREATE UNIQUE (w2) <-[:IN_WORD {position:1}]- (W)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:2}]- (H)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:3}]- (O)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:4}]- (S)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:5}]- (E)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:6}]- (S)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:7}]- (O)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:8}]- (E)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:9}]- (V)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:10}]- (E)
+CREATE UNIQUE (w2) <-[:IN_WORD {position:11}]- (R)
+... N-2 more of these ...;
+COMMIT
+... M-1 more transactions ...
+----
+
+I thought "There must be an easier way to do it".
+
+=== Cypher #FTW
+
+Fortunately Cypher is turing complete and so I came up with this simpler solution:
+
+//output
+[source,cypher]
+----
+WITH upper("Stackoverflow") as word
+MERGE (w:Word {text:word, length:length(word)})
+FOREACH (i in range(0,length(word)-1) | 
+  MERGE (l:Letter {token:substring(word,i,1)})
+  MERGE (l)-[:IN_WORD {position:i}]->(w)
+)
+----
+
+// graph
+
+I showed it to my colleague http://twitter.com/kbastani[Kenny Bastani] who's really into NLP and http://slideshare.net/kbastani/...[language analytics with graphs].
+
+And he said "Chicken".
+
+//output
+[source,cypher]
+----
+WITH upper("Chicken") as word
+MERGE (w:Word {text:word, length:length(word)})
+   ON CREATE SET w.s_enable1=true
+FOREACH (i in range(0,length(word)-1) | 
+  MERGE (l:Letter {token:substring(word,i,1)})
+  MERGE (l)-[:IN_WORD {position:i}]->(w)
+)
+----
+
+// graph
+
+Then he said: "Let's do sentences". Sure, just utilize +split+ and add another loop around it.
+
+//output
+[source,cypher]
+----
+WITH "this is a sentence" as sentence
+FOREACH (word in split(upper(sentence)," ") |
+   MERGE (w:Word {text:word, length:length(word)})
+      ON CREATE SET w.s_enable1=TRUE
+   FOREACH (i in range(0,length(word)-1) | 
+     MERGE (l:Letter {token:substring(word,i,1)})
+     MERGE (l)-[:IN_WORD {position:i}]->(w)
+   )
+)
+----
+
+// graph
+
+and:
+
+//output
+[source,cypher]
+----
+WITH "this is nonsense" as sentence
+FOREACH (word in split(upper(sentence)," ") |
+   MERGE (w:Word {text:word, length:length(word)})
+      ON CREATE SET w.s_enable1=TRUE
+   FOREACH (i in range(0,length(word)-1) | 
+     MERGE (l:Letter {token:substring(word,i,1)})
+     MERGE (l)-[:IN_WORD {position:i}]->(w)
+   )
+)
+----
+
+// graph
+
+And of course you can also do just word level connections:
+
+"this is a sentence"
+
+//output
+[source,cypher]
+----
+WITH upper("this is a sentence") as sentence
+MERGE (s:Sentence {text:sentence})
+FOREACH (word in split(sentence," ") |
+   MERGE (w:Word {text:word, length:length(word)})
+   MERGE (w)-[:IN_SENTENCE]->(s)
+)
+----
+
+// graph
+
+"this is a pig"
+
+//output
+[source,cypher]
+WITH upper("this is a pig") as sentence
+MERGE (s:Sentence {text:sentence})
+FOREACH (word in split(sentence," ") |
+   MERGE (w:Word {text:word, length:length(word)})
+   MERGE (w)-[:IN_SENTENCE]->(s)
+)
+----
+
+// graph
+
+Now you have a nifty toolset in your hand to create fun language graphs and then build interesting apps on top of them.
+
+Of course for an real import you would use parameters instead of the words and sentences and probably pass in large enough arrays of words.
+So if you have on average 7 characters per word you can easily pass in 5-10k words in a single call.
+
+Have fun

@@ -1,0 +1,26 @@
+in the neo4j shell you could do
+
+begin
+create index ..;
+create index ..;
+commit
+
+Against the neo4j server use the tx-endpoint.
+
+POST /db/data/transaction/commit {statements: [{statement:"create index ..."},{statement:"create index ..."}]}
+
+With the Java API
+
+try (Transaction tx = db.beginTx()) {
+   executionEngine.execute("create index...")
+   executionEngine.execute("create index...")
+   tx.success();
+}
+
+or
+
+try (Transaction tx = db.beginTx()) {
+   db.schema().indexFor(label).on(property).create();
+   db.schema().indexFor(label).on(property).create();
+   tx.success();
+}

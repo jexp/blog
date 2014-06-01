@@ -1,0 +1,5 @@
+For the relationship you have 3 options:
+
+1. for a fresh db. just refer to the row number of the node file (-1) as you start with node number 0
+2. you can index the nodes on a property with an index (which you have to configure, e.g. name:string:User and then in the rels file in the first two columns use name:String:User as header too (then it will try to find the field name in the user index)
+3. You control the node-ids from the outside, then you do id:id in the first column of the nodes providing the id's and for the relationships start:id and end:id for the first two columns of the relationship-file

@@ -1,0 +1,79 @@
+== Sampling A Neo4j Database
+
+After reading the http://blog.bruggen.com/2014/03/media-politics-and-graphs.html?view=sidebar[interesting blog post] of my colleague http://twitter.com/rvanbruggen[Rik van Bruggen] on "Media, Politics and Graphs" I thought it would be really cool to render it as a http://gist.neo4j.org[GrapGist]. Especially, as he already shared all the queries as https://gist.github.com/rvanbruggen/9728315[a GitHub Gist].
+
+image:http://www.boeschoten.eu/wp-content/uploads/2013/12/netwerk.png[]
+
+Unfortunately the dataset was a bit large for a sensible GraphGist representation, so I thought about means of extracting a smaller sample of his raw data that he made available (see his blog post for the link).
+
+Considering my http://jexp.de/blog/2014/03/quickly-create-a-100k-neo4j-graph-data-model-with-cypher-only/[last blog post on creating data from sampling a cross product], this should be much easier. We know we want to have all nodes with the labels +PARTY+, +SHOW+ and +GENDER+ in our graph as well as a sample of +GUEST+ nodes with their relationships.
+
+The first part is easy:
+
+[source,cypher]
+----
+MATCH (n) 
+WHERE n:PARTY OR n:SHOW OR n:GENDER 
+RETURN n;
+----
+
+The second part uses something that was not helpful in my last exploration, namely that random sampling when applied directly to a match, is used to filter the first node-pattern in the match and then still traverse all relationships/paths emanating from that node.
+
+[source,cypher]
+----
+MATCH(n:GUEST)-[r]->() 
+WHERE rand() < 0.1 
+RETURN n,r;
+----
+
+The number you compare +rand()+ to is the percentage you want to get back, in this example 10%.
+
+Now I have two nice queries, that can get me the data, how can I bring them together? With +UNION ALL+
+
+[source,cypher]
+----
+MATCH (n) 
+WHERE n:PARTY OR n:SHOW OR n:GENDER 
+RETURN n, null as r
+UNION ALL
+MATCH(n:GUEST)-[r]->() 
+WHERE rand() < 0.1 
+RETURN n,r;
+----
+
+And where do I get the Cypher statements from, that I can use to populate my GraphGist database setup? Fortunately my +dump+ command made it into the Neo4j-Shell, so that we can just run it on the command-line and redirect the output into a file:
+
+----
+bin/neo4j-shell -path talkshow/graph.db \
+-c 'dump 
+MATCH (n) WHERE n:PARTY OR n:SHOW OR n:GENDER RETURN n, null as r 
+UNION ALL 
+MATCH(n:GUEST)-[r]->() WHERE rand() < 0.1 RETURN n,r;' \
+> talkshow/sample.cql
+----
+
+**Don't forget the semicolon at the end!** Looking at +sample.cql+ we see something like:
+
+[source,cypher]
+----
+begin
+create (_0:`SHOW` {`Modularity Name`:"B&vD", `id`:"B&vD", `label`:"B&vD", `modularity_class`:3, `weighted outdegree`:0.000000})
+create (_1:`SHOW` {`Modularity Name`:"P&W", `id`:"P&W", `label`:"P&W", `modularity_class`:4, `weighted outdegree`:0.000000})
+create (_2:`SHOW` {`Modularity Name`:"DWDD", `id`:"DWDD", `label`:"DWDD", `modularity_class`:5, `weighted outdegree`:0.000000})
+...
+...
+create _509-[:`VISITED` {`quantity`:1}]->_5
+create _509-[:`VISITED` {`quantity`:1}]->_2
+create _509-[:`VISITED` {`quantity`:1}]->_1
+create _509-[:`VISITED` {`quantity`:1}]->_0
+;
+commit
+----
+
+Which we can now use to populate our database for our GraphGist, and here it is in all its beauty - http://gist.neo4j.org/?9754306[GraphGist: "Media, Politics and Graphs"]. But actually I chose not to use Rik's GitHub Gist with the queries, but to copy the nice text and pictures from his blog post into the GraphGist.
+
+You might notice that some of the parties go without connections. That would need some tweaking of the sampling which I leave as exercise for you.
+
+Have fun
+
+Michael

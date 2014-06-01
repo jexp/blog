@@ -1,0 +1,280 @@
+== Importing Forests into Neo4j
+
+Sometimes you don't see the forest for the trees. But if you do, you probably use a graph database.
+
+Trees are one of the simple graph datastructures, directed acyclic graphs (DAGs).
+
+For our example we use a time-tree that we want to import into the database. 
+
+=== Data Volume
+
+A quick http://www.acqualia.com/soulver/[soulver expression] (thanks http://twitter.com/markhneedham[Mark]) later we know how many nodes and rels (nodes-1), we will have to 
+import to represent a full year down to the second level.
+
+----
+1 year = 12 months = 365 days = 8.760 hours = 525.600 minutes = 31.536.000 seconds
+----
+
+So we have to import about 32M nodes and 32M relationships. Sounds good enough.
+
+These numbers also allow us to configure the memory mapping so that we can match it to the expected store-file sizes and get a smooth import.
+
+Again let's ask soulver:
+
+----
+32M nodes x 14 bytes in MB = 448MB
+32M rels x 38 bytes in MB = 1.216 MB
+----
+
+For the properties, I take 500MB for good measure. So our +neo4j.properties+ would look like this:
+
+----
+neostore.nodestore.db.mapped_memory=500M
+neostore.relationshipstore.db.mapped_memory=1200M
+neostore.propertystore.db.mapped_memory=500M
+----
+
+Running the import with 4G heap on Unix/Mac and 6.5GB heap on Windows (remember the memory mapping is inside the heap on Windows),
+either against a running server by just calling +bin/neo4j-shell+ or offline with a test database.
+
+----
+bin/neo4j-shell -path time.db -config conf/neo4j.properties
+----
+
+=== Root, Stem and first Branches
+
+My friend and colleague http://twitter.com/rvanbruggen[Rik Van Bruggen] started this experiment and created the following Cypher queries to import the data.
+
+We import the data using the Neo4j-Shell, but you can also do it one statement at a time with the Neo4j-Browser.
+
+The first part of the tree (8k nodes) can be imported quickly in one go, it takes about 5 seconds to parse and execute.
+
+[source,cypher]
+----
+BEGIN
+//Let's create the top of the tree, the Century
+CREATE (century:Century {id:21});
+
+//Let's create 100 children of the Century, Years
+MERGE (century:Century {id:21})
+WITH range(2000,2099) as YEARS, century
+FOREACH (year in YEARS | CREATE (:Year {id:year})-[:PART_OF]->(century) );
+
+//for every Year, let's connect 12 children at a 3rd level, the Months
+MERGE (year:Year {id:2014})
+WITH range(1,12) as MONTHS, year
+FOREACH (month in MONTHS | CREATE (:Month {id:month})-[:PART_OF]->(year) );
+
+//for every Month, connect 30 Days, and add one day for the longer months
+MATCH (month:Month)
+WITH range(1,30) as DAYS, month
+FOREACH (day in DAYS | CREATE (:Day {id:day})-[:PART_OF]->(month))
+WITH month
+WHERE month.id in [1,3,5,7,8,10,12]
+CREATE (:Day {id:31})-[:PART_OF]->(month);
+
+// remove 2 days from februrary
+MATCH (day:Day)-[r:PART_OF]->(month:Month)
+WHERE month.id=2 and day.id in [29,30]
+DELETE r,day;
+
+//for every Day, connect 24 different Hours (0-23)
+MATCH (day:Day)
+WITH range(0,23) as HOURS, day
+FOREACH (hour in HOURS | CREATE (:Hour {id:hour})-[:PART_OF]->(day) );
+
+COMMIT
+----
+
+For the 500k minute nodes our heap (4GB) is also large enough, so let's try it:
+
+[source,cypher]
+----
+//for every Hour, connect 60 minutes
+MATCH (hour:Hour)
+FOREACH (minute in range(0,59) | create (:Minute {id:minute})-[:PART_OF]->(hour));
+----
+
+----
+Nodes created: 525600
+Relationships created: 525600
+Properties set: 525600
+Labels added: 525600
+14044 ms
+----
+                                                                           
+The import takes 14 seconds. As we have 60 times as many seconds as minutes, we can estimate that the import for seconds would take 60 x 14s in minutes = 14 minutes.
+
+=== Raking in the Foliage
+
+Next up is the real challenge of this exercise. Importing 32M in the transactional graph takes a bit, so, you might
+grab a coffee or watch two episodes of our familys favorite show http://kindernetz.de/tom[Tom and the strawberry jam bread with honey].
+
+We're using +PERIODIC COMMIT+ here to interally commit every 50k updates, so that we don't overflow our heap with huge transactions. We discuss its fate a bit further down.
+
+[source,cypher]
+----
+//for every Minute, connect 60 seconds
+USING PERIODIC COMMIT 50000
+WITH range(0,59) as SECONDS
+MATCH (minute:Minute)
+FOREACH (second in SECONDS | CREATE (:Second {id:second})-[:PART_OF]->(minute));
+----                                
+
+----   
+Nodes created: 31536000
+Relationships created: 31536000
+Properties set: 31536000
+Labels added: 31536000
+742248 ms
+----     
+
+In reality it was **a bit faster, and took only 740s = 12 minutes**. That gives us 12 minutes per 32M nodes and 32M rels, which are about 45k pairs or about 90k elements per second. Not so bad for transactional inserts with Cypher.
+
+=== Chunking Inserts
+
+After Milestone 1 this gets a bit more tedious. Periodic commit is now tied to +LOAD CSV+. As we can't use it anymore, we have to create individual statements, each of which should insert about 50k pairs.
+For 32M elements to inserts that means 640 statements. If we have enough heap, we can increase the size per tx to about 500k which leaves us with 64 statements to execute.
+
+We could do that by inserting 6 days at a time. You have to run this and increment the day range by 6 for every run.
+
+[source,cypher]
+----
+//for every Minute, connect 60 seconds
+WITH range(0,59) as SECONDS, range(1,6) as DAYS
+MATCH (:Month {id:1})<-[:PART_OF]-(d:Day)<-[:PART_OF]-(:Hour)<-[:PART_OF]-(minute:Minute)
+WHERE d.id IN DAYS
+FOREACH (second in SECONDS | CREATE (:Second {id:second})-[:PART_OF]->(minute));
+----
+
+----
+Nodes created: 518400
+Relationships created: 518400
+Properties set: 518400
+Labels added: 518400
+16623 ms
+----                                
+
+=== Cheating, Handle with Care
+
+Or we can cheat, and use +PERIODIC COMMIT+ with +LOAD CSV+ but without actually loading data from a CSV file containing a single row. That file can be something hosted in a GitHub Gist
+or a single row file on your filesystem.
+                                                
+[IMPORTANT]
+Please do only use this if you know what you're doing. +PERIODIC COMMIT+ ignores query structure and just commits internally after N updated elements. Be it nodes, relationships, properties or labels. So the commit will very probably happen somewhere in the middle of your statement. 
+If something fails in between, you will have little chance to recover from that state if you don't use additional flags (labels or properties) to track your progress.
+
+[source,cypher]
+----
+//for every Minute, connect 60 seconds
+USING PERIODIC COMMIT 50000
+LOAD CSV FROM "https://gist.githubusercontent.com/jexp/10353750/raw/c227083464fb9af8955c90d2924774ee50abb547/one-row.csv" AS dummy
+WITH range(0,59) as SECONDS
+MATCH (minute:Minute)
+FOREACH (second IN SECONDS | CREATE (:Second {id:second})-[:PART_OF]->(minute));
+----                                
+
+=== Queries
+
+Ok, now we've imported this giant of a tree, what can we do with it?
+
+Here are a few graph queries that navigate along the tree.
+
+==== Drill down to hours:
+
+[source,cypher]
+----
+MATCH (y:Year {id:2014})<-[:PART_OF*3]-(hr) 
+RETURN y,count(*);
+
++-------------------------------+
+| y                  | count(*) |
++-------------------------------+
+| Node[128]{id:2014} | 8760     |
++-------------------------------+
+1 row
+63 ms
+----
+
+==== How many minutes does the odd months have?
+
+[source,cypher]
+----
+MATCH (y:Year {id:2014})<-[:PART_OF]-(m)<-[:PART_OF]-(d)<-[:PART_OF]-(hr)<-[:PART_OF]-(min) 
+WHERE m.id % 2 = 1
+RETURN y.id,m.id,count(*) 
+ORDER BY y.id, m.id;
+
++------------------------+
+| y.id | m.id | count(*) |
++------------------------+
+| 2014 | 1    | 44640    |
+| 2014 | 3    | 44640    |
+| 2014 | 5    | 44640    |
+| 2014 | 7    | 44640    |
+| 2014 | 9    | 43200    |
+| 2014 | 11   | 43200    |
++------------------------+
+6 rows
+1169 ms
+----
+
+=== Find the path to a certain day in the tree
+
+[source,cypher]
+----
+MATCH (y:Year {id:2014})<-[:PART_OF]-(m {id:12})<-[:PART_OF]-(d {id:24}) 
+RETURN y.id,m.id,d.id;
+
++--------------------+
+| y.id | m.id | d.id |
++--------------------+
+| 2014 | 12   | 24   |
++--------------------+
+1 row
+3 ms
+----
+
+=== Grow a branch at a time: On-demand creation
+
+This blog post showed how to generate a huge tree in the graph. In many cases pre-generating is not needed though, as you can create the tree on the fly while you are inserting data that's connected to the leaves of the tree.
+
+The +MERGE+ clause helps here a lot. Besides uniquely creating individual nodes and relationships between existing nodes it can also create unique subgraphs.
+That means only the starting point of your subgraph is taken into consideration for lookup, the remainder of the path is created on demand.
+
+For the whole time-tree it would look like this:
+
+[source,cypher]
+----
+MERGE (y:Year {id:2014})
+MERGE (y)<-[:PART_OF]-(m:Month {id:1})
+MERGE (m)<-[:PART_OF]-(d:Day {id:13})
+MERGE (d)<-[:PART_OF]-(h:Hour {id:18})
+MERGE (h)<-[:PART_OF]-(min:Minute {id:35})
+MERGE (min)<-[:PART_OF]-(s:Second {id:59})
+RETURN y.id,m.id,d.id,h.id,min.id,s.id;
+
++-----------------------------------------------------------+
+| y.id   | m.id    | d.id  | h.id   | min.id     | s.id     |
++-----------------------------------------------------------+
+| 2014   | 1       | 13    | 18     | 35         | 59       |
++-----------------------------------------------------------+
+1 row
+Nodes created: 6
+Relationships created: 5
+Properties set: 6
+Labels added: 6
+7 ms
+
+// executed a second time
++-----------------------------------------------------------+
+| y.id   | m.id    | d.id  | h.id   | min.id     | s.id     |
++-----------------------------------------------------------+
+| 2014   | 1       | 13    | 18     | 35         | 59       |
++-----------------------------------------------------------+
+1 row
+4 ms
+----
+
+This allows us to hande much more sparsely filled trees as they only contain the paths from the root to the leaves that are actually needed.
+So we can handle even more levels, down to milli-, nano- or microseconds.
