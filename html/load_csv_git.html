@@ -368,8 +368,8 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <h2 id="_importing_git_history_into_neo4j">Importing Git History into Neo4j</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>In this blog post I want to show the power of LOAD CSV which is much more than just a simple data ingestion clause for <a href="http://neo4j.org/learn/cypher">Neo4j&#8217;s Cypher</a>.
-I want to demonstrate, how easy it is to use by importing a project&#8217;s git commit history into Neo4j. For demonstration purposes I use <a href="http://github.com/neo4j/neo4j">Neo4j&#8217;s repository on GitHub</a> which contains
+<p>In this blog post, I want to show the power of LOAD CSV, which is much more than just a simple data ingestion clause for <a href="http://neo4j.org/learn/cypher">Neo4j&#8217;s Cypher</a>.
+I want to demonstrate how easy it is to use by importing a project&#8217;s git commit history into Neo4j. For demonstration purposes, I use <a href="http://github.com/neo4j/neo4j">Neo4j&#8217;s repository on GitHub</a>, which contains
 about 27000 commits.</p>
 </div>
 <div class="paragraph">
@@ -393,14 +393,14 @@ about 27000 commits.</p>
 <p>Use identifiers within the statement to connect commits to their parents with a <code>PARENT</code> relationship</p>
 </li>
 <li>
-<p>It also allows to run the Cypher statement against the Neo4j HTTP-Cypher-endpoint</p>
+<p>It also allows to us run the Cypher statement against the Neo4j HTTP-Cypher-endpoint</p>
 </li>
 </ul>
 </div>
 <div class="sect2">
 <h3 id="_data_model">Data Model</h3>
 <div class="paragraph">
-<p>The datamodel used is pretty direct and not that graphy yet.</p>
+<p>The data model used is pretty direct and not that graphy yet.</p>
 </div>
 <div class="paragraph">
 <p><span class="image"><img src="../img/git2neo/git2neo_datamodel.jpg" alt="git2neo_datamodel"></span></p>
@@ -430,10 +430,10 @@ RETURN c_0d952d4bb4c497146057ba28cf000bd0443902cd;</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>Unfortunately the script was too large and it also failed with non-ascii-characters in the Cypher-parser.</p>
+<p>Unfortunately, the script was too large, and it also failed with non-ascii-characters in the Cypher-parser.</p>
 </div>
 <div class="paragraph">
-<p>That&#8217;s why I decided to take my non-existant Python skills and work on the following tasks:</p>
+<p>That&#8217;s why I decided to take my non-existent Python skills and work on the following tasks:</p>
 </div>
 <div class="ulist">
 <ul>
@@ -520,7 +520,7 @@ sys	0m7.741s</code></pre>
 <p><span class="image"><img src="../img/git2neo/git2neo_datamodel2.jpg" alt="git2neo_datamodel2"></span></p>
 </div>
 <div class="paragraph">
-<p>The refactoring were two simple Cypher statements, one for creating the users and one for the time-tree from day via month to year.</p>
+<p>The refactoring was two simple Cypher statements, one for creating the users and one for the time-tree from day via month to year.</p>
 </div>
 </div>
 <div class="sect2">
@@ -567,7 +567,7 @@ CREATE (c)-[:ON_DAY]-&gt;(d);</code></pre>
 <script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
 <div class="paragraph">
 <p>That involved talking to my friend and colleague <a href="http://twitter.com/markhneedham">Mark Needham</a>. While doing so, I <strong>realized</strong> that the git log format is actually CSV.
-And as Neo4j 2.1 provides this easy <code>LOAD CSV</code> facility it made my life so much easier.</p>
+And as Neo4j 2.1 provides this easy <code>LOAD CSV</code> facility which made my life so much easier.</p>
 </div>
 </div>
 </div>
@@ -591,7 +591,7 @@ RETURN COUNT(*);</code></pre>
 <p>A while back I also discovered the real secret of <code>LOAD CSV</code>.</p>
 </div>
 <div class="paragraph">
-<p>It is not just a basic data ingestion mechanism but actually an <strong>ETL Powertool</strong>. Why?</p>
+<p>It is not just a basic data ingestion mechanism but actually an <strong>ETL Power Tool</strong>. Why?</p>
 </div>
 <div class="ulist">
 <ul>
@@ -668,7 +668,7 @@ RETURN COUNT(*);</code></pre>
 </table>
 
 <div class="paragraph">
-<p>For generating a CSV we only needed to provide the header row and then output the fields we wanted separated by commas.</p>
+<p>For generating a CSV, we only needed to provide the header row and then output the fields we wanted separated by commas.</p>
 </div>
 <div class="listingblock">
 <div class="content">
@@ -712,11 +712,11 @@ CREATE CONSTRAINT ON (y:Year) ASSERT y.year IS UNIQUE;</code></pre>
 <p>Then the next step is loading the actual CSV data, which I put into a Dropbox public folder for convenience.</p>
 </div>
 <div class="paragraph">
-<p>We create the commit, connect it to its author and the day it happend on which we merge teh path to the time-tree root (year) on the fly.
-As last step we split out the parent commit list into a collection and link them to the commit.</p>
+<p>We create the commit, connect it to its author and the day it happened on which we merge the path to the time-tree root (year) on the fly.
+As the last step, we split out the parent commit list into a collection and link them to the commit.</p>
 </div>
 <div class="paragraph">
-<p>This should be pretty easy and still readable. Data ingestion with mapping into a more complex and on-the-fly data conversion.</p>
+<p>This should be pretty easy and still readable. You see data ingestion with mapping into a more complex and on-the-fly data conversion in action.</p>
 </div>
 <div class="listingblock">
 <div class="content">
@@ -767,7 +767,7 @@ Labels added: 26189
 <div class="ulist">
 <ul>
 <li>
-<p>pull in more repostories into a gigantic graph to see inferred social interactions and repo dependencies</p>
+<p>pull-in more repositories into a gigantic graph to see inferred social interactions and repo dependencies</p>
 </li>
 <li>
 <p>add file information (stats) to link file change frequency to users and times</p>
@@ -784,12 +784,31 @@ Labels added: 26189
 <p>Thanks!</p>
 </div>
 </div>
+<div class="sect2">
+<h3 id="_resources">Resources</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><a href="http://docs.neo4j.org/chunked/milestone/cypherdoc-importing-csv-files-with-cypher.html">LOAD CSV Docs</a></p>
+</li>
+<li>
+<p>the Neo4j repository <a href="https://dl.dropboxusercontent.com/u/14493611/git.csv">git log csv file</a></p>
+</li>
+<li>
+<p>the <a href="https://dl.dropboxusercontent.com/u/14493611/git_db.zip">Neo4j Database</a> after importing the data</p>
+</li>
+<li>
+<p>the [Github data project]</p>
+</li>
+</ul>
+</div>
+</div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2014-06-01 03:56:19 CEST
+Last updated 2014-06-01 04:15:26 CEST
 </div>
 </div>
 </body>

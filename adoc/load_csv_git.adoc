@@ -2,8 +2,8 @@
 
 :img: ../img/git2neo
 
-In this blog post I want to show the power of LOAD CSV which is much more than just a simple data ingestion clause for http://neo4j.org/learn/cypher[Neo4j's Cypher].
-I want to demonstrate, how easy it is to use by importing a project's git commit history into Neo4j. For demonstration purposes I use http://github.com/neo4j/neo4j[Neo4j's repository on GitHub] which contains
+In this blog post, I want to show the power of LOAD CSV, which is much more than just a simple data ingestion clause for http://neo4j.org/learn/cypher[Neo4j's Cypher].
+I want to demonstrate how easy it is to use by importing a project's git commit history into Neo4j. For demonstration purposes, I use http://github.com/neo4j/neo4j[Neo4j's repository on GitHub], which contains
 about 27000 commits.
 
 It all started with this tweet by http://twitter.com/knutwalker[Paul Horn], a developer from http://www.avantgarde-labs.de/en[Avantgarde Labs] in my lovely Dresden.
@@ -20,11 +20,11 @@ I really liked the idea and wanted to take a look. His python script takes the f
   +git log --format:format="'%H'\t'%ai'\t'%at'"+
 * Generate one big cypher statement
 * Use identifiers within the statement to connect commits to their parents with a `PARENT` relationship
-* It also allows to run the Cypher statement against the Neo4j HTTP-Cypher-endpoint
+* It also allows to us run the Cypher statement against the Neo4j HTTP-Cypher-endpoint
 
 === Data Model
 
-The datamodel used is pretty direct and not that graphy yet.
+The data model used is pretty direct and not that graphy yet.
 
 ////
 <figure class="graph-diagram">
@@ -77,9 +77,9 @@ CREATE
 RETURN c_0d952d4bb4c497146057ba28cf000bd0443902cd;
 ----
 
-Unfortunately the script was too large and it also failed with non-ascii-characters in the Cypher-parser.
+Unfortunately, the script was too large, and it also failed with non-ascii-characters in the Cypher-parser.
 
-That's why I decided to take my non-existant Python skills and work on the following tasks:
+That's why I decided to take my non-existent Python skills and work on the following tasks:
 
 * one cypher statement per line, ending with semicolon
 * use matches to connect commits
@@ -185,7 +185,7 @@ The next aspect I wanted to tackle was a graph refactoring to add users and a ti
 
 image:{img}/git2neo_datamodel2.jpg[]
 
-The refactoring were two simple Cypher statements, one for creating the users and one for the time-tree from day via month to year.
+The refactoring was two simple Cypher statements, one for creating the users and one for the time-tree from day via month to year.
 
 === Create Users
 
@@ -228,7 +228,7 @@ Of course I couldn't wait to tell the world:
 ++++
 
 That involved talking to my friend and colleague http://twitter.com/markhneedham[Mark Needham]. While doing so, I **realized** that the git log format is actually CSV.
-And as Neo4j 2.1 provides this easy +LOAD CSV+ facility it made my life so much easier.
+And as Neo4j 2.1 provides this easy +LOAD CSV+ facility which made my life so much easier.
 
 == LOAD CSV
 
@@ -245,7 +245,7 @@ RETURN COUNT(*);
 
 A while back I also discovered the real secret of +LOAD CSV+. 
 
-It is not just a basic data ingestion mechanism but actually an **ETL Powertool**. Why?
+It is not just a basic data ingestion mechanism but actually an **ETL Power Tool**. Why?
 
 * it combines multiple aspects in **a single operation**
 * supports loading / ingesting CSV data from an URI
@@ -268,7 +268,7 @@ So let's utilize that power. And start with the CSV generation which was straigh
 | subject | %s | and many more |
 |===
 
-For generating a CSV we only needed to provide the header row and then output the fields we wanted separated by commas.
+For generating a CSV, we only needed to provide the header row and then output the fields we wanted separated by commas.
 
 [source,bash]
 ----
@@ -308,10 +308,10 @@ CREATE CONSTRAINT ON (y:Year) ASSERT y.year IS UNIQUE;
 
 Then the next step is loading the actual CSV data, which I put into a Dropbox public folder for convenience.
 
-We create the commit, connect it to its author and the day it happend on which we merge teh path to the time-tree root (year) on the fly.
-As last step we split out the parent commit list into a collection and link them to the commit.
+We create the commit, connect it to its author and the day it happened on which we merge the path to the time-tree root (year) on the fly.
+As the last step, we split out the parent commit list into a collection and link them to the commit.
 
-This should be pretty easy and still readable. Data ingestion with mapping into a more complex and on-the-fly data conversion.
+This should be pretty easy and still readable. You see data ingestion with mapping into a more complex and on-the-fly data conversion in action.
 
 [source,cypher]
 ----
@@ -355,7 +355,7 @@ Now the fun starts and we can begin asking interesting questions or thinking abo
 
 Some ideas:
 
-* pull in more repostories into a gigantic graph to see inferred social interactions and repo dependencies
+* pull-in more repositories into a gigantic graph to see inferred social interactions and repo dependencies
 * add file information (stats) to link file change frequency to users and times
 * add weekday and time information to find out the most active period for projects
 
@@ -363,6 +363,13 @@ Some ideas:
 So now go ahead and test http://docs.neo4j.org/chunked/milestone/cypherdoc-importing-csv-files-with-cypher.html[LOAD CSV] for yourself, just take any dataset and import it into Neo4j. Tell me in the comments how it went and what we can do to make it easier.
 
 Thanks!
+
+=== Resources
+
+* http://docs.neo4j.org/chunked/milestone/cypherdoc-importing-csv-files-with-cypher.html[LOAD CSV Docs]
+* the Neo4j repository https://dl.dropboxusercontent.com/u/14493611/git.csv[git log csv file]
+* the https://dl.dropboxusercontent.com/u/14493611/git_db.zip[Neo4j Database] after importing the data
+* the [Github data project]
 
 ////
 MATCH (u:User)--()
