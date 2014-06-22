@@ -13,3 +13,4 @@ You find the posts on http://jexp.github.io/blog
 * link:{base}/html/sdn_config.html[Spring Data Neo4j 3.0 - Configuration Changes]
 * link:{base}/html/styling_neo4j_server_visualisation.html[Styling Neo4j Server Visualisation]
 * link:{base}/html/timetree.html[Importing Forests into Neo4j]
+* link:{base}/html/ubigraph.html[Rendering a Neo4j Database in UbiGraph]

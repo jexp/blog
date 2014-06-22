@@ -4,7 +4,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <meta name="generator" content="Asciidoctor 0.1.4">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Untitled</title>
+<title>Rendering a Neo4j Graph in UbiGraph</title>
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
 article, aside, details, figcaption, figure, footer, header, hgroup, main, nav, section, summary { display: block; }
@@ -364,47 +364,260 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_rendering_a_neo4j_graph_in_ubigraph">Rendering a Neo4j Graph in UbiGraph</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a></p>
+<p>I never heard of UbiGraph before, but this tweet by <a href="https://twitter.com/a61dr41n">@a61dr41n</a> made me curious.</p>
+</div>
+<blockquote class="twitter-tweet" lang="en"><p><a href="https://twitter.com/search?q=%23ubigraph&amp;src=hash">#ubigraph</a> is an excellent <a href="https://twitter.com/search?q=%23visualisation&amp;src=hash">#visualisation</a> package for <a href="https://twitter.com/search?q=%23neo4j&amp;src=hash">#neo4j</a> and other <a href="https://twitter.com/search?q=%23GraphDB&amp;src=hash">#GraphDB</a> can&#39;t believe I haven&#39;t heard of it sooner...</p>&mdash; a61dr41n (@a61dr41n) <a href="https://twitter.com/a61dr41n/statuses/479815785288695808">June 20, 2014</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+<div class="paragraph">
+<p>So I checked it out. UbiGraph is a graph rendering server that is controlled remotely and also interactively with a XML-RPC API (which is a weird choice).
+It comes with example clients in Java, Python, Ruby and C.
+You can <a href="http://ubietylab.net/ubigraph/content/Downloads/index.php">download it from here</a>. After unzipping the file and starting <code>bin/ubigraph_server &amp;</code>, you should see a black window rendering the void, waiting for your commands.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>You can run the Python example with <code>python lang/Python/example.py</code>, you should run the other examples as well, just for fun. The Python example collection is most comprehensive.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog">http://jexp.github.io/blog</a></p>
+<p>In general the API is pretty straightforward, there is also a <a href="https://dl.dropboxusercontent.com/u/14493611/QuickReference.pdf">PDF refcard</a> in the download.</p>
 </div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
+<p><code>new_vertex(), new_vertex_w_id(id)</code> create node</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
+<p><code>new_edge(from,to)</code> create relationship</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
+<p><code>set_[vertex|edge]_attribute(id,attribute,value)</code> style a node or relationship</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
+<p>style attributes can be <code>shape</code> (sphere,cone,box,&#8230;), <code>size</code> (something around 1.0), <code>color</code> (hex), <code>label</code>, <code>visible</code> and for relationships also <code>spline</code>,<code>oriented</code>,<code>stroke</code>,<code>width</code> and more</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
+<p>generalize styles with <code>new_[vertex|edge]_style(parent_style)</code> create a new style with attributes, ineriting from a parent, or root (parent-id 0)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
+<p><code>change_[vertex|edge]_style(id,style)</code> assign style to node or relationship</p>
 </li>
 </ul>
+</div>
+<div class="paragraph">
+<p>I show how to access UbiGraph from Java, but it is of course much simpler in Ruby with <a href="http://github.com/maxdemarzi/neography">neography</a> or <a href="http://py2neo.org/">py2neo</a> with each of the drivers.</p>
+</div>
+<div class="paragraph">
+<p>Rendering Neo4j is pretty straightforward:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>we just connect to Neo4j,</p>
+</li>
+<li>
+<p>run a cypher query to return the graph structure and</p>
+</li>
+<li>
+<p>send it to UbiGraph using the API outlined above.</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p>UbiGraph comes with a Java connector in <code>UbigraphClient.java</code> with the mentioned API methods. It uses the Apache XmlRpc library, which you can pull in via Maven or <a href="http://archive.apache.org/dist/ws/xmlrpc/apache-xmlrpc-current-bin.tar.bz2">download here</a> (the official links are broken).</p>
+</div>
+<div class="paragraph">
+<p>Here is a minimal query that only loads the structure without any further information. You could choose to load the additional information using the interactive features of UbiGraph,
+which I don&#8217;t cover here.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">MATCH (n)--&gt;(m)
+RETURN id(n) as start_id, id(m) as end_id</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>I used more detailed graph information from the beginning. This cypher query is broader, it loads nodes, their relationships to other nodes (if any) and meta-data like id&#8217;s labels and relationship-types.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">MATCH (n)
+OPTIONAL MATCH (n)-[r]-&gt;(m)
+RETURN
+ id(n) as start_id, head(labels(n)) as start_label, n as start_properties,
+ id(m) as end_id, head(labels(m)) as end_label, m as end_properties,
+ id(r) as rel_id, type(r) as rel_type, r as rel_properties
+ LIMIT 1000</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>For connecting to Neo4j I used the <a href="http://www.neo4j.org/develop/tools/jdbc">Neo4j-JDBC driver</a>, but you can use any connector or client driver, or even a <a href="https://github.com/neo4j-contrib/cypher-http-examples">few lines of code with a http-client-library</a> to run a Cypher query against Neo4j.</p>
+</div>
+<div class="paragraph">
+<p>So what we do was:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Connect to Neo4j via JDBC</p>
+</li>
+<li>
+<p>Create a connection, statement, provide a parameter for the limit and execute the query</p>
+</li>
+<li>
+<p>Iterate over the resultset and</p>
+</li>
+<li>
+<p>for each returned row create the UbiGraph nodes and relationships (as we provide id&#8217;s no duplicates will be created)</p>
+</li>
+<li>
+<p>from the first label and given shape we create styles that we attach to each created node</p>
+</li>
+</ol>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="java language-java">public static final String ALL_NODES_QUERY =
+        "MATCH (n) " +
+                "OPTIONAL MATCH (n)-[r]-&gt;(m) " +
+                "RETURN " +
+                " id(n) as start_id, labels(n) as start_labels, n as start_properties, " +
+                " id(m) as end_id, labels(m) as end_labels, m as end_properties, " +
+                " id(r) as rel_id, type(r) as rel_type, r as rel_properties " +
+                "LIMIT {1}";
+
+private static void renderNeo4jGraph(UbigraphClient graph, String url, int limit) throws SQLException {
+    Connection connection = DriverManager.getConnection(url);
+    try (PreparedStatement stmt = connection.prepareStatement(ALL_NODES_QUERY)) {
+        stmt.setInt(1, limit);
+        try (ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                createUbiVertex(rs, "start", graph, false);
+                createUbiVertex(rs, "end", graph, false);
+                createUbiEdge(rs, "start_id", "end_id", "rel", graph);
+            }
+        }
+    }
+}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Creating a node and relationship with the UbigraphClient is pretty straightforward. The styling is a bit more involved.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="java language-java">private static int createUbiVertex(ResultSet rs, String prefix, UbigraphClient graph, boolean renderProps) throws SQLException {
+    int id = rs.getInt(prefix + "_id");
+    String label = label((Collection&lt;String&gt;) rs.getObject(prefix + "_labels"));
+    Map props = renderProps ? (Map) rs.getObject(prefix + "_properties") : null;
+
+    int success = graph.newVertex(id);
+    if (success==-1) return success;
+    if (label!=null) graph.changeVertexStyle(id, style(graph, label));
+    if (props != null &amp;&amp; props.containsKey("name") &amp;&amp; asList("Player", "Country", "WorldCup").contains(label)) {
+        graph.setVertexAttribute(id, "label", (String) props.get("name"));
+    }
+    return success;
+}
+
+private static int style(UbigraphClient graph, String label) {
+    if (!styles.containsKey(label)) {
+        Colors colorByLabel = Colors.values()[styles.size() % Colors.values().length];
+        int styleId = createVertexStyle(graph, Shape.cube, colorByLabel);
+        styles.put(label, styleId);
+        return styleId;
+    } else {
+        return styles.get(label);
+    }
+}
+
+private static int createVertexStyle(UbigraphClient graph, Shape shape, Colors color) {
+    int style = nextStyleId();
+    graph.newVertexStyle(style, 0);
+    graph.setVertexStyleAttribute(style, "shape", shape.name());
+    graph.setVertexStyleAttribute(style, "size", "0.5");
+    graph.setVertexStyleAttribute(style, "color", color.toHexValue());
+    System.out.println(nextStyleId() + " style = " + style + " color " + color + " shape " + shape);
+    return style;
+}
+
+enum Shape {
+    sphere, cone, cube, torus, dodecahedron, icosahedron, octahedron, tetrahedron, none;
+}
+
+enum Colors {
+    red(Color.RED), green(Color.GREEN), blue(Color.BLUE), orange(Color.ORANGE), yellow(Color.YELLOW), white(Color.WHITE);
+    private final Color color;
+
+    Colors(Color color) { this.color = color; }
+    public String toHexValue() {
+        return "#" + Integer.toHexString(color.getRGB() &amp; 0x00FFFFFF);
+    }
+}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>When running this program against the <a href="http://worldcup.neo4j.org/extending-the-world-cup-graph-domain-model/">extended football dataset</a> running on a local server with a limit of 1000 rows, I get a live, interactive graph rendering that looks like this.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/ubigraph/ubigraph.jpg" alt="ubigraph">
+</div>
+</div>
+<div class="paragraph">
+<p>You can control the visualisation with the keyboard or mouse.</p>
+</div>
+<table class="tableblock frame-all grid-all" style="width:100%; ">
+<colgroup>
+<col style="width:20%;">
+<col style="width:80%;"> 
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">ESC</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Exit full-screen mode</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">↑ and ↓</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Zoom in/out</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">! and @</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Zoom way out and in</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">← and →</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Start/increase/stop y-axis rotation</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">u,</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Start/increase/stop z-axis rotation</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">r</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Reset vertices to random positions</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">p</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Toggle serial/parallel</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">S</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Show performance stats</p></td>
+</tr>
+</tbody>
+</table>
+
+<div class="paragraph">
+<p>You can find all the code on <a href="http://github.com/jexp/neo4j-ubigraph">http://github.com/jexp/neo4j-ubigraph</a></p>
+</div>
+</div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2014-06-23 00:03:09 CEST
+Last updated 2014-06-23 00:01:57 CEST
 </div>
 </div>
 </body>
