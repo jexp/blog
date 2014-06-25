@@ -1,0 +1,414 @@
+== LOAD CSV into Neo4j quickly and successfully
+
+:neo4j-version: 2.1
+:author: Michael Hunger
+:twitter: @mesirii
+:tags: domain:ETL,use-case:graphdb
+:dataurl: https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/a147631215456d86a77edc7ec08c128b9ef05e3b
+
+[NOTE]
+You can also read an http://www.neo4j.org/graphgist?d788e117129c3730a042[interactive and live version of this blog post as a Neo4j GraphGist].
+
+Since version 2.1 Neo4j provides out-of-the box support for CSV ingestion. The +LOAD CSV+ command that was added to the Cypher Query language is a versatile and powerful ETL tool.
+It allows you to ingest CSV data from any URL into a friendly parameter stream for your simple or complex graph update operation, that ... conversion.
+
+But hear my words of advice before you jump directly into using it. There are some tweaks and configuration aspects that you should know to be successful on the first run.
+
+Data volume: LOAD CSV was built to support around 1M rows per import, it still works with 10M rows but you have to wait a bit, at 100M it'll try your patience.
+Except for tiny datasets never run it without the saveguard of periodic commits, which prevent you from large transactions overflowing your available database memory (JVM Heap).
+
+The CSV used in this example is pretty basic, but enough to show some issues and make a point, it's people and companies they work(ed) for.
+
+[source,csv]
+----
+PersonName,"Company Name",year
+"Kenny Bastani","Neo Technology",2013
+"Michael Hunger","Neo Technology",2010
+"James Ward","Heroku",2011
+"Someone",,
+"John","Doe.com","ninetynine"
+----
+
+
+=== OS, RAM and DISK
+
+First make sure the machine you want to import on is fit to import the data. That means you should have some RAM available, if your 8GB machine only sports 1GB of free RAM and already uses 3GB swap, this is a sure sign you shouldn't try. The more RAM the better, I'd recommend to reserve at least 4GB to import your data.
+
+If you run on SSD's you're lucky, on spinning disks it will definitely take longer.
+
+[NOTE]
+If you are on **Windows** take extra care. On Windows the database memory (JVM Heap) is used for BOTH Neo4j's objects & caches AND the memory-mapping for storage-files. On Unix and OSX the memory mapping resides on the outside.
+So make sure that on Windows you have *enough* Java memory allocated to cater for both aspects.
+
+==== Memory Config
+
+For your memory configuration, a sane starting point is to give Neo4j 3-4GB RAM as Java heap (including the memory mapping size on Windows), and a sensible amount (e.g. 1GB+) as memory mapping.
+The more memory you have the faster it will import your data.
+
+So make sure to edit +conf/neo4j-wrapper.conf+ and set:
+
+[source]
+----
+# Uncomment these lines to set specific initial and maximum
+# heap size in MB.
+wrapper.java.initmemory=4096
+wrapper.java.maxmemory=4096
+----
+
+In +conf/neo4j.properties+ set:
+
+[source]
+----
+# Default values for the low-level graph engine
+neostore.nodestore.db.mapped_memory=50M
+neostore.relationshipstore.db.mapped_memory=500M
+neostore.propertystore.db.mapped_memory=100M
+neostore.propertystore.db.strings.mapped_memory=100M
+neostore.propertystore.db.arrays.mapped_memory=0M
+----
+
+=== Data Loading
+
+If you load your CSV file over the network make sure it is fast enough to sustain the ingestion rate you'd like to have. Otherwise if possible download it, and use a +file://+ URL.
+
+[NOTE]
+File URLs are tricky. On OSX and Unix use +file:///path/to/data.csv+, on Windows, please use +file:c:/path/to/data.csv+. Beware spaces in file-names and relative paths. Http-URLs are much easier.
++LOAD CSV+ afaik supports cookies, redirects and +https+.
+
+=== Data Quality
+
+There are some challenges when loading CSV data from "organic" files.
+
+1. You might not load the right file. On a local filesystem Cypher will complain if it can't find it, but will happily ingest your latest movie-trilogy while trying to find the first comma.
+For remote URLs it will fail if the server returns a 404, but otherwise try to load HTML error pages, which might be fun.
+
+2. If you have the right file, make sure that it loads correctly. I.e. all the columsn and lines are separated by delimeters to your liking. You can easily try that by *sampling* the first few lines and see that they are returned correctly.
+
+==== Initial checking for the first 5 lines
+
+Does everything look ok, anything that looks dubious? Fix it in your input data!
+
+//output
+[source,cypher]
+----
+LOAD CSV FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/a147631215456d86a77edc7ec08c128b9ef05e3b/people_leading_empty.csv" 
+  AS line
+WITH line LIMIT 4
+RETURN line
+----
+
+----
++--------------------------------------------+
+| line                                       |
++--------------------------------------------+
+| [""]                                       |
+| ["PersonName","Company Name","year"]       |
+| ["Kenny Bastani","Neo Technology","2013"]  |
+| ["Michael Hunger","Neo Technology","2010"] |
++--------------------------------------------+
+----
+
+
+Caveats are: Leading blank line, wrong or double line breaks.
+
+
+====  Check for correct columns
+
+//output
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/a147631215456d86a77edc7ec08c128b9ef05e3b/people_leading_empty.csv" 
+  AS line
+WITH line LIMIT 5
+RETURN line.PersonName, line.Company, line.company, line.`Company Name`
+----
+
+----
++---------------------------------------------------------------------+
+| line.PersonName | line.Company | line.company | line.`Company Name` |
++---------------------------------------------------------------------+
+| <null>          | <null>       | <null>       | <null>              |
+| <null>          | <null>       | <null>       | <null>              |
+| <null>          | <null>       | <null>       | <null>              |
+| <null>          | <null>       | <null>       | <null>              |
+| <null>          | <null>       | <null>       | <null>              |
++---------------------------------------------------------------------+
+----
+
+
+Leading empty line will break +WITH HEADERS+.
+
+//output
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv" 
+  AS line
+WITH line LIMIT 5
+RETURN line.PersonName, line.Company, line.company, line.`Company Name`
+----
+
+----
++--------------------------------------------------------------------------+
+| line.PersonName      | line.Company | line.company | line.`Company Name` |
++--------------------------------------------------------------------------+
+| "Kenny Bastani"      | <null>       | <null>       | "Neo Technology"    |
+| "Michael Hunger"     | <null>       | <null>       | "Neo Technology"    |
+| "James Ward"         | <null>       | <null>       | "Heroku"            |
+| "Matthew McCullough" | <null>       | <null>       | "GitHub"            |
+| "Someone"            | <null>       | <null>       | ""                  |
++--------------------------------------------------------------------------+
+----
+
+
+This is better, still some misspelled columns.
+
+[NOTE]
+Misspelled column name (it's case sensitive), empty columns which are treated as +null+
+
+You can skip null values by adding a 
+
++WHERE line.value IS NOT NULL+ after the +LOAD CSV .. WITH line+
+
+If you don't, you might end up with errors in Neo4j's indexing subsystem trying to index null values.
+
+If you want to you can alternatively provide defaults with 
+
++coalesce(value_or_null,value2_or_null,..., default-value)+.
+
+=== Filter out NULL values
+
+//output
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv" 
+  AS line
+WITH line
+
+WHERE line.PersonName IS NOT NULL
+
+RETURN line.PersonName, coalesce(line.Company,"None")
+----
+
+----
++------------------------------------------------------+
+| line.PersonName      | coalesce(line.Company,"None") |
++------------------------------------------------------+
+| "Kenny Bastani"      | "None"                        |
+| "Michael Hunger"     | "None"                        |
+| "James Ward"         | "None"                        |
+| "Matthew McCullough" | "None"                        |
+| "Someone"            | "None"                        |
+| "John"               | "None"                        |
++------------------------------------------------------+
+----
+
+
+=== Data Conversion
+
+Cypher reads all CSV columns as Strings by default. You can use conversion functions like +toInt(str)+, +toFloat(str)+, or boolean expressions, +split(str, " ")+ and +substring(str,start,count)+ (e.g. for extracting day, month, year from a date-string). Note that the conversion functions return +null+ if they can't convert. So use the null handling from above to handle unclean data.
+
+Note: Make sure to use the same conversion for the same value in all the places, both when creating nodes and relationships and also when using the CSV data to look them up again. 
+A helpful tip is to do the conversion upfront with +WITH toInt(line.number) as number+
+
+//output
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv" 
+  AS line
+
+WITH line, toInt(line.year) as year
+RETURN line.PersonName, year
+----
+
+----
++-------------------------------+
+| line.PersonName      | year   |
++-------------------------------+
+| "Kenny Bastani"      | 2013   |
+| "Michael Hunger"     | 2010   |
+| "James Ward"         | 2011   |
+| "Matthew McCullough" | 2010   |
+| "Someone"            | <null> |
+| "John"               | <null> |
++-------------------------------+
+----
+
+
+=== Field Separation
+
+You can specify alternative field separators for your data. For a tab-separated file (+.tsv+) you can use +... AS line FIELDTERMINATOR \'\t\'+ for semicolons +... AS line FIELDTERMINATOR \';' +
+
+=== Batch Your Transactions
+
+**This is really important** 
+
+If you import more than 100k elements in a single transactions, it is very likely (depending on your available memory), that you'll fail. And it might not be a quick death of your operation. It can drag on for quite a while desparately trying to recover memory to store its intermediate transaction data.
+
+So make sure, to ALWAYS prefix your +LOAD CSV+ with +USING PERIODIC COMMIT 1000+. The number given is the number of import rows after which a commit of the imported data happens. Depending on the complexity of your import operation, you might create from 100 elements per 1000 rows (if you have a lot of duplicates) up to 100,000 when you have complex operations that generate up to 100 nodes and relationships per row of input.
+That's why a commit size of 1000 might be a safe bet (or not). 
+
+There is also an issue within Neo4j's index operations that makes it work better with smaller commit-sizes.
+If you use +LOAD CSV+ without any create or update operation, you cannot use PERIODIC COMMIT. If you use it from within an embedded Java-Application, make sure to __not start a manual transaction beforehand_.
+
+==== Batch Transactions after every 1000 Rows
+
+//output
+[source,cypher]
+----
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv" 
+  AS line
+CREATE (:Person {name:line.PersonName})
+----
+
+----
+Nodes created: 6
+Properties set: 6
+----
+
+=== Indexing
+
+Usually you import your nodes and relationships in one step, creating connections as you process each line. As most CSV files are representing denormalized tables, you'll get a lot of duplication in them, especially for the joined entity tables (which will probably converted to nodes). So you want to use either +MERGE+ or +MATCH+ to lookup nodes in your graph database to connect or update them in a later step.
+
+Make sure you created the neccessary indexes and constraints upfront, so that both operations can utilize them and lookup values really quickly.
+
+==== Creating Indexes and Constraints Upfront
+
+This example shows a mult-step import where people are created upfront from one source, and then later on only looked up to connect them to merged Companies.
+
+//output
+[source,cypher]
+----
+CREATE CONSTRAINT ON (c:Company) ASSERT c.name IS UNIQUE;
+CREATE INDEX ON :Person(name);
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv" 
+  AS line
+CREATE (p:Person {name:line.PersonName});
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv" 
+  AS line
+MATCH (p:Person {name:line.PersonName})
+MERGE (c:Company {name:line.`Company Name`});
+CREATE (p)-[:WORKS_FOR]->(c)
+----
+
+=== Test First
+
+Use the same sampling approach as before, but now only take the first 10k or 100k lines and import them. Try importing into a throwaway test database with the *neo4j-shell* (see below).
+If that goes well, remove the added data or clean the database (by deleting the db-directory).
+
+=== Use the Neo4j-Shell for larger Imports
+
+The Neo4j Browser is great for quick query and playing around with your import data, but if you really want to import millions of rows, go with the Neo4j shell.
+
+If you downloaded the http://neo4j.org/download[zip distribution] of Neo4j, the shell can be found in +bin/neo4j-shell+ (+bin\Neo4jShell.bat+ on Windows). By default it connects to a running server but you can also specify a dedicated database directory with the +-path people.db+ parameter. With +-config conf/neo4j.properties+ you'd use the same config as the Neo4j server for that db-directory.
+
+For importing lots of data you should probably edit the shell script and edit this line +EXTRA_JVM_ARGUMENTS="-Xmx4G -Xms4G -Xmn1G"+ to provide sensible Java heap settings.
+You can add your import statements (including index creation) to a Cypher script and execute it with +-file import.cql+. **Don't forget the semicolons at the end of your statements.**
+
+If you run into errors, you might try +export STACKTRACES=true+ and re-run the command to have a good error message to share when asking on http://stackoverflow.com/questions/tagged/neo4j[StackOverflow].
+
+
+==== The Import Query in all its Beauty
+
+Clean out the database for my final import.
+
+//hide
+[source,cypher]
+----
+MATCH (n) 
+WITH n LIMIT 10000
+OPTIONAL MATCH (n)-[r]->()
+DELETE n,r
+----
+
+[source,cypher]
+----
+CREATE CONSTRAINT ON (c:Company) ASSERT c.name IS UNIQUE;
+CREATE INDEX ON :Person(name);
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/1bd8c19bf8b49d9eb7149918cc11a34faf996dd8/people.tsv" 
+  AS line FIELDTERMINATOR '\t'
+
+WITH line, toInt(line.year) as year, coalesce(line.`Company Name`,"None") as company
+
+WHERE year IS NOT NULL
+
+MERGE (p:Person {name:line.PersonName})
+MERGE (c:Company {name:company})
+CREATE (p)-[r:WORKS_FOR {since:year}]->(c)
+RETURN p,r,c
+----
+
+//graph
+
+//table
+
+=== Ready to go?
+
+That's it. If you hit any issue, I haven't covered, here please don't hesitate to reach out to me, either by commenting below or dropping me an emal to michael at neo4j.org
+
+
+=== Real World Example
+
+I just went to http://www.mockaroo.com to generate a CSV sample. I did a _lastname_ and _country_ tuple and generated 1M lines of them (18MB data), put them in my public dropbox folder.
+
+The data looks like this.
+
+[source]
+----
+last_name,country
+Fuller,Saint Vincent and the Grenadines
+Lynch,Israel
+Crawford,Iceland
+Fowler,Belgium
+... 1M lines ...
+Walker,Mali
+Wilson,Turkey
+Hart,Saint Vincent and the Grenadines
+Fowler,Nigeria
+----
+
+Then I checked the CSV as outlined above, and used +bin/neo4j-shell -path people.db -config conf/neo4j.properties -file import-names.cql+
+
+[source]
+----
+CREATE CONSTRAINT ON (c:Country) ASSERT c.name IS UNIQUE;
+CREATE INDEX ON :Person(name);
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/name_country.csv" 
+  AS line 
+
+WITH line
+WHERE line.last_name IS NOT NULL and line.country IS NOT NULL
+
+MERGE (p:Person {name:line.last_name})
+MERGE (c:Country {name:line.country})
+CREATE (p)-[r:LIVES_IN]->(c);
+----
+
+The output shown here, you and also look at the  https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/cb923c4e1693c4d9072894276cd5145a1f62b75d/shell_import.log[the full log].
+
+[source]
+----
++-------------------+
+| No data returned. |
++-------------------+
+Nodes created: 499
+Relationships created: 1000000
+Properties set: 499
+Labels added: 499
+119200 ms
+----
+
+=== References
+
+* You find some more details about +LOAD CSV+ in the http://docs.neo4j.org/chunked/milestone/cypherdoc-importing-csv-files-with-cypher.html[Neo4j Manual]
+* You can find the CSV files used in this article in https://gist.github.com/jexp/d788e117129c3730a042[this GitHub Gist]
+* You can also read an http://www.neo4j.org/graphgist?d788e117129c3730a042[interactive and live version of this blog post as a Neo4j GraphGist].
+* Read at my http://jexp.de/blog/2014/06/using-load-csv-to-import-git-history-into-neo4j/[git-commit import article] that also uses LOAD CSV

@@ -4,7 +4,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <meta name="generator" content="Asciidoctor 0.1.4">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Import</title>
+<title>LOAD CSV into Neo4j quickly and successfully</title>
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
 article, aside, details, figcaption, figure, footer, header, hgroup, main, nav, section, summary { display: block; }
@@ -364,100 +364,520 @@ span.icon > [class^="icon-"], span.icon > [class*=" icon-"] { cursor: default; }
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_load_csv_into_neo4j_quickly_and_successfully">LOAD CSV into Neo4j quickly and successfully</h2>
+<div class="sectionbody">
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+You can also read an <a href="http://www.neo4j.org/graphgist?d788e117129c3730a042">interactive and live version of this blog post as a Neo4j GraphGist</a>.
+</td>
+</tr>
+</table>
+</div>
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>Since version 2.1 Neo4j provides out-of-the box support for CSV ingestion. The <code>LOAD CSV</code> command that was added to the Cypher Query language is a versatile and powerful ETL tool.
+It allows you to ingest CSV data from any URL into a friendly parameter stream for your simple or complex graph update operation, that &#8230; conversion.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>But hear my words of advice before you jump directly into using it. There are some tweaks and configuration aspects that you should know to be successful on the first run.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog">http://jexp.github.io/blog</a></p>
+<p>Data volume: LOAD CSV was built to support around 1M rows per import, it still works with 10M rows but you have to wait a bit, at 100M it&#8217;ll try your patience.
+Except for tiny datasets never run it without the saveguard of periodic commits, which prevent you from large transactions overflowing your available database memory (JVM Heap).</p>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
+<div class="paragraph">
+<p>The CSV used in this example is pretty basic, but enough to show some issues and make a point, it&#8217;s people and companies they work(ed) for.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="csv language-csv">PersonName,"Company Name",year
+"Kenny Bastani","Neo Technology",2013
+"Michael Hunger","Neo Technology",2010
+"James Ward","Heroku",2011
+"Someone",,
+"John","Doe.com","ninetynine"</code></pre>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_os_ram_and_disk">OS, RAM and DISK</h3>
+<div class="paragraph">
+<p>First make sure the machine you want to import on is fit to import the data. That means you should have some RAM available, if your 8GB machine only sports 1GB of free RAM and already uses 3GB swap, this is a sure sign you shouldn&#8217;t try. The more RAM the better, I&#8217;d recommend to reserve at least 4GB to import your data.</p>
+</div>
+<div class="paragraph">
+<p>If you run on SSD&#8217;s you&#8217;re lucky, on spinning disks it will definitely take longer.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+If you are on <strong>Windows</strong> take extra care. On Windows the database memory (JVM Heap) is used for BOTH Neo4j&#8217;s objects &amp; caches AND the memory-mapping for storage-files. On Unix and OSX the memory mapping resides on the outside.
+So make sure that on Windows you have <strong>enough</strong> Java memory allocated to cater for both aspects.
+</td>
+</tr>
+</table>
+</div>
+<div class="sect3">
+<h4 id="_memory_config">Memory Config</h4>
+<div class="paragraph">
+<p>For your memory configuration, a sane starting point is to give Neo4j 3-4GB RAM as Java heap (including the memory mapping size on Windows), and a sensible amount (e.g. 1GB+) as memory mapping.
+The more memory you have the faster it will import your data.</p>
+</div>
+<div class="paragraph">
+<p>So make sure to edit <code>conf/neo4j-wrapper.conf</code> and set:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code># Uncomment these lines to set specific initial and maximum
+# heap size in MB.
+wrapper.java.initmemory=4096
+wrapper.java.maxmemory=4096</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>In <code>conf/neo4j.properties</code> set:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code># Default values for the low-level graph engine
+neostore.nodestore.db.mapped_memory=50M
+neostore.relationshipstore.db.mapped_memory=500M
+neostore.propertystore.db.mapped_memory=100M
+neostore.propertystore.db.strings.mapped_memory=100M
+neostore.propertystore.db.arrays.mapped_memory=0M</code></pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_data_loading">Data Loading</h3>
+<div class="paragraph">
+<p>If you load your CSV file over the network make sure it is fast enough to sustain the ingestion rate you&#8217;d like to have. Otherwise if possible download it, and use a <code>file://</code> URL.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+File URLs are tricky. On OSX and Unix use <code>file:///path/to/data.csv</code>, on Windows, please use <code>file:c:/path/to/data.csv</code>. Beware spaces in file-names and relative paths. Http-URLs are much easier.
+<code>LOAD CSV</code> afaik supports cookies, redirects and <code>https</code>.
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_data_quality">Data Quality</h3>
+<div class="paragraph">
+<p>There are some challenges when loading CSV data from "organic" files.</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>You might not load the right file. On a local filesystem Cypher will complain if it can&#8217;t find it, but will happily ingest your latest movie-trilogy while trying to find the first comma.
+For remote URLs it will fail if the server returns a 404, but otherwise try to load HTML error pages, which might be fun.</p>
+</li>
+<li>
+<p>If you have the right file, make sure that it loads correctly. I.e. all the columsn and lines are separated by delimeters to your liking. You can easily try that by <strong>sampling</strong> the first few lines and see that they are returned correctly.</p>
+</li>
+</ol>
+</div>
+<div class="sect3">
+<h4 id="_initial_checking_for_the_first_5_lines">Initial checking for the first 5 lines</h4>
+<div class="paragraph">
+<p>Does everything look ok, anything that looks dubious? Fix it in your input data!</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">LOAD CSV FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/a147631215456d86a77edc7ec08c128b9ef05e3b/people_leading_empty.csv"
+  AS line
+WITH line LIMIT 4
+RETURN line</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>+--------------------------------------------+
+| line                                       |
++--------------------------------------------+
+| [""]                                       |
+| ["PersonName","Company Name","year"]       |
+| ["Kenny Bastani","Neo Technology","2013"]  |
+| ["Michael Hunger","Neo Technology","2010"] |
++--------------------------------------------+</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Caveats are: Leading blank line, wrong or double line breaks.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_check_for_correct_columns">Check for correct columns</h4>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/a147631215456d86a77edc7ec08c128b9ef05e3b/people_leading_empty.csv"
+  AS line
+WITH line LIMIT 5
+RETURN line.PersonName, line.Company, line.company, line.`Company Name`</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>+---------------------------------------------------------------------+
+| line.PersonName | line.Company | line.company | line.`Company Name` |
++---------------------------------------------------------------------+
+| &lt;null&gt;          | &lt;null&gt;       | &lt;null&gt;       | &lt;null&gt;              |
+| &lt;null&gt;          | &lt;null&gt;       | &lt;null&gt;       | &lt;null&gt;              |
+| &lt;null&gt;          | &lt;null&gt;       | &lt;null&gt;       | &lt;null&gt;              |
+| &lt;null&gt;          | &lt;null&gt;       | &lt;null&gt;       | &lt;null&gt;              |
+| &lt;null&gt;          | &lt;null&gt;       | &lt;null&gt;       | &lt;null&gt;              |
++---------------------------------------------------------------------+</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Leading empty line will break <code>WITH HEADERS</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv"
+  AS line
+WITH line LIMIT 5
+RETURN line.PersonName, line.Company, line.company, line.`Company Name`</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>+--------------------------------------------------------------------------+
+| line.PersonName      | line.Company | line.company | line.`Company Name` |
++--------------------------------------------------------------------------+
+| "Kenny Bastani"      | &lt;null&gt;       | &lt;null&gt;       | "Neo Technology"    |
+| "Michael Hunger"     | &lt;null&gt;       | &lt;null&gt;       | "Neo Technology"    |
+| "James Ward"         | &lt;null&gt;       | &lt;null&gt;       | "Heroku"            |
+| "Matthew McCullough" | &lt;null&gt;       | &lt;null&gt;       | "GitHub"            |
+| "Someone"            | &lt;null&gt;       | &lt;null&gt;       | ""                  |
++--------------------------------------------------------------------------+</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This is better, still some misspelled columns.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+Misspelled column name (it&#8217;s case sensitive), empty columns which are treated as <code>null</code>
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>You can skip null values by adding a</p>
+</div>
+<div class="paragraph">
+<p><code>WHERE line.value IS NOT NULL</code> after the <code>LOAD CSV .. WITH line</code></p>
+</div>
+<div class="paragraph">
+<p>If you don&#8217;t, you might end up with errors in Neo4j&#8217;s indexing subsystem trying to index null values.</p>
+</div>
+<div class="paragraph">
+<p>If you want to you can alternatively provide defaults with</p>
+</div>
+<div class="paragraph">
+<p><code>coalesce(value_or_null,value2_or_null,&#8230;, default-value)</code>.</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_filter_out_null_values">Filter out NULL values</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv"
+  AS line
+WITH line
+
+WHERE line.PersonName IS NOT NULL
+
+RETURN line.PersonName, coalesce(line.Company,"None")</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>+------------------------------------------------------+
+| line.PersonName      | coalesce(line.Company,"None") |
++------------------------------------------------------+
+| "Kenny Bastani"      | "None"                        |
+| "Michael Hunger"     | "None"                        |
+| "James Ward"         | "None"                        |
+| "Matthew McCullough" | "None"                        |
+| "Someone"            | "None"                        |
+| "John"               | "None"                        |
++------------------------------------------------------+</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_data_conversion">Data Conversion</h3>
+<div class="paragraph">
+<p>Cypher reads all CSV columns as Strings by default. You can use conversion functions like <code>toInt(str)</code>, <code>toFloat(str)</code>, or boolean expressions, <code>split(str, " ")</code> and <code>substring(str,start,count)</code> (e.g. for extracting day, month, year from a date-string). Note that the conversion functions return <code>null</code> if they can&#8217;t convert. So use the null handling from above to handle unclean data.</p>
+</div>
+<div class="paragraph">
+<p>Note: Make sure to use the same conversion for the same value in all the places, both when creating nodes and relationships and also when using the CSV data to look them up again.
+A helpful tip is to do the conversion upfront with <code>WITH toInt(line.number) as number</code></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv"
+  AS line
+
+WITH line, toInt(line.year) as year
+RETURN line.PersonName, year</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>+-------------------------------+
+| line.PersonName      | year   |
++-------------------------------+
+| "Kenny Bastani"      | 2013   |
+| "Michael Hunger"     | 2010   |
+| "James Ward"         | 2011   |
+| "Matthew McCullough" | 2010   |
+| "Someone"            | &lt;null&gt; |
+| "John"               | &lt;null&gt; |
++-------------------------------+</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_field_separation">Field Separation</h3>
+<div class="paragraph">
+<p>You can specify alternative field separators for your data. For a tab-separated file (<code>.tsv</code>) you can use <code>&#8230; AS line FIELDTERMINATOR '\t\'</code> for semicolons +&#8230; AS line FIELDTERMINATOR ';'<br></p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_batch_your_transactions">Batch Your Transactions</h3>
+<div class="paragraph">
+<p><strong>This is really important</strong></p>
+</div>
+<div class="paragraph">
+<p>If you import more than 100k elements in a single transactions, it is very likely (depending on your available memory), that you&#8217;ll fail. And it might not be a quick death of your operation. It can drag on for quite a while desparately trying to recover memory to store its intermediate transaction data.</p>
+</div>
+<div class="paragraph">
+<p>So make sure, to ALWAYS prefix your <code>LOAD CSV</code> with <code>USING PERIODIC COMMIT 1000</code>. The number given is the number of import rows after which a commit of the imported data happens. Depending on the complexity of your import operation, you might create from 100 elements per 1000 rows (if you have a lot of duplicates) up to 100,000 when you have complex operations that generate up to 100 nodes and relationships per row of input.
+That&#8217;s why a commit size of 1000 might be a safe bet (or not).</p>
+</div>
+<div class="paragraph">
+<p>There is also an issue within Neo4j&#8217;s index operations that makes it work better with smaller commit-sizes.
+If you use <code>LOAD CSV</code> without any create or update operation, you cannot use PERIODIC COMMIT. If you use it from within an embedded Java-Application, make sure to <em>_not start a manual transaction beforehand</em>.</p>
+</div>
+<div class="sect3">
+<h4 id="_batch_transactions_after_every_1000_rows">Batch Transactions after every 1000 Rows</h4>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv"
+  AS line
+CREATE (:Person {name:line.PersonName})</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>Nodes created: 6
+Properties set: 6</pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_indexing">Indexing</h3>
+<div class="paragraph">
+<p>Usually you import your nodes and relationships in one step, creating connections as you process each line. As most CSV files are representing denormalized tables, you&#8217;ll get a lot of duplication in them, especially for the joined entity tables (which will probably converted to nodes). So you want to use either <code>MERGE</code> or <code>MATCH</code> to lookup nodes in your graph database to connect or update them in a later step.</p>
+</div>
+<div class="paragraph">
+<p>Make sure you created the neccessary indexes and constraints upfront, so that both operations can utilize them and lookup values really quickly.</p>
+</div>
+<div class="sect3">
+<h4 id="_creating_indexes_and_constraints_upfront">Creating Indexes and Constraints Upfront</h4>
+<div class="paragraph">
+<p>This example shows a mult-step import where people are created upfront from one source, and then later on only looked up to connect them to merged Companies.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">CREATE CONSTRAINT ON (c:Company) ASSERT c.name IS UNIQUE;
+CREATE INDEX ON :Person(name);
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv"
+  AS line
+CREATE (p:Person {name:line.PersonName});
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/c5f98f269b4a219ebb88bd3eb83d331f439a8201/people.csv"
+  AS line
+MATCH (p:Person {name:line.PersonName})
+MERGE (c:Company {name:line.`Company Name`});
+CREATE (p)-[:WORKS_FOR]-&gt;(c)</code></pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_test_first">Test First</h3>
+<div class="paragraph">
+<p>Use the same sampling approach as before, but now only take the first 10k or 100k lines and import them. Try importing into a throwaway test database with the <strong>neo4j-shell</strong> (see below).
+If that goes well, remove the added data or clean the database (by deleting the db-directory).</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_use_the_neo4j_shell_for_larger_imports">Use the Neo4j-Shell for larger Imports</h3>
+<div class="paragraph">
+<p>The Neo4j Browser is great for quick query and playing around with your import data, but if you really want to import millions of rows, go with the Neo4j shell.</p>
+</div>
+<div class="paragraph">
+<p>If you downloaded the <a href="http://neo4j.org/download">zip distribution</a> of Neo4j, the shell can be found in <code>bin/neo4j-shell</code> (<code>bin\Neo4jShell.bat</code> on Windows). By default it connects to a running server but you can also specify a dedicated database directory with the <code>-path people.db</code> parameter. With <code>-config conf/neo4j.properties</code> you&#8217;d use the same config as the Neo4j server for that db-directory.</p>
+</div>
+<div class="paragraph">
+<p>For importing lots of data you should probably edit the shell script and edit this line <code>EXTRA_JVM_ARGUMENTS="-Xmx4G -Xms4G -Xmn1G"</code> to provide sensible Java heap settings.
+You can add your import statements (including index creation) to a Cypher script and execute it with <code>-file import.cql</code>. <strong>Don&#8217;t forget the semicolons at the end of your statements.</strong></p>
+</div>
+<div class="paragraph">
+<p>If you run into errors, you might try <code>export STACKTRACES=true</code> and re-run the command to have a good error message to share when asking on <a href="http://stackoverflow.com/questions/tagged/neo4j">StackOverflow</a>.</p>
+</div>
+<div class="sect3">
+<h4 id="_the_import_query_in_all_its_beauty">The Import Query in all its Beauty</h4>
+<div class="paragraph">
+<p>Clean out the database for my final import.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">MATCH (n)
+WITH n LIMIT 10000
+OPTIONAL MATCH (n)-[r]-&gt;()
+DELETE n,r</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="cypher language-cypher">CREATE CONSTRAINT ON (c:Company) ASSERT c.name IS UNIQUE;
+CREATE INDEX ON :Person(name);
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/1bd8c19bf8b49d9eb7149918cc11a34faf996dd8/people.tsv"
+  AS line FIELDTERMINATOR '\t'
+
+WITH line, toInt(line.year) as year, coalesce(line.`Company Name`,"None") as company
+
+WHERE year IS NOT NULL
+
+MERGE (p:Person {name:line.PersonName})
+MERGE (c:Company {name:company})
+CREATE (p)-[r:WORKS_FOR {since:year}]-&gt;(c)
+RETURN p,r,c</code></pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_ready_to_go">Ready to go?</h3>
+<div class="paragraph">
+<p>That&#8217;s it. If you hit any issue, I haven&#8217;t covered, here please don&#8217;t hesitate to reach out to me, either by commenting below or dropping me an emal to michael at neo4j.org</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_real_world_example">Real World Example</h3>
+<div class="paragraph">
+<p>I just went to <a href="http://www.mockaroo.com">http://www.mockaroo.com</a> to generate a CSV sample. I did a <em>lastname</em> and <em>country</em> tuple and generated 1M lines of them (18MB data), put them in my public dropbox folder.</p>
+</div>
+<div class="paragraph">
+<p>The data looks like this.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>last_name,country
+Fuller,Saint Vincent and the Grenadines
+Lynch,Israel
+Crawford,Iceland
+Fowler,Belgium
+... 1M lines ...
+Walker,Mali
+Wilson,Turkey
+Hart,Saint Vincent and the Grenadines
+Fowler,Nigeria</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Then I checked the CSV as outlined above, and used <code>bin/neo4j-shell -path people.db -config conf/neo4j.properties -file import-names.cql</code></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>CREATE CONSTRAINT ON (c:Country) ASSERT c.name IS UNIQUE;
+CREATE INDEX ON :Person(name);
+
+USING PERIODIC COMMIT 1000
+LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/name_country.csv"
+  AS line
+
+WITH line
+WHERE line.last_name IS NOT NULL and line.country IS NOT NULL
+
+MERGE (p:Person {name:line.last_name})
+MERGE (c:Country {name:line.country})
+CREATE (p)-[r:LIVES_IN]-&gt;(c);</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The output shown here, you and also look at the  <a href="https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/cb923c4e1693c4d9072894276cd5145a1f62b75d/shell_import.log">the full log</a>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>+-------------------+
+| No data returned. |
++-------------------+
+Nodes created: 499
+Relationships created: 1000000
+Properties set: 499
+Labels added: 499
+119200 ms</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_references">References</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">LOAD CSV into Neo4j quickly and successfully</a></p>
+<p>You find some more details about <code>LOAD CSV</code> in the <a href="http://docs.neo4j.org/chunked/milestone/cypherdoc-importing-csv-files-with-cypher.html">Neo4j Manual</a></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
+<p>You can find the CSV files used in this article in <a href="https://gist.github.com/jexp/d788e117129c3730a042">this GitHub Gist</a></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
+<p>You can also read an <a href="http://www.neo4j.org/graphgist?d788e117129c3730a042">interactive and live version of this blog post as a Neo4j GraphGist</a>.</p>
+</li>
+<li>
+<p>Read at my <a href="http://jexp.de/blog/2014/06/using-load-csv-to-import-git-history-into-neo4j/">git-commit import article</a> that also uses LOAD CSV</p>
 </li>
 </ul>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2014-06-25 10:08:20 CEST
+Last updated 2014-06-25 10:04:14 CEST
 </div>
 </div>
 </body>
