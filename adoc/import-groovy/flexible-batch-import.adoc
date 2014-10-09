@@ -1,0 +1,114 @@
+== How to use the Neo4j Batch-Inserter for your own CSV files
+
+:author: Michael Hunger 
+:email: michael@jexp.de
+:source-highlighter: prettify
+
+You might have data as CSV files to create nodes and relationships from in your http://neo4j.com[Neo4j Graph Database].
+It might be a *lot* of data, like many tens of million lines. 
+Too much for http://docs.neo4j.org/chunked/milestone/query-load-csv.html[LOAD CSV] to handle transactionally.
+
+Usually you can just fire up my http://github.com/jexp/batch-import[batch-importer] and prepare node and relationship files that adhere to its input format requirements.
+
+=== Your Requirements
+
+There are some things you probably want to do differently than the batch-importer does by default:
+
+* not create legacy indexes
+* not index properties at all that you just need for connecting data
+* create schema indexes
+* skip certain columns
+* rename properties from the column names
+* create your own labels based on the data in the row
+* convert column values into Neo4j types (e.g. split strings or parse JSON)
+
+=== Batch Inserter API
+
+Here is where you, even as non-Java developer can write a few lines of code and make it happen.
+The Neo4j Batch-Inserter APIs are fast and simple, you get very far with just the few main methods
+
+* `inserter.createNode(properties, labels)` -> node-id
+* `inserter.createRelationship(fromId, toId, type, properties)` -> rel-id
+* `inserter.createDeferredSchemaIndex(label).on(property).create()`
+
+=== Demo Data
+
+For our demo we want to import articles, authors and citations from the MS citation database. // todo
+
+The file looks like this:
+
+[format="csv", options="header"]
+|===
+include::articles.csv[0..3]
+|===
+
+=== Setup with Groovy
+
+To keep the "Java"ness of this exercise to a minimum, I choose groovy a dynamic JVM language that feels closer to ruby and javascript than Java.
+You can run Groovy programs as script much like in other scripting languages.
+And more importantly it comes with a cool feature that allows us to run the whole thing without setting up and build configuration or installing dependencies manually.
+
+If you want to, you can also do the same in jRuby, Jython or JavaScript (Rhino on Java7, Nashorn on Java8) or Lisp (Clojure).
+Would love to get a variant of the program in those languages.
+
+Make sure you have a Java Development Kit (JDK) and http://groovy.codehaus.org/Download[Groovy] installed.
+
+We need two dependencies a CSV reader (GroovyCSV), and Neo4j and can just declare them with a `@Grab` annoation and import the classes into scope. (Thanks to http://twitter.com/darthvader42[Stefan] for the tip.)
+
+[source,groovy]
+----
+include::import_articles.groovy[tags=dependencies]
+----
+
+Then we create a batch-inserter instance which we have to make sure to shut down at the end, otherwise our store will not be valid.
+
+The CSV reading is a simple one-liner, here is a quick example, more details on the versatile config in the [API docs].
+
+[source,groovy]
+----
+csv = new File("articles.csv").newReader()
+for (line in parseCsv(csv)) {
+   println "Author: $line.author, Title: $line.title Date $line.date"
+}
+----
+
+One trick we want to employ is keeping our authors unique by name, so even if they appear on multiple lines, we only want to create them once and then keep them around for the next time
+they are referenced.
+
+[NOTE]
+To keep the example simple we just use a Map, if you have to save memory you can look into a more efficient datastructure and a double pass.
+My recommendation would be a sorted name array where the array-index equals the node-id, so you can use `Arrays.binarySearch(authors,name)` on it to find the node-id of the author.
+
+We define two enums, one for labels and one for relationship-types.
+
+[source,groovy]
+----
+include::import_articles.groovy[tags=enums]
+----
+
+So when reading our data, we now check if we already know the author, if not, we create the _Author_-node and cache the node-id by name.
+Then we create the _Article_-node and connect both with a _WROTE_-relationship.
+
+[source,groovy]
+----
+include::import_articles.groovy[tags=loop]
+----
+
+And that's it. 
+
+I ran the data import with the https://www.kaggle.com/c/kdd-cup-2013-author-paper-identification-challenge/data[Kaggle Authorship Competition] containing 12M Author->Paper relationships.
+
+The import used a https://gist.github.com/jexp/0617412dcdd644fd520b#file-import_kaggle-groovy[slightly modified script] that took care of the 3 files of authors, articles and the mapping.
+It loaded the 12m rows, 1.8m authors and 1.2m articles in 175 seconds taking about 1-2 s per 100k rows.
+
+[source,bash]
+----
+groovy import_kaggle.groovy papers.db ~/Downloads/kaggle-author-paper
+
+Total 11.160.348 rows 1.868.412 Authors and 1.172.020 Papers took 174.122 seconds.
+----
+
+You can find the full script in this https://gist.github.com/jexp/0617412dcdd644fd520b#file-import_kaggle-groovy[GitHub gist].
+
+If you're interested in meeting me, more treats (full-day training, hackathon) or graph database fun in general, 
+don't hesitate to join us on *Oct 22 2014 in San Francisco* for this years http://graphconnect.com[GraphConnect] conference for all things Neo4j.

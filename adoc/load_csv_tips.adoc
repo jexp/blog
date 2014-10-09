@@ -10,12 +10,12 @@
 You can also read an http://www.neo4j.org/graphgist?d788e117129c3730a042[interactive and live version of this blog post as a Neo4j GraphGist].
 
 Since version 2.1 Neo4j provides out-of-the box support for CSV ingestion. The +LOAD CSV+ command that was added to the Cypher Query language is a versatile and powerful ETL tool.
-It allows you to ingest CSV data from any URL into a friendly parameter stream for your simple or complex graph update operation, that ... conversion.
+It allows you to ingest CSV data from any URL into a friendly parameter stream for your simple or complex graph update operation that includes data conversion.
 
 But hear my words of advice before you jump directly into using it. There are some tweaks and configuration aspects that you should know to be successful on the first run.
 
 Data volume: LOAD CSV was built to support around 1M rows per import, it still works with 10M rows but you have to wait a bit, at 100M it'll try your patience.
-Except for tiny datasets never run it without the saveguard of periodic commits, which prevent you from large transactions overflowing your available database memory (JVM Heap).
+Except for tiny datasets never run it without the safeguard of periodic commits, which prevent you from large transactions overflowing your available database memory (JVM Heap).
 
 The CSV used in this example is pretty basic, but enough to show some issues and make a point, it's people and companies they work(ed) for.
 
@@ -32,18 +32,18 @@ PersonName,"Company Name",year
 
 === OS, RAM and DISK
 
-First make sure the machine you want to import on is fit to import the data. That means you should have some RAM available, if your 8GB machine only sports 1GB of free RAM and already uses 3GB swap, this is a sure sign you shouldn't try. The more RAM the better, I'd recommend to reserve at least 4GB to import your data.
+First make sure the machine you want to import on is fit to import the data. That means you should have some RAM available, if your 8GB machine only sports 1GB of free RAM and already uses 3GB swap, this is a sure sign you shouldn't try. The more RAM, the better, I'd recommend reserving at least 4GB to import your data.
 
 If you run on SSD's you're lucky, on spinning disks it will definitely take longer.
 
 [NOTE]
-If you are on **Windows** take extra care. On Windows the database memory (JVM Heap) is used for BOTH Neo4j's objects & caches AND the memory-mapping for storage-files. On Unix and OSX the memory mapping resides on the outside.
+If you are on **Windows**, take extra care. On Windows the database memory (JVM Heap) is used for BOTH Neo4j's objects & caches AND the memory-mapping for storage-files. On Unix and OSX the memory mapping resides on the outside.
 So make sure that on Windows you have *enough* Java memory allocated to cater for both aspects.
 
 ==== Memory Config
 
 For your memory configuration, a sane starting point is to give Neo4j 3-4GB RAM as Java heap (including the memory mapping size on Windows), and a sensible amount (e.g. 1GB+) as memory mapping.
-The more memory you have the faster it will import your data.
+The more memory you have, the faster it will import your data.
 
 So make sure to edit +conf/neo4j-wrapper.conf+ and set:
 
@@ -69,7 +69,7 @@ neostore.propertystore.db.arrays.mapped_memory=0M
 
 === Data Loading
 
-If you load your CSV file over the network make sure it is fast enough to sustain the ingestion rate you'd like to have. Otherwise if possible download it, and use a +file://+ URL.
+If you load your CSV file over the network make sure, it is fast enough to sustain the ingestion rate, you'd like to have. Otherwise if possible download it, and use a +file://+ URL.
 
 [NOTE]
 File URLs are tricky. On OSX and Unix use +file:///path/to/data.csv+, on Windows, please use +file:c:/path/to/data.csv+. Beware spaces in file-names and relative paths. Http-URLs are much easier.
@@ -79,10 +79,10 @@ File URLs are tricky. On OSX and Unix use +file:///path/to/data.csv+, on Windows
 
 There are some challenges when loading CSV data from "organic" files.
 
-1. You might not load the right file. On a local filesystem Cypher will complain if it can't find it, but will happily ingest your latest movie-trilogy while trying to find the first comma.
-For remote URLs it will fail if the server returns a 404, but otherwise try to load HTML error pages, which might be fun.
+1. You might not load the right file. On a local filesystem, Cypher will complain if it can't find it, but will happily ingest your latest movie-trilogy while trying to find the first comma.
+For remote URLs, it will fail if the server returns a 404, but otherwise try to load HTML error pages, which might be fun.
 
-2. If you have the right file, make sure that it loads correctly. I.e. all the columsn and lines are separated by delimeters to your liking. You can easily try that by *sampling* the first few lines and see that they are returned correctly.
+2. If you have the right file, make sure that it loads correctly. I.e. all the columns and lines are separated by delimiters to your liking. You can easily try that by *sampling* the first few lines and see that they are returned correctly.
 
 ==== Initial checking for the first 5 lines
 
@@ -242,12 +242,12 @@ You can specify alternative field separators for your data. For a tab-separated 
 
 **This is really important** 
 
-If you import more than 100k elements in a single transactions, it is very likely (depending on your available memory), that you'll fail. And it might not be a quick death of your operation. It can drag on for quite a while desparately trying to recover memory to store its intermediate transaction data.
+If you import more than 100k elements in a single transactions, it is very likely (depending on your available memory), that you'll fail. And it might not be a quick death of your operation. It can drag on for quite a while desperately trying to recover memory to store its intermediate transaction data.
 
 So make sure, to ALWAYS prefix your +LOAD CSV+ with +USING PERIODIC COMMIT 1000+. The number given is the number of import rows after which a commit of the imported data happens. Depending on the complexity of your import operation, you might create from 100 elements per 1000 rows (if you have a lot of duplicates) up to 100,000 when you have complex operations that generate up to 100 nodes and relationships per row of input.
 That's why a commit size of 1000 might be a safe bet (or not). 
 
-There is also an issue within Neo4j's index operations that makes it work better with smaller commit-sizes.
+There is also an issue within Neo4j's index operations that make it work better with smaller commit-sizes.
 If you use +LOAD CSV+ without any create or update operation, you cannot use PERIODIC COMMIT. If you use it from within an embedded Java-Application, make sure to __not start a manual transaction beforehand_.
 
 ==== Batch Transactions after every 1000 Rows
@@ -270,11 +270,11 @@ Properties set: 6
 
 Usually you import your nodes and relationships in one step, creating connections as you process each line. As most CSV files are representing denormalized tables, you'll get a lot of duplication in them, especially for the joined entity tables (which will probably converted to nodes). So you want to use either +MERGE+ or +MATCH+ to lookup nodes in your graph database to connect or update them in a later step.
 
-Make sure you created the neccessary indexes and constraints upfront, so that both operations can utilize them and lookup values really quickly.
+Make sure you created the necessary indexes and constraints upfront, so that both operations can utilize them and lookup values really quickly.
 
 ==== Creating Indexes and Constraints Upfront
 
-This example shows a mult-step import where people are created upfront from one source, and then later on only looked up to connect them to merged Companies.
+This example shows a multi-step import where people are created upfront from one source, and then later on only looked up to connect them to merged Companies.
 
 //output
 [source,cypher]
@@ -298,11 +298,11 @@ CREATE (p)-[:WORKS_FOR]->(c)
 === Test First
 
 Use the same sampling approach as before, but now only take the first 10k or 100k lines and import them. Try importing into a throwaway test database with the *neo4j-shell* (see below).
-If that goes well, remove the added data or clean the database (by deleting the db-directory).
+If that goes well, remove the added data or clean the database (by deleting the database-directory).
 
 === Use the Neo4j-Shell for larger Imports
 
-The Neo4j Browser is great for quick query and playing around with your import data, but if you really want to import millions of rows, go with the Neo4j shell.
+The Neo4j Browser is great for quick querying and playing around with your import data, but if you really want to import millions of rows, go with the Neo4j shell.
 
 If you downloaded the http://neo4j.org/download[zip distribution] of Neo4j, the shell can be found in +bin/neo4j-shell+ (+bin\Neo4jShell.bat+ on Windows). By default it connects to a running server but you can also specify a dedicated database directory with the +-path people.db+ parameter. With +-config conf/neo4j.properties+ you'd use the same config as the Neo4j server for that db-directory.
 
@@ -350,7 +350,7 @@ RETURN p,r,c
 
 === Ready to go?
 
-That's it. If you hit any issue, I haven't covered, here please don't hesitate to reach out to me, either by commenting below or dropping me an emal to michael at neo4j.org
+That's it. If you hit any issue, I haven't covered, here please don't hesitate to reach out to me, either by commenting below or dropping me an email to michael at neo4j.org
 
 
 === Real World Example
@@ -392,7 +392,7 @@ MERGE (c:Country {name:line.country})
 CREATE (p)-[r:LIVES_IN]->(c);
 ----
 
-The output shown here, you and also look at the  https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/cb923c4e1693c4d9072894276cd5145a1f62b75d/shell_import.log[the full log].
+The output shown here, you can also look at the  https://gist.githubusercontent.com/jexp/d788e117129c3730a042/raw/cb923c4e1693c4d9072894276cd5145a1f62b75d/shell_import.log[the full log].
 
 [source]
 ----

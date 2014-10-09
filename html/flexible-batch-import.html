@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Import</title>
+<title>How to use the Neo4j Batch-Inserter for your own CSV files</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,103 +413,222 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_how_to_use_the_neo4j_batch_inserter_for_your_own_csv_files">How to use the Neo4j Batch-Inserter for your own CSV files</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>You might have data as CSV files to create nodes and relationships from in your <a href="http://neo4j.com">Neo4j Graph Database</a>.
+It might be a <strong>lot</strong> of data, like many tens of million lines.
+Too much for <a href="http://docs.neo4j.org/chunked/milestone/query-load-csv.html">LOAD CSV</a> to handle transactionally.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>Usually you can just fire up my <a href="http://github.com/jexp/batch-import">batch-importer</a> and prepare node and relationship files that adhere to its input format requirements.</p>
+</div>
+<div class="sect2">
+<h3 id="_your_requirements">Your Requirements</h3>
+<div class="paragraph">
+<p>There are some things you probably want to do differently than the batch-importer does by default:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>not create legacy indexes</p>
+</li>
+<li>
+<p>not index properties at all that you just need for connecting data</p>
+</li>
+<li>
+<p>create schema indexes</p>
+</li>
+<li>
+<p>skip certain columns</p>
+</li>
+<li>
+<p>rename properties from the column names</p>
+</li>
+<li>
+<p>create your own labels based on the data in the row</p>
+</li>
+<li>
+<p>convert column values into Neo4j types (e.g. split strings or parse JSON)</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_batch_inserter_api">Batch Inserter API</h3>
+<div class="paragraph">
+<p>Here is where you, even as non-Java developer can write a few lines of code and make it happen.
+The Neo4j Batch-Inserter APIs are fast and simple, you get very far with just the few main methods</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>inserter.createNode(properties, labels)</code> &#8594; node-id</p>
+</li>
+<li>
+<p><code>inserter.createRelationship(fromId, toId, type, properties)</code> &#8594; rel-id</p>
+</li>
+<li>
+<p><code>inserter.createDeferredSchemaIndex(label).on(property).create()</code></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_demo_data">Demo Data</h3>
+<div class="paragraph">
+<p>For our demo we want to import articles, authors and citations from the MS citation database. // todo</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>The file looks like this:</p>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 33%;">
+<col style="width: 33%;">
+<col style="width: 33%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">author</th>
+<th class="tableblock halign-left valign-top">title</th>
+<th class="tableblock halign-left valign-top">date</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Max</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Matches</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">2012-01-01</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Mark</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Clojure</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">2013-05-21</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Michael</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Forests</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">2014-02-03</p></td>
+</tr>
+</tbody>
+</table>
 </div>
+<div class="sect2">
+<h3 id="_setup_with_groovy">Setup with Groovy</h3>
+<div class="paragraph">
+<p>To keep the "Java"ness of this exercise to a minimum, I choose groovy a dynamic JVM language that feels closer to ruby and javascript than Java.
+You can run Groovy programs as script much like in other scripting languages.
+And more importantly it comes with a cool feature that allows us to run the whole thing without setting up and build configuration or installing dependencies manually.</p>
 </div>
+<div class="paragraph">
+<p>If you want to, you can also do the same in jRuby, Jython or JavaScript (Rhino on Java7, Nashorn on Java8) or Lisp (Clojure).
+Would love to get a variant of the program in those languages.</p>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Make sure you have a Java Development Kit (JDK) and <a href="http://groovy.codehaus.org/Download">Groovy</a> installed.</p>
 </div>
+<div class="paragraph">
+<p>We need two dependencies a CSV reader (GroovyCSV), and Neo4j and can just declare them with a <code>@Grab</code> annoation and import the classes into scope. (Thanks to <a href="http://twitter.com/darthvader42">Stefan</a> for the tip.)</p>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre class="prettyprint highlight"><code class="language-groovy" data-lang="groovy">@Grab('com.xlson.groovycsv:groovycsv:1.0')
+@Grab('org.neo4j:neo4j:2.1.4')
+import static com.xlson.groovycsv.CsvParser.parseCsv
+import org.neo4j.graphdb.*</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>Then we create a batch-inserter instance which we have to make sure to shut down at the end, otherwise our store will not be valid.</p>
 </div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>The CSV reading is a simple one-liner, here is a quick example, more details on the versatile config in the [API docs].</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="prettyprint highlight"><code class="language-groovy" data-lang="groovy">csv = new File("articles.csv").newReader()
+for (line in parseCsv(csv)) {
+   println "Author: $line.author, Title: $line.title Date $line.date"
+}</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>One trick we want to employ is keeping our authors unique by name, so even if they appear on multiple lines, we only want to create them once and then keep them around for the next time
+they are referenced.</p>
 </div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+To keep the example simple we just use a Map, if you have to save memory you can look into a more efficient datastructure and a double pass.
+My recommendation would be a sorted name array where the array-index equals the node-id, so you can use <code>Arrays.binarySearch(authors,name)</code> on it to find the node-id of the author.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>We define two enums, one for labels and one for relationship-types.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="prettyprint highlight"><code class="language-groovy" data-lang="groovy">enum Labels implements Label { Author, Article }
+enum Types implements RelationshipType { WROTE }</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>So when reading our data, we now check if we already know the author, if not, we create the <em>Author</em>-node and cache the node-id by name.
+Then we create the <em>Article</em>-node and connect both with a <em>WROTE</em>-relationship.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="prettyprint highlight"><code class="language-groovy" data-lang="groovy">  for (line in parseCsv(csv)) {
+     name = line.author
+     if (!authors[name]) {
+        authors[name] = batch.createNode([name:name],Labels.Author)
+     }
+     date = format.parse(line.date).time
+     article = batch.createNode([title:line.title, date:date],Labels.Article)
+     batch.createRelationship(authors[name] ,article, Types.WROTE, NO_PROPS)
+     trace()
+  }</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>And that&#8217;s it.</p>
+</div>
+<div class="paragraph">
+<p>I ran the data import with the <a href="https://www.kaggle.com/c/kdd-cup-2013-author-paper-identification-challenge/data">Kaggle Authorship Competition</a> containing 12M Author&#8594;Paper relationships.</p>
+</div>
+<div class="paragraph">
+<p>The import used a <a href="https://gist.github.com/jexp/0617412dcdd644fd520b#file-import_kaggle-groovy">slightly modified script</a> that took care of the 3 files of authors, articles and the mapping.
+It loaded the 12m rows, 1.8m authors and 1.2m articles in 175 seconds taking about 1-2 s per 100k rows.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="prettyprint highlight"><code class="language-bash" data-lang="bash">groovy import_kaggle.groovy papers.db ~/Downloads/kaggle-author-paper
+
+Total 11.160.348 rows 1.868.412 Authors and 1.172.020 Papers took 174.122 seconds.</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>You can find the full script in this <a href="https://gist.github.com/jexp/0617412dcdd644fd520b#file-import_kaggle-groovy">GitHub gist</a>.</p>
+</div>
+<div class="paragraph">
+<p>If you&#8217;re interested in meeting me, more treats (full-day training, hackathon) or graph database fun in general,
+don&#8217;t hesitate to join us on <strong>Oct 22 2014 in San Francisco</strong> for this years <a href="http://graphconnect.com">GraphConnect</a> conference for all things Neo4j.</p>
+</div>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2014-10-09 21:57:42 CEST
+Last updated 2014-10-09 21:52:54 CEST
 </div>
 </div>
 </body>

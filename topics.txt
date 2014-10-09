@@ -1,0 +1,53 @@
+== Planned Neo4j Blog Topics
+
+* Streaming Data from Neo4j to Gephi
+* Cy2Neo
+* LOAD CSV Tips & Tricks Part 2 (caveats)
+* Using Neo4j from an iPython Notebook (py2neo, render results in table, chart or graph, neo4j-rest-client->match)
+* Importing arbitrary JSON-APIs into Neo4j 
+* Getting Started with Neo4j & Go (using cq)
+
+* 
+LOAD_JSON.sh
+
+JSON_API=${1-'http://localhost:7474/'}
+SHIFT
+QUERY=${*-'create (l:Links {management:{data}.management, data:{data}.data}) return l'}
+JSON_DATA=`curl -H accept:application/json -s $JSON_API`
+POST_DATA="{\"statements\":[{\"statement\": \"$QUERY\", \"parameters\": {\"data\":$JSON_DATA}}]}"
+DB_URL=http://localhost:7474
+echo $post_data
+echo curl -H accept:application/json -H content-type:application/json -XPOST "$DB_URL/db/data/transaction/commit" -d "$POST_DATA"
+curl -i -H accept:application/json -H content-type:application/json -XPOST "$DB_URL/db/data/transaction/commit" -d "$POST_DATA"
+
+
+JSON_API="https://api.stackexchange.com/2.2/questions?pagesize=1&order=desc&sort=creation&tagged=neo4j&site=stackoverflow&filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf"
+~/bin/load_json.sh "$JSON_API" ~/DropBox/Public/import_stackoverflow.cypher
+
+UNWIND {data}.items as q
+MERGE (question:Question {id:q.question_id}) ON CREATE 
+  SET question.title = q.title, question.share_link = q.share_link, question.favorite_count = q.favorite_count
+
+MERGE (owner:User {id:q.owner.user_id}) ON CREATE SET owner.display_name = q.owner.display_name
+MERGE (owner)-[:ASKED]->(question)
+
+FOREACH (tagName IN q.tags | MERGE (tag:Tag {name:tagName}) MERGE (question)-[:TAGGED]->(tag))
+FOREACH (a IN q.answers | 
+   MERGE (question)<-[:ANSWER_FOR]-(answer:Answer {id:a.answer_id})
+   MERGE (answerer:User {id:a.owner.user_id}) ON CREATE SET answerer.display_name = a.owner.display_name
+   MERGE (answer)<-[:AUTHORED]-(answerer)
+)
+
+
+How to make sure that your CSV data is good for an import:
+
+LOAD CSV from "file:///path/to/file.csv" as line
+return count(*);
+
+LOAD CSV from "file:///path/to/file.csv" as line
+with line limit 5
+return line;
+
+LOAD CSV from "file:///path/to/file.csv" as line
+MATCH (a:Label {id: line[0]})
+RETURN count(*);

@@ -15,14 +15,14 @@ You can run the Python example with +python lang/Python/example.py+, you should 
 
 In general the API is pretty straightforward, there is also a https://dl.dropboxusercontent.com/u/14493611/QuickReference.pdf[PDF refcard] in the download.
 
-* +new_vertex(), new_vertex_w_id(id)+ create node
-* +new_edge(from,to)+ create relationship
+* +new_vertex(), new_vertex_w_id(id)+ create a node
+* +new_edge(from,to)+ create a relationship
 * +set_[vertex|edge]_attribute(id,attribute,value)+ style a node or relationship
-* style attributes can be +shape+ (sphere,cone,box,...), +size+ (something around 1.0), +color+ (hex), +label+, +visible+ and for relationships also +spline+,+oriented+,+stroke+,+width+ and more
-* generalize styles with +new_[vertex|edge]_style(parent_style)+ create a new style with attributes, ineriting from a parent, or root (parent-id 0)
+* style attributes can be +shape+ (sphere,cone,box,...), +size+ (a value around 1.0), +color+ (hex), +label+, +visible+ additionally for relationships +spline+,+oriented+,+stroke+,+width+ and more
+* +new_[vertex|edge]_style(parent_style)+ create a new global style with attributes, inheriting from a parent, or root (parent-id 0)
 * +change_[vertex|edge]_style(id,style)+ assign style to node or relationship
 
-I show how to access UbiGraph from Java, but it is of course much simpler in Ruby with http://github.com/maxdemarzi/neography[neography] or http://py2neo.org/[py2neo] with each of the drivers.
+I show how to access UbiGraph from Java, but it is of course much simpler in Ruby with http://github.com/maxdemarzi/neography[neography] or in Python using http://py2neo.org/[py2neo].
 
 Rendering Neo4j is pretty straightforward:
 
@@ -30,7 +30,7 @@ Rendering Neo4j is pretty straightforward:
 2. run a cypher query to return the graph structure and 
 3. send it to UbiGraph using the API outlined above.
 
-UbiGraph comes with a Java connector in +UbigraphClient.java+ with the mentioned API methods. It uses the Apache XmlRpc library, which you can pull in via Maven or http://archive.apache.org/dist/ws/xmlrpc/apache-xmlrpc-current-bin.tar.bz2[download here] (the official links are broken).
+UbiGraph comes with a Java connector in +UbigraphClient.java+ with the mentioned API methods. It uses the Apache XmlRpc library, which you can pull in via https://github.com/jexp/neo4j-ubigraph/blob/master/pom.xml#L18[Maven] or http://archive.apache.org/dist/ws/xmlrpc/apache-xmlrpc-current-bin.tar.bz2[download here] (the official links are broken).
 
 
 Here is a minimal query that only loads the structure without any further information. You could choose to load the additional information using the interactive features of UbiGraph, 
