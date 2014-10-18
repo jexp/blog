@@ -1,0 +1,255 @@
+== LOAD CSV with SUCCESS
+
+I have to admit that using our `LOAD CSV` facility is trickier than you and I would expect.
+Several people ran into issues that they could not solve on their own.
+
+My first http://jexp.de/blog/2014/06/load-csv-into-neo4j-quickly-and-successfully/[blog post on LOAD CSV] is still valid in it own right, and contains important aspects that I won't repeat here.
+Both in terms of data quality checking (broken CSV files, misspelt header names or incorrect data types) as well as the concern of transaction size, where `PERiODIC COMMIT` comes to the rescue.
+
+To address the most frequent issues and questions, I decided to write this follow up post. 
+
+In general you might have better experience using Neo4j-Enterprise as it contains some components which are more memory efficient.
+
+If you want to import much more than 10-15 million lines of data, you might consider using our non-transactional batch-insertion facilities:
+
+* my https://github.com/jexp/batch-import/tree/2.1[CSV Batch-Importer]
+* the [Neo4j Batch-Inserter API from Java], or 
+* like http://jexp.de/blog/2014/10/flexible-neo4j-batch-import-with-groovy/?utm_content=bufferffae1&utm_medium=social&utm_source=twitter.com&utm_campaign=buffer[my example from Groovy].
+
+Stay tuned for some new announcements from Neo Technology about a super-fast batch-insertion mechanism.
+
+=== Clean and Check your CSV-Files
+
+We ran into many issues where CSV files were just broken, please make sure that your files are not, otherwise you will spend hours hunting for bugs in the wrong place.
+
+The CSV reader used by Cypher (OpenCSV) will handle quotes and escaping correctly, that means if you have quotes in places where they not belong please escape and remove them.
+Otherwise you might end up getting a million lines of CSV concatenated in a single string value, just because you had a quoted string in one place
+
+Other bad things:
+
+* Having binary zeros in your file `\u000`, remove them (e.g. `tr < file-with-nulls.csv -d '\000' > file-without-nulls.csv`)
+* the 2-byte UTF file preamble (byte order mark, BOM) will trip it up, remove it
+* Escaped quotes instead normal quotes in your cells break your file, e.g `"A title\", "An Author"`, unescape them
+* Quotes in the middle of the text will trip up the file structure, e.g. `"I love :") this smiley"`, escape those
+* Make sure to have no unquoted text fields containing newlines
+* Windows Newlines can sometimes trip it up, when imported under non-Windows OS, make sure to clean it up first
+* if you use non-ascii characters (umlauts, accents etc.) make sure to use the appropriate locale or provide the System property `-Dfile.encoding=UTF8`
+
+Some tools that can help you checking and fixing your CSV:
+
+* http://csvkit.readthedocs.org/en/0.9.0/[CSV Kit]
+* http://csvlint.io/[CSV Lint]
+* hexdump, and the hex-mode of editors like vi, emacs, UltraEdit and Notepad++
+* the tips on checking your CSV files from my http://jexp.de/blog/2014/06/load-csv-into-neo4j-quickly-and-successfully/[last blog post]
+
+=== Data Conversion
+
+When you convert data from the CSV to be imported via `toInt, toFloat, split` or otherwise, make sure to do it consistently in all places.
+One tip that can help is to use WITH to declare them as identifiers once after conversion:
+
+[source,cypher]
+----
+LOAD CSV ... AS data
+WITH data, toInt(data.id) as id, extract(p IN split(data.parts,";") | toInt(p)) as partIds
+CREATE (n:Node {id:id})
+FOREACH (partId in partIds | CREATE (:Part {id:partId})-[:PART_OF]->(n) )
+----
+
+=== Partially addressed Issue: Eager Loading for Change Isolation
+
+The *biggest issue* that people ran into, even when following the advice I gave earlier, was that for large imports of more than *one million rows*, Cypher ran into an out-of-memory situation.
+
+That was *not related to commit sizes*, so it happened even with `PERIODIC COMMIT` of small batches.
+
+The issue is that within a single Cypher statement you have to isolate changes that affect matches further on, e.g. when you `CREATE` nodes with a label that are suddenly matched by a later `MATCH` or `MERGE` operation.
+Generating one row of results would affect other, subsequent ones in unexpected ways.
+
+One example query that illustrates the behavior, that would happen if you don't isolate, is:
+
+[source,cypher]
+----
+MATCH (person:Person)
+CREATE (clone:Person {name:"Clone of "+person.name});
+----
+
+If you don't execute *all* the read's before all the updates, you'll end up creating clone of clone armies.
+If you profile that query you see that there is an "Eager" step in the query plan. 
+That is where the "pull in all data" happens.
+
+[source]
+----
++-------------+------+--------+----------------+------------+
+|    Operator | Rows | DbHits |    Identifiers |      Other |
++-------------+------+--------+----------------+------------+
+| EmptyResult |    ? |      ? |                |            |
+| UpdateGraph |    ? |      ? |          clone | CreateNode |
+|     *Eager* |    ? |      ? |                |            |
+| NodeByLabel |    ? |      ? | person, person |    :Person |
++-------------+------+--------+----------------+------------+
+----
+
+==== How does this affect LOAD CSV?
+
+Cypher deals with this as follows: As soon as it detects a _Update followed by Read_ (or the other way round) operation, it will execute the first operation for *all rows* first, before continuing on the second operation.
+This happens by inserting an *Eager* Operator (that you can spot in the query plan), which will fetch all intermediate results from the previous step before continuing.
+
+In normal queries where you create at most a few (hundred-) thousand nodes or relationships in one statements that's not an issue.
+But when you deal with a CSV file with millions of rows of input, it will both - fill your memory with the file contents and created data (and transaction state).
+And as `PERIODIC COMMIT` is tied to the CSV-lines read at the end of the statement, it will also be effectively disabled.
+
+This is not a problem if you have enough heap, I ran very complex LOAD CSV commands that had several *Eager* operators in their execution plan with a lot of CSV data on machines with enough heap (eg. 8G, 16GB or 32GB) and there it was no problem pulling all intermediate state into memory.
+But you might not want to afford such a luxury.
+
+Don't worry, here are some simple tips on how to avoid it:
+
+==== Some Tips 
+
+* *Upgrade to 2.1.5+* , Cypher has learned a number of constructs where it doesn't have to put in an *Eager* operator between reads and writes because they are actually independent
+* Profile your statement upfront (even without pulling lines of input through `WITH data LIMIT 0`), if *Eager* shows up, simplify your statement
+* Write only simple LOAD CSV statements if you want to save memory and have multiple passes across the same or multiple csv files
+** only `CREATE` nodes or `MERGE` different type of nodes in one statement
+** don't mix `MERGE` of nodes and `MERGE` of relationships
+
+This "Eager" step also shows up in the following LOAD CSV statement in versions before 2.1.5
+
+[source,cypher]
+----
+PROFILE LOAD CSV WITH HEADERS FROM "..." AS data
+WITH data LIMIT 0 // limit 0 for profiling only
+MATCH (p:Person {name:data.name}) 
+MATCH (c:Company {name:data.company})
+CREATE (p)-[:WORKD_AT]->(c)
+----
+
+.Neo4j *before* 2.1.5
+----
++----------------+------+--------+--------------+----------------------------------------+
+|       Operator | Rows | DbHits |  Identifiers |                                  Other |
++----------------+------+--------+--------------+----------------------------------------+
+|    EmptyResult |    0 |      0 |              |                                        |
+|    UpdateGraph |    0 |      0 |   UNNAMED161 |                     CreateRelationship |
+|       !! Eager |    0 |      0 |              |                     ! Watch this !     |
+| SchemaIndex(0) |    0 |      0 |         c, c | Property(data,company); :Company(name) |
+| SchemaIndex(1) |    0 |      0 |         p, p |  Property(data,name(0)); :Person(name) |
+|          Slice |    0 |      0 |              |                           {  AUTOINT0} |
+|        LoadCSV |    1 |      0 |         data |                                        |
++----------------+------+--------+--------------+----------------------------------------+
+----
+
+Fortunately, Cypher was fixed in 2.1.5 to learn that there are some patterns that are unrelated, so it doesn't add the *Eager* step by default.
+Here is the profiler output of the same query in 2.1.5, you see that the *Eager* operation *is missing*.
+
+.Neo4j 2.1.5+
+----
++----------------+------+--------+--------------+----------------------------------------+
+|       Operator | Rows | DbHits |  Identifiers |                                  Other |
++----------------+------+--------+--------------+----------------------------------------+
+|    EmptyResult |    0 |      0 |              |                                        |
+|    UpdateGraph |    0 |      0 |   UNNAMED179 |                     CreateRelationship |
+| SchemaIndex(0) |    0 |      0 |         c, c | Property(data,company); :Company(name) |
+| SchemaIndex(1) |    0 |      0 |         p, p |  Property(data,name(0)); :Person(name) |
+|          Slice |    0 |      0 |              |                           {  AUTOINT0} |
+|        LoadCSV |    1 |      0 |         data |                                        |
++----------------+------+--------+--------------+----------------------------------------+
+----
+
+There are some statements that are *not yet covered*, e.g. property updates like this:
+
+[source,cypher]
+----
+LOAD CSV ... AS data
+MATCH (n:Node {id:data.id})
+SET n.value = data.value
+----
+
+////
+profile load csv with headers from "file:///Users/mh/Downloads/employees.csv" as data return data;
+
+profile load csv with headers from "file:///Users/mh/Downloads/employees.csv" as data
+WITH data LIMIT 0
+MATCH (p:Person {name:data.name}) 
+MATCH (c:Company {name:data.company})
+CREATE (p)-[:WORKD_AT]->(c)
+;
+
+profile load csv with headers from "file:///Users/mh/Downloads/employees.csv" as data
+WITH data LIMIT 0
+MERGE (p:Person {name:data.name}) 
+MERGE (c:Person {name:data.company})
+MERGE (p)-[:WORKD_AT]->(c)
+;
+////
+
+
+=== Fixed Issue: Read your own Changes (Fixed in 2.1.5+)
+
+Another issue that could slow down an import was an _read your own writes_ problem (which has been *recently fixed in 2.1.5*) in Neo4j when using a statement like this.
+That happened especially when you had schema indexes to speed up your node by label and value lookups.
+
+[source,cypher]
+----
+CREATE INDEX ON :Person(name);
+CREATE INDEX ON :Company(name);
+...
+MATCH (p:Person {name:"John"}),(c:Company {name:"ACME"})
+CREATE (p)-[:WORKS_AT]->(c);
+----
+
+[FIXED]
+*The reason* for that issue was that the overlaying transaction state check for index lookups (i.e. potential node changes that affect index results, like added or removed labels and properties), also checked against nodes where other aspects were changed (e.g. relationships added).
+That check also did not take labels into account.
+So the more relationships you created the more nodes it had to scan to.
+That's why PERIODIC COMMIT with a small transaction size helped (100 or 1000).
+
+=== Avoid Windows for Import
+
+Due to a variety of reasons, disk and memory-mapping operations on Windows are much slower than on Linux and Mac.
+This might not be so apparent in day-to-day operations with Neo4j but for imports where every millisecond counts, it quickly adds up and becomes a bottleneck.
+So even if you just grab a live-boot-cd, an AWS or Digital-Ocean (better w/ SSD) instance or your friends Linux machine, you'll be happier.
+
+=== Use the Shell, Luke
+
+The Neo4j-Shell is most helpful when importing data, as you can point it to different test-database directories (`-path test.db`), kill it with ctrl-c and run multiple of them in parallel (on different databases).
+You can also supply a config file where you adapted the memory mapping sizes to fit your projected store sizes (`-config conf/neo4j.properties`).
+And you can load commands from a file (`-file import.cyp`), no need for tedious copy & paste.
+
+You find the `neo4j-shell` (or `Neo4jShell.bat`) script in your `path/to/neo4j/bin` and you can run it from anywhere.
+If you have a server running and, *don't* provide the `-path` parameter it will connect to the running server (if you didn't disable remote shell).
+For Windows users that installed the database via the graphical installer, my colleague Mark http://www.markhneedham.com/blog/2013/11/29/neo4j-the-case-of-windows-neo4j-desktop-and-the-invisible-text/[explained the steps to access the Neo4j-Shell].
+
+There is only one caveat, if you run neo4j-shell without server, you have to provide it with more RAM for the import.
+
+You can do that by setting an environment variable: `EXPORT JAVA_OPTS="-Xmx4G -Xms4G -Xmn1G"` for machines with more RAM you can increase that to 8 or 16 *but not more that a quarter* of your RAM.
+
+For really large imports, you should use the remainder of your RAM for memory mapping, projecting the expected node, relationship and property-counts.
+In the file you provide to the shell via `-config conf/neo4j.properties`:
+
+[source]
+----
+# eg. for 25M nodes, 250M relationships, total 10.4G, with 4G heap and 2G OS of 16GB total
+# 15 bytes per node
+neostore.nodestore.db.mapped_memory=400M
+# 35 bytes per rel
+neostore.relationshipstore.db.mapped_memory=7G
+# 42 bytes per property
+neostore.propertystore.db.mapped_memory=2G
+# long strings, chopped up into 60 char segments
+neostore.propertystore.db.strings.mapped_memory=1G
+# arrays if needed
+#neostore.propertystore.db.arrays.mapped_memory=100M
+----
+
+[source,shell]
+----
+export JAVA_OPTS="-Xmx4G -Xms4G -Xmn1G"
+path/to/neo4j/bin/neo4j-shell -path import-test.db -config path/to/neo4j/conf/neo4j.properties -file import-test.cyp
+----
+
+=== Need Help? We're there
+
+If you have any questions regarding importing data into Neo4j, don't worry, we can help you quickly:
+
+* Join our *Open Office Hours* during http://graphconnect.com[GraphConnect on Wed, Oct 22 in San Francisco] (Discount code *NEOTECH*)
+* Ask on http://stackoverflow.com/questions/tagged/neo4j[Stackoverflow] or the http://groups.google.com/forum/#!forum/neo4j[google group].
+* Come to one of our http://neo4j.com/events/#/events?type=Meetup[meetups] or http://neo4j.com/events/#/events?type=Training[trainings]
+* Contact our [professional support] to get the quickest help

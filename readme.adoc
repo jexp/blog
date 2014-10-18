@@ -7,6 +7,7 @@ You find the posts on http://jexp.github.io/blog
 
 == Import
 
+* link:{base}/html/load_csv_with_success.html[Load CSV with Success (Part 2)]
 * link:{base}/html/flexible-batch-import.html[Flexible Neo4j Batch Import with Groovy]
 * link:{base}/html/load_csv_tips.html[LOAD CSV into Neo4j quickly and successfully]
 * link:{base}/html/load_csv_git.html[Importing Git History into Neo4j]
