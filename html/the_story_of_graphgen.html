@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Import</title>
+<title>The Story of GraphGen</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,109 +413,153 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_the_story_of_graphgen">The Story of GraphGen</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>This is the story behind the really useful and ingenious <a href="http://neo4j.com">Neo4j</a> example graph data generator developed by <a href="http://twitter.com/ikwattro">Christophe Willemsen</a>.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>I don&#8217;t just want to show you the tool but also tell the story how it came to be.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p><strong>First of all: The Neo4j Community is awesome.</strong><br>
+There are so many enthusiastic and creative people, that it is often humbling for me to be part of it.</p>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
+<div class="paragraph">
+<p>So October 1st, Christophe tweeted out a short screencast he recorded, about a new tool (NeoGen) he was developing which converted a YAML domain specification into Cypher statements to populate a Neo4j database.</p>
+</div>
+<blockquote class="twitter-tweet" lang="en"><p>Just released a <a href="https://twitter.com/hashtag/neo4j?src=hash">#neo4j</a> graph generator <a href="https://t.co/7EDLQcwSuE">https://t.co/7EDLQcwSuE</a> sample video : <a href="https://t.co/ErDwl20pO2">https://t.co/ErDwl20pO2</a> <a href="https://twitter.com/hashtag/graphs?src=hash">#graphs</a> <a href="https://twitter.com/hashtag/draft?src=hash">#draft</a> feedbks|reqs welcome</p>&mdash; Christophe Willemsen (@ikwattro) <a href="https://twitter.com/ikwattro/status/517302896707534848">October 1, 2014</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+<div class="paragraph">
+<p>It was already pretty cool, but being me, I had a bulk of ideas that I&#8217;d love to see in such a tool.</p>
+</div>
+<div class="paragraph">
+<p>Some of these were:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
+<p>online tool</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
+<p>visualization</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
+<p>cypher like specification language (inspired by <a href="http://yuml.me">yuml.me</a>)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
+<p>download cypher script and GraphJSON for later usage</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
+<p>populate Neo4j database from online tool</p>
+</li>
+<li>
+<p>generate Neo4j console link</p>
 </li>
 </ul>
 </div>
+<div class="paragraph">
+<p>So I contacted him and we had some really good discussions.
+He was very enthusiastic and eager to continue to work on this.
+So he first added the <a href="https://twitter.com/ikwattro/status/518042994277384192">Cypher spec</a>, then the <a href="https://twitter.com/ikwattro/status/519927723171782656">online tool GraphGen</a> including visualization, the download of <a href="https://twitter.com/ikwattro/status/519964348358598656">GraphJSON</a> &amp; <a href="https://twitter.com/ikwattro/status/519990567737245697x">Cypher</a> and finally the <a href="https://twitter.com/ikwattro/status/520516549904715777">database population</a>.
+And he continued further and further adding model types (pre-defined combinations of labels with properties) and adding the Neo4j console link. All while expanding the documentation.</p>
+</div>
+<div class="paragraph">
+<p>Really impressive work.</p>
+</div>
+<div class="paragraph">
+<p>Christophe also added some <a href="http://graphgen.neoxygen.io/documentation">documentation</a> and a neat teaser to quickly get started.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<a class="image" href="http://graphgen.neoxygen.io/"><img src="https://pbs.twimg.com/media/BzrUpthIQAA-Bl7.png:large" alt="BzrUpthIQAA Bl7" width="500"></a>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
+<div class="paragraph">
+<p>And so today, <strong>a mere 5 days later</strong>, <a href="http://graphgen.neoxygen.io/">GraphGen</a> was out there, very usable and useful and waiting for you to generate <strong>your graph domain model</strong>.</p>
+</div>
+<div class="paragraph">
+<p>No wonder he won the 2014 GraphConnect Graphies Award for best community contribution.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<a class="image" href="http://neo4j.com/blog/winners/"><img src="../img/graphie_graphgen.jpg" alt="graphie graphgen" width="200"></a>
+</div>
+</div>
+<div class="paragraph">
+<p>Here is a quick screencast I made (which is already superceded by new features):</p>
+</div>
+<iframe width="560" height="315" style="margin:1em;" src="//www.youtube.com/embed/3ZXOuiVaaOU" frameborder="10" allowfullscreen></iframe>
+<div class="sidebarblock">
+<div class="content">
+<div class="paragraph">
+<p>The web-based GraphGen tool is of course on <a href="https://github.com/neoxygen/graphgen">GitHub</a> too.
+Here is a quick explanation on how it works internally:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
 <li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
+<p>Rendering your Cypher-Spec statement colorfully with <a href="http://codemirror.net/mode/cypher/index.html">CodeMirror Cypher highlighting</a></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
+<p>The PHP backend parses the Cypher statement and generates and intermediate model, which is the same as from the YAML input</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
+<p>then generates the graph model internally according to the counts, cardinalities and property types you provided</p>
 </li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
+<p>the property values are created using the <a href="https://github.com/fzaninotto/Faker#formatters">Faker library</a> to generate realistic data for names, dates, creditcards etc.</p>
 </li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
+<p>then it generates Cypher Statements (CREATE, MERGE, MATCH) to generate your data and <a href="http://graphjson.io">GraphJSON</a></p>
 </li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
+<p>the cypher and GraphJSON are made available for download and the GraphJSON is also used to render a visualization of your graph with <a href="http://graphalchemist.github.io/Alchemy">Alchemy.js</a></p>
 </li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
+<p>you can open a new, shared Neo4j console link which is generated using its API</p>
 </li>
-</ul>
+<li>
+<p>if you choose to, a publicly available Neo4j database can be populated with the graph model by posting Cypher statements to the <a href="http://docs.neo4j.org/chunked/milestone/rest-api-transactional.html">transactional HTTP endpoint</a> using Ajax requests</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+<div class="paragraph">
+<p>In a <a href="http://neo4j.com/blog/graphgen-creation-implementation/">recent blog post</a> Christophe wrote about his view of this story.</p>
+</div>
+<div class="paragraph">
+<p>And my amazing colleague Rik showed how to utilize GraphGen in his <a href="http://blog.bruggen.com/2014/10/simulating-idms-empdemo-using-graphgen.html">Simulating the IDMS EmpDemo</a> blog post.</p>
+</div>
+<div class="paragraph">
+<p>This is just one of the many examples in which a member of the Neo4j community got behind a good idea and created a very useful tool, driver, framework or documentation.</p>
+</div>
+<div class="paragraph">
+<p>I can&#8217;t thank all the contributors enough and can only pledge to support the community to the best of my abilities.</p>
+</div>
+<div class="paragraph">
+<p>I want to invite you all to join our community and contribute in writing and coding around Neo4j and be supported by others when you need it.</p>
+</div>
+<div class="paragraph">
+<p>And even if you don&#8217;t have an idea that you currently want to pursue, just helping others by answering questions and providing feedback to Neo4j and all the tools and content in its ecosystem is extremely valuable and helpful.</p>
+</div>
+<div class="paragraph">
+<p>Cheers, Michael</p>
+</div>
+<div class="paragraph">
+<p>P.S: Christophe is also the author of the more widely used Neo4j PHP library <a href="https://github.com/neoxygen/neo4j-neoclient">NeoClient</a>, translator of the <a href="http://docs.neo4j.org/lab/manual-french/">Neo4j manual into French</a> and importer of <a href="https://twitter.com/ikwattro/status/500417925627785217">GitHub repository data</a> into Neo4j.</p>
+</div>
+<div class="paragraph">
+<p>Meet him and me in London for the <a href="http://www.eventbrite.com/e/neo4j-graphday-london-tickets-13129289057">GraphDay on Nov 13</a> and the <a href="http://www.meetup.com/graphdb-london/events/216099452/">GraphHack - Meetup on Nov 12</a>.</p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2014-11-01 04:10:32 CET
+Last updated 2014-11-01 03:59:57 CET
 </div>
 </div>
 </body>

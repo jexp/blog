@@ -7,7 +7,7 @@ You find the posts on http://jexp.github.io/blog
 
 == Import
 
-* link:{base}/html/load_csv_with_success.html[Load CSV with Success (Part 2)]
+* link:{base}/html/load_csv_with_success.html[Load CSV with Success]
 * link:{base}/html/flexible-batch-import.html[Flexible Neo4j Batch Import with Groovy]
 * link:{base}/html/load_csv_tips.html[LOAD CSV into Neo4j quickly and successfully]
 * link:{base}/html/load_csv_git.html[Importing Git History into Neo4j]
@@ -15,6 +15,7 @@ You find the posts on http://jexp.github.io/blog
 
 == Data Generation
 
+* link:{base}/html/the_story_of_graphgen.html[The Story of GraphGen]
 * link:{base}/html/create_random_data.html[Quickly create a 100k Neo4j graph data model with Cypher only]
 * link:{base}/html/sampling_a_graph.html[Sampling A Neo4j Database]
 
