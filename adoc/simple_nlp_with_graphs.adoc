@@ -15,7 +15,7 @@ Differences in formulation or inserted fill words only affect the graph structur
 
 You can find all the details of the approach in this http://kavita-ganesan.com/system/files/private/opinosis-presentation.ppt.pdf[presentation] or the http://www.kavita-ganesan.com/opinosis[accompanying research].
 
-I always joked that you could create this graph representation without programming just by writing a simple Cypher statement, but I actually never tried.
+I always joked that you could create this graph in http://neo4j.com[Neo4j] representation without programming just by writing a simple http://neo4j.com/developer/cypher[Cypher] statement, but I actually never tried.
 
 Until now, and to be honest I'm impressed how easy it was to write down the essence and then extend and expand the statement until it covered a large number of inputs.
 
@@ -47,9 +47,9 @@ MERGE (w1)-[:NEXT]->(w2);
 
 Running this statement with the two example reviews from the aforementioned blog post generates this graph representation:
 
-// // graph
+//graph
 
-image::https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_phones.svg[]
+// image::https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_phones.svg[]
 
 
 Pretty cool, I can also run queries for instance to find common phrases (for phones):
@@ -61,8 +61,9 @@ RETURN [n in nodes(path) | n.name] as phrase
 LIMIT 5;
 ----
 
-// table
+//table
 
+////
 |===
 
 | phrase
@@ -73,6 +74,7 @@ LIMIT 5;
 | [calls, drop, too, frequently]
 
 |===
+////
 
 The Cypher features used so far:
 
@@ -283,7 +285,7 @@ MERGE (w1)-[r:NEXT]->(w2)
 
 //graph
 
-image::https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_ring.svg[]
+// image::https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_ring.svg[]
 
 There are many ways how you can use the data, either follow what Kavita suggests in her paper or just play around freely with the graph, like I did below.
 
@@ -301,6 +303,7 @@ LIMIT 1
 
 //table
 
+////
 |===
 
 |phrase |score
@@ -308,5 +311,8 @@ LIMIT 1
 | [one, ring, to] | 6
 
 |===
+////
 
 // http://neo4j-console-21.herokuapp.com/?id=one_ring[Shareable Neo4j Console Link]
+
+You can also see this post in the full beauty of a http://gist.neo4j.org/?dropbox-14493611%2Fblog%2Fadoc%2Fsimple_nlp_with_graphs.adoc[Neo4j Graph-Gist].
