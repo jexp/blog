@@ -1,0 +1,243 @@
+== Speeding up Remote Spring Data Neo4j
+
+With the first milestone of the https://spring.io/blog/2014/12/01/first-milestone-of-spring-data-release-train-fowler-available[Spring Data "Fowler" release train], Spring Data Neo4j 3.3.0.M1 was released.
+Besides a lot of smaller fixes, it contains one big improvement.
+I finally found some time to work on the remoting performance of the library, i.e. when used in conjunction with Neo4j Server.
+This blog post explains the history behind the issue and the first steps taken to address it.
+
+In the past for many of its users, the remote performance of Spring Data Neo4j was not satisfying.
+The reasons for that were twofold - historical and development bandwidth.
+Let's start with the history.
+
+=== History
+
+When Spring Data Neo4j started, neither Cypher, nor Neo4j-Server existed, only the embedded Java APIs of Neo4j were available.
+
+So initially, the AspectJ-based, write- and read-through mapping mode and then later the simple mapping mode were built based on these in-process Java-APIs.
+
+Later adding Neo4j server support was made "easy" with the `java-rest-binding` library which pretended to be an embedded 
+`GraphDatabaseService` API but actually made remote calls to the Neo4j Server REST endpoints for each of the API operations.
+
+Both were very bad ideas.
+Not just because network transparency is a *very* leaky abstraction.
+
+So what we ended up with was an Object-Graph-Mapper assuming to talk to an embedded database.
+In the embedded case, the frequency of API calls is not problematic, and re-fetching nodes and relationships by id was just a cache-hit away.
+
+But unknowingly making REST calls over the wire for each of the operations has quite an impact.
+
+So a call that took nanoseconds or less in embedded mode may have taken as long as your twice your network latency in the remote case.
+Combined with the number of calls it pretty quickly summed up to an unsatisfying remote performance of the whole library.
+
+Unfortunately fixing this it was not in the development bandwidth available to work on the library. 
+In retrospect that was a really bad decision too, as many users (esp. in larger organizations) really like the Spring Data (Neo4j) convenience for CRUD and use-case specific operations.
+
+=== Recommendations for Working with Neo4j Server
+
+Usually I recommended to either *move the persistence layer of such an SDN application into a server extension* and just expose REST endpoints that use a domain level protocol.
+Or to *rewrite complex remote mapping logic into a few cypher statements* that will be executed within the server.
+
+Both suggestions are actually sensible and can improve the performance of your operations up to 20 times.
+
+=== Performance Example
+
+To show the implications, I created a http://github.com/jexp/sdn-remote-save[small test project] that runs the same medium-complex SDN-mapping operations for each of the setups, creating 1000 medium size business objects (9 entities and 8 relationships with some properties):
+
+* on an embedded database, 
+* against a SDN based server extension and 
+* remotely via Spring Data Neo4j (3.2.1.RELEASE).
+
+For completeness I also added two tests that indicate remote Cypher performance, once via JDBC and once via the SDN Cypher execution.
+
+The speed differences are quite big:
+
+|===
+
+| Mode | Operations | Time (ms) | Time/Op (ms)
+| SDN remote (3.2.1):  | 1000 | 282385 | 282
+| SDN embedded: | 1000 | 11879 | 11
+| SDN server extension: | 1000 | 11879 | 16
+| SDN  Cypher: | 1000 | 7739 | 7
+| JDBC Cypher: | 1000 | 5235 | 5
+
+|===
+
+Fortunately lately I finally got around to addressing at least a few of the root causes.
+
+=== Hotspots
+
+I looked into the hotspots of the remote execution, and fixed the ones with the highest impact.
+
+I refrained from rewriting the whole object graph mapping logic within SDN as this is a much larger effort and will be worked on by our partner http://graphaware.com[GraphAware] as part of the _SDN.next_ efforts (see below).
+
+The places with the highest impact were:
+
+* Separate call to fetch node-labels as the REST-representation doesn't expose labels
+* Continous re-fetching of nodes and relationships from the database as part of the simple mapping process (as only the ID is available in the `@GraphId` field of the actual entity).
+// In the embedded mode that doesn't really matter, as 
+// todo rewrite access logic to actually pass in the node object into `getValue` and `setValue` methods
+* setting properties individually via `propertyContainer.setProperty()` which is the only available API in embedded mode
+
+=== Transactionality
+
+The existing `java-rest-binding` library also can't expose any transaction semantics over the wire, as each REST-operation creates a new independent transaction within Neo4j Server.
+
+The only approach that was supported for "larger transactions" was the REST-Batch-Operations which encapsulated a number of operations in one single large HTTP request.
+But that API didn't allow to read your own writes within a transaction and making decisions based on that information.
+So this didn't only remove transactional safety but also created a lot of tiny transactions which all had to be forcibly synched to disk by Neo4j.
+
+=== Changes impacting Performance
+
+I started by comparing the remote performance of single REST-API calls with the appropriate Cypher calls and found that the former are twice as fast for single and simple operations. 
+Cypher has its strengths in more complex operations and in running multiple statements within the same transaction with the new transactional endpoint.
+
+As a first step, I inlined all the code of java-rest-binding that I still intended to use, into Spring Data Neo4j and removed the operations that were no longer relevant.
+So starting from that next version, the `java-rest-binding` dependency will no longer be used.
+
+For some quick gains I changed:
+
+* load node with labels in one step using two batch-REST calls, only load labels from SDN if they are not already loaded
+* used label and id meta-information from Neo4j's REST format for nodes since Neo4j 2.1.5
+* added a local client-cache for nodes loaded from the server, updates and refreshes will also go through this cache
+* added a separate interface `UpdateableState` to `RestEntity` (nodes and relationships) that allows bulk-updates of properties
+* changed node- and relationship-creation to utilize maps of properties for the initial `create` or `merge` call
+
+All of those changes already improved the performance of the Spring Data Neo4j remote operations by a *factor of 3* as shown by the sample project, but it was still not good enough.
+
+=== Transactional Cypher #FTW
+
+A you probably know Neo4j supports a http://neo4j.com/docs/stable/rest-api-transactional.html[streaming HTTP endpoint] that is able to run multiple Cypher statements per request and can keep a transaction running across multiple HTTP-requests.
+
+So although I originally wanted to use the Neo4j-JDBC driver, it was not yet available on Maven Central.
+So I deferred that and instead wrote a quick Jersey based https://github.com/spring-projects/spring-data-neo4j/blob/master/spring-data-neo4j-rest/src/main/java/org/neo4j/rest/graphdb/query/CypherTransaction.java[HTTP client for the transactional Cypher endpoint] which also supported batching of queries and running multiple HTTP requests within the same transaction.
+
+The internal API looks like this:
+
+[source,java]
+----
+query = "MATCH (n) where id(n) = {id} " +
+        "RETURN id(n) as id, labels(n) as labels, n as data";
+
+params = singletonMap("id",nodeId);
+
+tx = new CypherTransaction(url, ResultType.row);
+
+Result result = tx.send(query, params);
+tx.commit();
+
+// or
+
+tx.add(query, params);
+List<Result> results = tx.commit();
+tx.rollback();
+
+List<String> cols = result.getColumns();
+if (result.hasData()) {
+   Iterable<List<Object>> data = result.getData();
+}
+
+for (Map<String,Object> row : result) {
+   Long id = row.get("id");
+   List<String> = row.get("labels");
+   Map props = row.get("data");
+}
+----
+
+I then rewrote all remote operations that were expressible with Cypher from REST-HTTP calls into parameterized Cypher statements, for instance the http://neo4j.com/docs/stable/rest-api-nodes.html#rest-api-create-node[_Create-Node_] call into:
+
+[source,cypher]
+----
+CREATE (n:`Label1`:`Label 2` {props})
+RETURN id(n) as id, labels(n) as labels, n as data
+----
+
+This allowed me to set all the labels and properties of the node with a single `CREATE` operation and return the property `data` as well as the metadata like `id` and `labels` in a single call.
+I used the same return format consistently for nodes and relationships to map them easily back into the appropriate graph objects that SDN expects.
+The variant for relationships actually also returns start- and end-node-ids.
+
+The list of operations that were (re)written is pretty long:
+
+* createNode, mergeNode
+* createRelationship
+* getDegree, getRelationships
+* findByLabelAndPropertyValue, findAllByLabel
+* findByQuery (lucene)
+* setProperty, setProperties, addLabel, removeLabel
+* deleteNode, deleteRelationship
+* ...
+
+All other methods still forward to the existing REST operations (e.g. adding nodes to legacy indexes).
+The new Cypher based REST-Api-Impl also utilizes the node cache that I already mentioned.
+Some of these operations also send multiple statements on the same HTTP-request. 
+
+All Cypher operations run within a transaction, if there is none running, a single transaction will be opened just for this operation.
+If there is already a transaction started (stored in a `ThreadLocal`), the following operations will participate in it.
+So if the transaction is started on the outside, e.g. on a method boundary (annotated with `@Transactional`) all operations in the same thread will continue to use *that transaction* until the transactional scope was closed by issuing a commit or rollback operation.
+
+To integrate this functionality with the outside, the Cypher based Rest-API exposes a method to create new Transactions.
+Those are held in a thread-local variable so that you can run independent threads with individual, concurrent transactions.
+
+For integration with the Java world, aka. JTA, I also implemented a `javax.transaction.TransactionManager` on top of that API which can be used on its own.
+But of course for integrating with Spring it is injected into a `Jta(Platform)TransactionManager` in the Spring Data Neo4j configuration.
+
+So whenever you annotate a method or class with `@Transactional`, the Spring transaction infrastructure will use that bean to tie into the remote transaction mechanism provided by the transactional Cypher endpoint.
+
+It was pretty cool that it worked out of the box after I brought the individual pieces together.
+
+To make this new remote integration usable from Spring Data Neo4j I created a `SpringCypherRestGraphDatabase` (an implementation of the SDN-`Database` API that is more comprehensive than Neo4j's `GraphDatabaseService`).
+
+*This is what you should use now to connect your Spring Data Neo4j application remotely to a Neo4j Server.*
+
+[source,java]
+----
+@EnableNeo4jRepositories("org.neo4j.example.repositories")
+@EnableTransactionManagement(mode = AdviceMode.PROXY)
+@Configuration
+@ComponentScan("org.neo4j.example.services")
+public static class RemoteConfiguration extends Neo4jConfiguration {
+    public RemoteConfiguration() {
+        setBasePackage("org.neo4j.example.domain");
+    }
+
+    @Bean
+    public GraphDatabaseService graphDatabaseService() {
+        return new SpringCypherRestGraphDatabase(BASE_URI);
+    }
+}
+----
+
+The steps taken here improved the performance of the use-case we were looking at by a factor of 8, which is not that bad.
+
+|===
+
+| Mode | Operations | Time (ms) | Time/Op (ms)
+| SDN remote (3.2.1):  | 1000 | 282385 | 282
+| SDN remote (3.3.0):  | 1000 | 38151 | *38*
+
+|===
+
+
+My changes only addressed the remoting aspect of this challenge, the next step is to think big.
+
+=== Ad Astra - SDN.next
+
+We started work on completely rewriting the internals of Spring Data Neo4j to embrace a single, fast object graph mapping library for Neo4j.
+
+As part of this effort which is mainly developed by our partner http://graphaware.com[GraphAware] in London, we will simplify the architecture that Spring Data Neo4j is built on.
+
+While we will keep the external APIs that you see as SDN users, as stable as possible, the internals will change completely.
+
+The idea is to build a fast, pure Java-Object Graph Mapper that utilizes the transactional Cypher Endpoint.
+It will provide APIs for specifying mapping metadata from the outside and focus on simple CRUD operations of your entities and mapping Cypher query results into arbitrary result object structure (DTOs, view objects).
+
+Spring Data Neo4j's single future mapping mode will then utilize these APIs to provide mapping meta-information from its annotations, run the CRUD operations for updating and reading entities and support Cypher execution and result handling like you already use today. 
+
+As all that relies on the execution of compound Cypher statements, you can do much more in a single call, depending on how clever the OGM will become.
+
+And going forward its performance will benefit from all Cypher performance improvements, new schema indexes (spatial and fulltext) and new remoting protocols.
+
+I'm really excited to accompany this work and see it advancing every day.
+If you want to get a glance of these developments, check out the GraphAware http://github.com/graphaware[GitHub repositories].
+But please be patient, this is work in progress in its early stages and although it progresses quickly, the first publicly usable version is still a while out.
+
+I hope you join me all on this journey and are excited as I am of these latest developments.

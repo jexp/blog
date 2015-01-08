@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Import</title>
+<title>Speeding up Remote Spring Data Neo4j</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,115 +413,417 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_speeding_up_remote_spring_data_neo4j">Speeding up Remote Spring Data Neo4j</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>With the first milestone of the <a href="https://spring.io/blog/2014/12/01/first-milestone-of-spring-data-release-train-fowler-available">Spring Data "Fowler" release train</a>, Spring Data Neo4j 3.3.0.M1 was released.
+Besides a lot of smaller fixes, it contains one big improvement.
+I finally found some time to work on the remoting performance of the library, i.e. when used in conjunction with Neo4j Server.
+This blog post explains the history behind the issue and the first steps taken to address it.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>In the past for many of its users, the remote performance of Spring Data Neo4j was not satisfying.
+The reasons for that were twofold - historical and development bandwidth.
+Let&#8217;s start with the history.</p>
+</div>
+<div class="sect2">
+<h3 id="_history">History</h3>
+<div class="paragraph">
+<p>When Spring Data Neo4j started, neither Cypher, nor Neo4j-Server existed, only the embedded Java APIs of Neo4j were available.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>So initially, the AspectJ-based, write- and read-through mapping mode and then later the simple mapping mode were built based on these in-process Java-APIs.</p>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
+<div class="paragraph">
+<p>Later adding Neo4j server support was made "easy" with the <code>java-rest-binding</code> library which pretended to be an embedded
+<code>GraphDatabaseService</code> API but actually made remote calls to the Neo4j Server REST endpoints for each of the API operations.</p>
+</div>
+<div class="paragraph">
+<p>Both were very bad ideas.
+Not just because network transparency is a <strong>very</strong> leaky abstraction.</p>
+</div>
+<div class="paragraph">
+<p>So what we ended up with was an Object-Graph-Mapper assuming to talk to an embedded database.
+In the embedded case, the frequency of API calls is not problematic, and re-fetching nodes and relationships by id was just a cache-hit away.</p>
+</div>
+<div class="paragraph">
+<p>But unknowingly making REST calls over the wire for each of the operations has quite an impact.</p>
+</div>
+<div class="paragraph">
+<p>So a call that took nanoseconds or less in embedded mode may have taken as long as your twice your network latency in the remote case.
+Combined with the number of calls it pretty quickly summed up to an unsatisfying remote performance of the whole library.</p>
+</div>
+<div class="paragraph">
+<p>Unfortunately fixing this it was not in the development bandwidth available to work on the library.
+In retrospect that was a really bad decision too, as many users (esp. in larger organizations) really like the Spring Data (Neo4j) convenience for CRUD and use-case specific operations.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_recommendations_for_working_with_neo4j_server">Recommendations for Working with Neo4j Server</h3>
+<div class="paragraph">
+<p>Usually I recommended to either <strong>move the persistence layer of such an SDN application into a server extension</strong> and just expose REST endpoints that use a domain level protocol.
+Or to <strong>rewrite complex remote mapping logic into a few cypher statements</strong> that will be executed within the server.</p>
+</div>
+<div class="paragraph">
+<p>Both suggestions are actually sensible and can improve the performance of your operations up to 20 times.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_performance_example">Performance Example</h3>
+<div class="paragraph">
+<p>To show the implications, I created a <a href="http://github.com/jexp/sdn-remote-save">small test project</a> that runs the same medium-complex SDN-mapping operations for each of the setups, creating 1000 medium size business objects (9 entities and 8 relationships with some properties):</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
+<p>on an embedded database,</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
+<p>against a SDN based server extension and</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
+<p>remotely via Spring Data Neo4j (3.2.1.RELEASE).</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>For completeness I also added two tests that indicate remote Cypher performance, once via JDBC and once via the SDN Cypher execution.</p>
+</div>
+<div class="paragraph">
+<p>The speed differences are quite big:</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 25%;">
+<col style="width: 25%;">
+<col style="width: 25%;">
+<col style="width: 25%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Mode</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Operations</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Time (ms)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Time/Op (ms)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SDN remote (3.2.1):</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1000</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">282385</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">282</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SDN embedded:</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1000</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">11879</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">11</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SDN server extension:</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1000</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">11879</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">16</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SDN  Cypher:</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1000</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">7739</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">7</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">JDBC Cypher:</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1000</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">5235</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">5</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>Fortunately lately I finally got around to addressing at least a few of the root causes.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_hotspots">Hotspots</h3>
+<div class="paragraph">
+<p>I looked into the hotspots of the remote execution, and fixed the ones with the highest impact.</p>
+</div>
+<div class="paragraph">
+<p>I refrained from rewriting the whole object graph mapping logic within SDN as this is a much larger effort and will be worked on by our partner <a href="http://graphaware.com">GraphAware</a> as part of the <em>SDN.next</em> efforts (see below).</p>
+</div>
+<div class="paragraph">
+<p>The places with the highest impact were:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Separate call to fetch node-labels as the REST-representation doesn&#8217;t expose labels</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
+<p>Continous re-fetching of nodes and relationships from the database as part of the simple mapping process (as only the ID is available in the <code>@GraphId</code> field of the actual entity).</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
+<p>setting properties individually via <code>propertyContainer.setProperty()</code> which is the only available API in embedded mode</p>
 </li>
 </ul>
 </div>
 </div>
+<div class="sect2">
+<h3 id="_transactionality">Transactionality</h3>
+<div class="paragraph">
+<p>The existing <code>java-rest-binding</code> library also can&#8217;t expose any transaction semantics over the wire, as each REST-operation creates a new independent transaction within Neo4j Server.</p>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
+<div class="paragraph">
+<p>The only approach that was supported for "larger transactions" was the REST-Batch-Operations which encapsulated a number of operations in one single large HTTP request.
+But that API didn&#8217;t allow to read your own writes within a transaction and making decisions based on that information.
+So this didn&#8217;t only remove transactional safety but also created a lot of tiny transactions which all had to be forcibly synched to disk by Neo4j.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_changes_impacting_performance">Changes impacting Performance</h3>
+<div class="paragraph">
+<p>I started by comparing the remote performance of single REST-API calls with the appropriate Cypher calls and found that the former are twice as fast for single and simple operations.
+Cypher has its strengths in more complex operations and in running multiple statements within the same transaction with the new transactional endpoint.</p>
+</div>
+<div class="paragraph">
+<p>As a first step, I inlined all the code of java-rest-binding that I still intended to use, into Spring Data Neo4j and removed the operations that were no longer relevant.
+So starting from that next version, the <code>java-rest-binding</code> dependency will no longer be used.</p>
+</div>
+<div class="paragraph">
+<p>For some quick gains I changed:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
+<p>load node with labels in one step using two batch-REST calls, only load labels from SDN if they are not already loaded</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
+<p>used label and id meta-information from Neo4j&#8217;s REST format for nodes since Neo4j 2.1.5</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
+<p>added a local client-cache for nodes loaded from the server, updates and refreshes will also go through this cache</p>
+</li>
+<li>
+<p>added a separate interface <code>UpdateableState</code> to <code>RestEntity</code> (nodes and relationships) that allows bulk-updates of properties</p>
+</li>
+<li>
+<p>changed node- and relationship-creation to utilize maps of properties for the initial <code>create</code> or <code>merge</code> call</p>
 </li>
 </ul>
 </div>
+<div class="paragraph">
+<p>All of those changes already improved the performance of the Spring Data Neo4j remote operations by a <strong>factor of 3</strong> as shown by the sample project, but it was still not good enough.</p>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
+<div class="sect2">
+<h3 id="_transactional_cypher_ftw">Transactional Cypher #FTW</h3>
+<div class="paragraph">
+<p>A you probably know Neo4j supports a <a href="http://neo4j.com/docs/stable/rest-api-transactional.html">streaming HTTP endpoint</a> that is able to run multiple Cypher statements per request and can keep a transaction running across multiple HTTP-requests.</p>
+</div>
+<div class="paragraph">
+<p>So although I originally wanted to use the Neo4j-JDBC driver, it was not yet available on Maven Central.
+So I deferred that and instead wrote a quick Jersey based <a href="https://github.com/spring-projects/spring-data-neo4j/blob/master/spring-data-neo4j-rest/src/main/java/org/neo4j/rest/graphdb/query/CypherTransaction.java">HTTP client for the transactional Cypher endpoint</a> which also supported batching of queries and running multiple HTTP requests within the same transaction.</p>
+</div>
+<div class="paragraph">
+<p>The internal API looks like this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-java" data-lang="java">query = "MATCH (n) where id(n) = {id} " +
+        "RETURN id(n) as id, labels(n) as labels, n as data";
+
+params = singletonMap("id",nodeId);
+
+tx = new CypherTransaction(url, ResultType.row);
+
+Result result = tx.send(query, params);
+tx.commit();
+
+// or
+
+tx.add(query, params);
+List&lt;Result&gt; results = tx.commit();
+tx.rollback();
+
+List&lt;String&gt; cols = result.getColumns();
+if (result.hasData()) {
+   Iterable&lt;List&lt;Object&gt;&gt; data = result.getData();
+}
+
+for (Map&lt;String,Object&gt; row : result) {
+   Long id = row.get("id");
+   List&lt;String&gt; = row.get("labels");
+   Map props = row.get("data");
+}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>I then rewrote all remote operations that were expressible with Cypher from REST-HTTP calls into parameterized Cypher statements, for instance the <a href="http://neo4j.com/docs/stable/rest-api-nodes.html#rest-api-create-node"><em>Create-Node</em></a> call into:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CREATE (n:`Label1`:`Label 2` {props})
+RETURN id(n) as id, labels(n) as labels, n as data</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This allowed me to set all the labels and properties of the node with a single <code>CREATE</code> operation and return the property <code>data</code> as well as the metadata like <code>id</code> and <code>labels</code> in a single call.
+I used the same return format consistently for nodes and relationships to map them easily back into the appropriate graph objects that SDN expects.
+The variant for relationships actually also returns start- and end-node-ids.</p>
+</div>
+<div class="paragraph">
+<p>The list of operations that were (re)written is pretty long:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
+<p>createNode, mergeNode</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
+<p>createRelationship</p>
+</li>
+<li>
+<p>getDegree, getRelationships</p>
+</li>
+<li>
+<p>findByLabelAndPropertyValue, findAllByLabel</p>
+</li>
+<li>
+<p>findByQuery (lucene)</p>
+</li>
+<li>
+<p>setProperty, setProperties, addLabel, removeLabel</p>
+</li>
+<li>
+<p>deleteNode, deleteRelationship</p>
+</li>
+<li>
+<p>&#8230;&#8203;</p>
 </li>
 </ul>
 </div>
+<div class="paragraph">
+<p>All other methods still forward to the existing REST operations (e.g. adding nodes to legacy indexes).
+The new Cypher based REST-Api-Impl also utilizes the node cache that I already mentioned.
+Some of these operations also send multiple statements on the same HTTP-request.</p>
+</div>
+<div class="paragraph">
+<p>All Cypher operations run within a transaction, if there is none running, a single transaction will be opened just for this operation.
+If there is already a transaction started (stored in a <code>ThreadLocal</code>), the following operations will participate in it.
+So if the transaction is started on the outside, e.g. on a method boundary (annotated with <code>@Transactional</code>) all operations in the same thread will continue to use <strong>that transaction</strong> until the transactional scope was closed by issuing a commit or rollback operation.</p>
+</div>
+<div class="paragraph">
+<p>To integrate this functionality with the outside, the Cypher based Rest-API exposes a method to create new Transactions.
+Those are held in a thread-local variable so that you can run independent threads with individual, concurrent transactions.</p>
+</div>
+<div class="paragraph">
+<p>For integration with the Java world, aka. JTA, I also implemented a <code>javax.transaction.TransactionManager</code> on top of that API which can be used on its own.
+But of course for integrating with Spring it is injected into a <code>Jta(Platform)TransactionManager</code> in the Spring Data Neo4j configuration.</p>
+</div>
+<div class="paragraph">
+<p>So whenever you annotate a method or class with <code>@Transactional</code>, the Spring transaction infrastructure will use that bean to tie into the remote transaction mechanism provided by the transactional Cypher endpoint.</p>
+</div>
+<div class="paragraph">
+<p>It was pretty cool that it worked out of the box after I brought the individual pieces together.</p>
+</div>
+<div class="paragraph">
+<p>To make this new remote integration usable from Spring Data Neo4j I created a <code>SpringCypherRestGraphDatabase</code> (an implementation of the SDN-<code>Database</code> API that is more comprehensive than Neo4j&#8217;s <code>GraphDatabaseService</code>).</p>
+</div>
+<div class="paragraph">
+<p><strong>This is what you should use now to connect your Spring Data Neo4j application remotely to a Neo4j Server.</strong></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-java" data-lang="java">@EnableNeo4jRepositories("org.neo4j.example.repositories")
+@EnableTransactionManagement(mode = AdviceMode.PROXY)
+@Configuration
+@ComponentScan("org.neo4j.example.services")
+public static class RemoteConfiguration extends Neo4jConfiguration {
+    public RemoteConfiguration() {
+        setBasePackage("org.neo4j.example.domain");
+    }
+
+    @Bean
+    public GraphDatabaseService graphDatabaseService() {
+        return new SpringCypherRestGraphDatabase(BASE_URI);
+    }
+}</code></pre>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>The steps taken here improved the performance of the use-case we were looking at by a factor of 8, which is not that bad.</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 25%;">
+<col style="width: 25%;">
+<col style="width: 25%;">
+<col style="width: 25%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Mode</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Operations</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Time (ms)</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Time/Op (ms)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SDN remote (3.2.1):</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1000</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">282385</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">282</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SDN remote (3.3.0):</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1000</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">38151</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><strong>38</strong></p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>My changes only addressed the remoting aspect of this challenge, the next step is to think big.</p>
 </div>
 </div>
+<div class="sect2">
+<h3 id="_ad_astra_sdn_next">Ad Astra - SDN.next</h3>
+<div class="paragraph">
+<p>We started work on completely rewriting the internals of Spring Data Neo4j to embrace a single, fast object graph mapping library for Neo4j.</p>
 </div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>As part of this effort which is mainly developed by our partner <a href="http://graphaware.com">GraphAware</a> in London, we will simplify the architecture that Spring Data Neo4j is built on.</p>
 </div>
+<div class="paragraph">
+<p>While we will keep the external APIs that you see as SDN users, as stable as possible, the internals will change completely.</p>
 </div>
+<div class="paragraph">
+<p>The idea is to build a fast, pure Java-Object Graph Mapper that utilizes the transactional Cypher Endpoint.
+It will provide APIs for specifying mapping metadata from the outside and focus on simple CRUD operations of your entities and mapping Cypher query results into arbitrary result object structure (DTOs, view objects).</p>
 </div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Spring Data Neo4j&#8217;s single future mapping mode will then utilize these APIs to provide mapping meta-information from its annotations, run the CRUD operations for updating and reading entities and support Cypher execution and result handling like you already use today.</p>
+</div>
+<div class="paragraph">
+<p>As all that relies on the execution of compound Cypher statements, you can do much more in a single call, depending on how clever the OGM will become.</p>
+</div>
+<div class="paragraph">
+<p>And going forward its performance will benefit from all Cypher performance improvements, new schema indexes (spatial and fulltext) and new remoting protocols.</p>
+</div>
+<div class="paragraph">
+<p>I&#8217;m really excited to accompany this work and see it advancing every day.
+If you want to get a glance of these developments, check out the GraphAware <a href="http://github.com/graphaware">GitHub repositories</a>.
+But please be patient, this is work in progress in its early stages and although it progresses quickly, the first publicly usable version is still a while out.</p>
+</div>
+<div class="paragraph">
+<p>I hope you join me all on this journey and are excited as I am of these latest developments.</p>
+</div>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-01-08 15:50:30 CET
+Last updated 2014-12-09 08:17:51 CET
 </div>
 </div>
 </body>

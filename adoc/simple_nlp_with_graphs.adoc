@@ -1,0 +1,312 @@
+= Natural Language Analytics made simple and visual with Neo4j
+
+:neo4j-version: neo4j-2.1
+
+I was really impressed by this blog post on http://maxdemarzi.com/2012/08/10/summarize-opinions-with-a-graph-part-1/[Summarizing Opinions with a Graph] from http://twitter.com[Max] and always waited for Part 2 to show up :)
+
+The blog post explains an really interesting approach by http://twitter.com/kav_gan[Kavita Ganesan] which uses a graph representation of sentences of review content to extract the most significant statements about a product.
+
+image::http://maxdemarzidotcom.files.wordpress.com/2012/07/opiniosis_overview.png?w=800[]
+
+Each word of the sentence is represented by a shared node in the graph with order of words being reflected by relationships pointing to the next word, which carries the sentence-id and a positional information of the leading word.
+
+By just looking at the graph structure, it turns out that the most significant statements (positive or negative) are repeated across many reviews.
+Differences in formulation or inserted fill words only affect the graph structure minimally but reinforce it for the parts where they overlap.
+
+You can find all the details of the approach in this http://kavita-ganesan.com/system/files/private/opinosis-presentation.ppt.pdf[presentation] or the http://www.kavita-ganesan.com/opinosis[accompanying research].
+
+I always joked that you could create this graph representation without programming just by writing a simple Cypher statement, but I actually never tried.
+
+Until now, and to be honest I'm impressed how easy it was to write down the essence and then extend and expand the statement until it covered a large number of inputs.
+
+The essence of creating the graph can be formulated as: "Each word of the sentence is represented by a shared node in the graph with order of words being reflected by relationships pointing to the next word".
+
+In Cypher:
+
+[source,cypher]
+----
+// "Great device but the calls drop too frequently"
+WITH split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+CREATE (w1)-[:NEXT]->(w2);
+----
+
+//hide
+[source,cypher]
+----
+WITH split("Great device but the calls drop too frequently"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]->(w2);
+----
+
+Running this statement with the two example reviews from the aforementioned blog post generates this graph representation:
+
+// // graph
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_phones.svg[]
+
+
+Pretty cool, I can also run queries for instance to find common phrases (for phones):
+
+[source,cypher]
+----
+MATCH path = (w:Word {name:"calls"})-[:NEXT*..3]->()
+RETURN [n in nodes(path) | n.name] as phrase
+LIMIT 5;
+----
+
+// table
+
+|===
+
+| phrase
+| [calls, drop]
+| [calls, drop, frequently]
+| [calls, drop, frequently, with]
+| [calls, drop, too]
+| [calls, drop, too, frequently]
+
+|===
+
+The Cypher features used so far:
+
+* `WITH` to provide data to the next query statement
+* `split()` to split text along delimiters
+* `size()` for the size of collections and strings
+* `range()` to create a range of numbers
+* `UNWIND` to turn a collection into result rows
+* collection index access to get the individual words
+* MERGE to "find-or-create" data in the graph, with a label `:Word` for each of the nodes and a property `name`
+* CREATE to create the relationship between two nodes (You would want to use MERGE on the relationship in this concrete case)
+
+For `MERGE` to work efficiently you would want to create an constraint in your graph, like this:
+
+`CREATE CONSTRAINT ON (w:Word) ASSERT w.name IS UNIQUE;`
+
+== But I wanted moar features!
+
+So I added one after the other in quick succession, becoming happier as I went along as I didn't hit any real stumbling blocks.
+
+=== I want to record followship frequency
+
+_Easy, use ON CREATE and ON MATCH with MERGE_
+
+[source,cypher]
+----
+WITH split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[r:NEXT]->(w2) 
+  ON CREATE SET r.count = 1 ON MATCH SET r.count = r.count +1;
+----
+
+=== I want to record the word frequencies too
+
+_Same approach, only note that the last word is only merged by the second statement_
+
+[source,cypher]
+----
+WITH split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]}) 
+  ON CREATE SET w1.count = 1 ON MATCH SET w1.count = w1.count + 1
+MERGE (w2:Word {name:words[idx+1]}) 
+  ON CREATE SET w2.count = 1 
+  ON MATCH SET w2.count = w2.count + (case when idx = size(words)-2 then 1 else 0 end)
+MERGE (w1)-[r:NEXT]->(w2) 
+  ON CREATE SET r.count = 1 
+  ON MATCH SET r.count = r.count +1;
+----
+
+=== I also want to sentence number and word position
+
+_I pass the sentence number from the the outside as `sid`, the position is `idx`_
+
+[source,cypher]
+----
+WITH 1 as sid, split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]}) 
+  ON CREATE SET w1.count = 1 ON MATCH SET w1.count = w1.count + 1
+MERGE (w2:Word {name:words[idx+1]}) 
+  ON CREATE SET w2.count = 1 
+  ON MATCH SET w2.count = w2.count + (case when idx = size(words)-2 then 1 else 0 end)
+MERGE (w1)-[r:NEXT]->(w2) 
+  ON CREATE SET r.count = 1, r.pos = [sid,idx] 
+  ON MATCH SET r.count = r.count +1, r.pos = r.pos = [sid,idx];
+----
+
+=== I want all words to be lower-case
+_Apply tolower() to the text_
+
+[source,cypher]
+----
+WITH "My phone calls drop frequently with the iPhone" as text
+WITH split(tolower(text)," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]->(w2)
+----
+
+=== I want to clean up punctuation
+_Just use replace() repeatedly with the text_
+
+[source,cypher]
+----
+with "Great device, but the calls drop too frequently." as text
+with replace(replace(tolower(text),".",""),",","") as normalized
+with split(normalized," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]->(w2)
+----
+
+=== I want to remove many punctuation symbols
+_Work over a collection of punctuations symbols with `reduce`_
+
+[source,cypher]
+----
+with "Great device, but the calls drop too frequently." as text
+with reduce(t=tolower(text), delim in [",",".","!","?",'"',":",";","'","-"] | replace(t,delim,"")) as normalized
+with split(normalized," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]->(w2)
+----
+
+=== I want to trim whitespace
+_Use trim() with *each* word of the collection_
+
+[source,cypher]
+----
+with "Great device, but the calls drop too frequently." as text
+with replace(replace(tolower(text),".",""),",","") as normalized
+with [w in split(normalized," ") | trim(w)] as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]->(w2)
+----
+
+=== I want to filter out stop words
+_Filter the words after splitting and trimming by checking against a collection with `IN`_
+
+[source,cypher]
+----
+with "Great device, but the calls drop too frequently." as text
+with replace(replace(tolower(text),".",""),",","") as normalized
+with [w in split(normalized," ") | trim(w)] as words
+with [w in words WHERE NOT w IN ["the","an","on"]] as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]->(w2)
+----
+
+
+//hide
+.Cleanup
+[source,cypher]
+----
+match (n) optional match (n)-[r]-() delete n,r
+----
+
+=== I want to load the text from a file
+_LOAD CSV actually doesn't care if the file is a CSV or not_
+
+We use the Lord of the Rings poem of the http://en.wikipedia.org/wiki/One_Ring[_One Ring_] as input, locatd in a https://dl.dropboxusercontent.com/u/14493611/one-ring.txt[dropbox text file].
+
+`LOAD CSV` loads each row as array of strings (when not used with a header row), using the provided field terminator (comma by default). 
+If we choose a full stop as a field terminator, it actually splits on sentence ends (mostly).
+So we can just unwind each row into it's cells (text fragments) and then treat each of those as we did a piece of text before.
+
+----
+Three Rings for the Elven-kings under the sky,
+Seven for the Dwarf-lords in their halls of stone,
+Nine for Mortal Men doomed to die,
+One for the Dark Lord on his dark throne
+In the Land of Mordor where the Shadows lie.
+One Ring to rule them all, One Ring to find them,
+One Ring to bring them all and in the darkness bind them
+In the Land of Mordor where the Shadows lie.
+----
+
+[source,cypher]
+----
+load csv from "https://dl.dropboxusercontent.com/u/14493611/one-ring.txt" as row fieldterminator "."
+with row
+unwind row as text
+with reduce(t=tolower(text), delim in [",",".","!","?",'"',":",";","'","-"] | replace(t,delim,"")) as normalized
+with [w in split(normalized," ") | trim(w)] as words
+unwind range(0,size(words)-2) as idx
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[r:NEXT]->(w2) 
+  ON CREATE SET r.count = 1 ON MATCH SET r.count = r.count +1
+----
+
+=== I want to ingest really large files
+_Prefix your LOAD CSV with USING PERIODIC COMMIT X for committing after X rows_
+
+
+[source,cypher]
+----
+using periodic commit 1000
+load csv from "https://dl.dropboxusercontent.com/u/14493611/one-ring.txt" as row fieldterminator "."
+with row
+unwind row as text
+with reduce(t=tolower(text), delim in [",",".","!","?",'"',":",";","'","-"] | replace(t,delim,"")) as normalized
+with [w in split(normalized," ") | trim(w)] as words
+unwind range(0,size(words)-2) as idx
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[r:NEXT]->(w2)
+----
+
+//graph
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_ring.svg[]
+
+There are many ways how you can use the data, either follow what Kavita suggests in her paper or just play around freely with the graph, like I did below.
+
+Finding the most important phrase of the text is easy.
+Look for paths with high reference counts and compute a score of total reference counts of the paths and order by it.
+
+[source,cypher]
+----
+MATCH path = (w:Word)-[:NEXT*..5]->()
+WHERE ALL (r IN rels(path) WHERE r.count > 1)
+RETURN [w IN nodes(path)| w.name] AS phrase, reduce(sum=0,r IN rels(path)| sum + r.count) as score
+ORDER BY score DESC 
+LIMIT 1
+----
+
+//table
+
+|===
+
+|phrase |score
+
+| [one, ring, to] | 6
+
+|===
+
+// http://neo4j-console-21.herokuapp.com/?id=one_ring[Shareable Neo4j Console Link]

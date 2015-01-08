@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Import</title>
+<title>Natural Language Analytics made simple and visual with Neo4j</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -411,117 +411,411 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>Natural Language Analytics made simple and visual with Neo4j</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>I was really impressed by this blog post on <a href="http://maxdemarzi.com/2012/08/10/summarize-opinions-with-a-graph-part-1/">Summarizing Opinions with a Graph</a> from <a href="http://twitter.com">Max</a> and always waited for Part 2 to show up :)</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>The blog post explains an really interesting approach by <a href="http://twitter.com/kav_gan">Kavita Ganesan</a> which uses a graph representation of sentences of review content to extract the most significant statements about a product.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="http://maxdemarzidotcom.files.wordpress.com/2012/07/opiniosis_overview.png?w=800" alt="opiniosis overview">
+</div>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>Each word of the sentence is represented by a shared node in the graph with order of words being reflected by relationships pointing to the next word, which carries the sentence-id and a positional information of the leading word.</p>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
+<div class="paragraph">
+<p>By just looking at the graph structure, it turns out that the most significant statements (positive or negative) are repeated across many reviews.
+Differences in formulation or inserted fill words only affect the graph structure minimally but reinforce it for the parts where they overlap.</p>
+</div>
+<div class="paragraph">
+<p>You can find all the details of the approach in this <a href="http://kavita-ganesan.com/system/files/private/opinosis-presentation.ppt.pdf">presentation</a> or the <a href="http://www.kavita-ganesan.com/opinosis">accompanying research</a>.</p>
+</div>
+<div class="paragraph">
+<p>I always joked that you could create this graph representation without programming just by writing a simple Cypher statement, but I actually never tried.</p>
+</div>
+<div class="paragraph">
+<p>Until now, and to be honest I&#8217;m impressed how easy it was to write down the essence and then extend and expand the statement until it covered a large number of inputs.</p>
+</div>
+<div class="paragraph">
+<p>The essence of creating the graph can be formulated as: "Each word of the sentence is represented by a shared node in the graph with order of words being reflected by relationships pointing to the next word".</p>
+</div>
+<div class="paragraph">
+<p>In Cypher:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">// "Great device but the calls drop too frequently"
+WITH split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+CREATE (w1)-[:NEXT]-&gt;(w2);</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH split("Great device but the calls drop too frequently"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]-&gt;(w2);</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Running this statement with the two example reviews from the aforementioned blog post generates this graph representation:</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_phones.svg" alt="nlp cypher phones">
+</div>
+</div>
+<div class="paragraph">
+<p>Pretty cool, I can also run queries for instance to find common phrases (for phones):</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH path = (w:Word {name:"calls"})-[:NEXT*..3]-&gt;()
+RETURN [n in nodes(path) | n.name] as phrase
+LIMIT 5;</code></pre>
+</div>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 100%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">phrase</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop]</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, frequently]</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, frequently, with]</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, too]</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, too, frequently]</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>The Cypher features used so far:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
+<p><code>WITH</code> to provide data to the next query statement</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
+<p><code>split()</code> to split text along delimiters</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
+<p><code>size()</code> for the size of collections and strings</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
+<p><code>range()</code> to create a range of numbers</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
+<p><code>UNWIND</code> to turn a collection into result rows</p>
+</li>
+<li>
+<p>collection index access to get the individual words</p>
+</li>
+<li>
+<p>MERGE to "find-or-create" data in the graph, with a label <code>:Word</code> for each of the nodes and a property <code>name</code></p>
+</li>
+<li>
+<p>CREATE to create the relationship between two nodes (You would want to use MERGE on the relationship in this concrete case)</p>
 </li>
 </ul>
+</div>
+<div class="paragraph">
+<p>For <code>MERGE</code> to work efficiently you would want to create an constraint in your graph, like this:</p>
+</div>
+<div class="paragraph">
+<p><code>CREATE CONSTRAINT ON (w:Word) ASSERT w.name IS UNIQUE;</code></p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
+<h2 id="_but_i_wanted_moar_features">But I wanted moar features!</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>So I added one after the other in quick succession, becoming happier as I went along as I didn&#8217;t hit any real stumbling blocks.</p>
+</div>
+<div class="sect2">
+<h3 id="_i_want_to_record_followship_frequency">I want to record followship frequency</h3>
+<div class="paragraph">
+<p><em>Easy, use ON CREATE and ON MATCH with MERGE</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[r:NEXT]-&gt;(w2)
+  ON CREATE SET r.count = 1 ON MATCH SET r.count = r.count +1;</code></pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_i_want_to_record_the_word_frequencies_too">I want to record the word frequencies too</h3>
+<div class="paragraph">
+<p><em>Same approach, only note that the last word is only merged by the second statement</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+  ON CREATE SET w1.count = 1 ON MATCH SET w1.count = w1.count + 1
+MERGE (w2:Word {name:words[idx+1]})
+  ON CREATE SET w2.count = 1
+  ON MATCH SET w2.count = w2.count + (case when idx = size(words)-2 then 1 else 0 end)
+MERGE (w1)-[r:NEXT]-&gt;(w2)
+  ON CREATE SET r.count = 1
+  ON MATCH SET r.count = r.count +1;</code></pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_i_also_want_to_sentence_number_and_word_position">I also want to sentence number and word position</h3>
+<div class="paragraph">
+<p><em>I pass the sentence number from the the outside as <code>sid</code>, the position is `idx`</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH 1 as sid, split("My phone calls drop frequently with the iPhone"," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+  ON CREATE SET w1.count = 1 ON MATCH SET w1.count = w1.count + 1
+MERGE (w2:Word {name:words[idx+1]})
+  ON CREATE SET w2.count = 1
+  ON MATCH SET w2.count = w2.count + (case when idx = size(words)-2 then 1 else 0 end)
+MERGE (w1)-[r:NEXT]-&gt;(w2)
+  ON CREATE SET r.count = 1, r.pos = [sid,idx]
+  ON MATCH SET r.count = r.count +1, r.pos = r.pos = [sid,idx];</code></pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_i_want_all_words_to_be_lower_case">I want all words to be lower-case</h3>
+<div class="paragraph">
+<p><em>Apply tolower() to the text</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH "My phone calls drop frequently with the iPhone" as text
+WITH split(tolower(text)," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]-&gt;(w2)</code></pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_i_want_to_clean_up_punctuation">I want to clean up punctuation</h3>
+<div class="paragraph">
+<p><em>Just use replace() repeatedly with the text</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">with "Great device, but the calls drop too frequently." as text
+with replace(replace(tolower(text),".",""),",","") as normalized
+with split(normalized," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]-&gt;(w2)</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_i_want_to_remove_many_punctuation_symbols">I want to remove many punctuation symbols</h3>
+<div class="paragraph">
+<p><em>Work over a collection of punctuations symbols with `reduce`</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">with "Great device, but the calls drop too frequently." as text
+with reduce(t=tolower(text), delim in [",",".","!","?",'"',":",";","'","-"] | replace(t,delim,"")) as normalized
+with split(normalized," ") as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]-&gt;(w2)</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_i_want_to_trim_whitespace">I want to trim whitespace</h3>
+<div class="paragraph">
+<p><em>Use trim() with <strong>each</strong> word of the collection</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">with "Great device, but the calls drop too frequently." as text
+with replace(replace(tolower(text),".",""),",","") as normalized
+with [w in split(normalized," ") | trim(w)] as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]-&gt;(w2)</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_i_want_to_filter_out_stop_words">I want to filter out stop words</h3>
+<div class="paragraph">
+<p><em>Filter the words after splitting and trimming by checking against a collection with `IN`</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">with "Great device, but the calls drop too frequently." as text
+with replace(replace(tolower(text),".",""),",","") as normalized
+with [w in split(normalized," ") | trim(w)] as words
+with [w in words WHERE NOT w IN ["the","an","on"]] as words
+UNWIND range(0,size(words)-2) as idx
+
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[:NEXT]-&gt;(w2)</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">Cleanup</div>
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">match (n) optional match (n)-[r]-() delete n,r</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_i_want_to_load_the_text_from_a_file">I want to load the text from a file</h3>
+<div class="paragraph">
+<p><em>LOAD CSV actually doesn&#8217;t care if the file is a CSV or not</em></p>
+</div>
+<div class="paragraph">
+<p>We use the Lord of the Rings poem of the <a href="http://en.wikipedia.org/wiki/One_Ring"><em>One Ring</em></a> as input, locatd in a <a href="https://dl.dropboxusercontent.com/u/14493611/one-ring.txt">dropbox text file</a>.</p>
+</div>
+<div class="paragraph">
+<p><code>LOAD CSV</code> loads each row as array of strings (when not used with a header row), using the provided field terminator (comma by default).
+If we choose a full stop as a field terminator, it actually splits on sentence ends (mostly).
+So we can just unwind each row into it&#8217;s cells (text fragments) and then treat each of those as we did a piece of text before.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>Three Rings for the Elven-kings under the sky,
+Seven for the Dwarf-lords in their halls of stone,
+Nine for Mortal Men doomed to die,
+One for the Dark Lord on his dark throne
+In the Land of Mordor where the Shadows lie.
+One Ring to rule them all, One Ring to find them,
+One Ring to bring them all and in the darkness bind them
+In the Land of Mordor where the Shadows lie.</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">load csv from "https://dl.dropboxusercontent.com/u/14493611/one-ring.txt" as row fieldterminator "."
+with row
+unwind row as text
+with reduce(t=tolower(text), delim in [",",".","!","?",'"',":",";","'","-"] | replace(t,delim,"")) as normalized
+with [w in split(normalized," ") | trim(w)] as words
+unwind range(0,size(words)-2) as idx
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[r:NEXT]-&gt;(w2)
+  ON CREATE SET r.count = 1 ON MATCH SET r.count = r.count +1</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_i_want_to_ingest_really_large_files">I want to ingest really large files</h3>
+<div class="paragraph">
+<p><em>Prefix your LOAD CSV with USING PERIODIC COMMIT X for committing after X rows</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">using periodic commit 1000
+load csv from "https://dl.dropboxusercontent.com/u/14493611/one-ring.txt" as row fieldterminator "."
+with row
+unwind row as text
+with reduce(t=tolower(text), delim in [",",".","!","?",'"',":",";","'","-"] | replace(t,delim,"")) as normalized
+with [w in split(normalized," ") | trim(w)] as words
+unwind range(0,size(words)-2) as idx
+MERGE (w1:Word {name:words[idx]})
+MERGE (w2:Word {name:words[idx+1]})
+MERGE (w1)-[r:NEXT]-&gt;(w2)</code></pre>
+</div>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_ring.svg" alt="nlp cypher ring">
+</div>
+</div>
+<div class="paragraph">
+<p>There are many ways how you can use the data, either follow what Kavita suggests in her paper or just play around freely with the graph, like I did below.</p>
+</div>
+<div class="paragraph">
+<p>Finding the most important phrase of the text is easy.
+Look for paths with high reference counts and compute a score of total reference counts of the paths and order by it.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH path = (w:Word)-[:NEXT*..5]-&gt;()
+WHERE ALL (r IN rels(path) WHERE r.count &gt; 1)
+RETURN [w IN nodes(path)| w.name] AS phrase, reduce(sum=0,r IN rels(path)| sum + r.count) as score
+ORDER BY score DESC
+LIMIT 1</code></pre>
+</div>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">phrase</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">score</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">[one, ring, to]</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">6</p></td>
+</tr>
+</tbody>
+</table>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-01-08 15:50:30 CET
+Last updated 2015-01-08 15:39:42 CET
 </div>
 </div>
 </body>

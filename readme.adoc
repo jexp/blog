@@ -22,6 +22,7 @@ You find the posts on http://jexp.github.io/blog
 == Cypher
 
 * link:{base}/html/cleaning_up_cypher.html[Cleaning Out Your Graph]
+* link:{base}/html/simple_nlp_with_graphs.html[Natural Language Analytics made simple and visual with Neo4j]
 
 == Neo4j
 
@@ -33,6 +34,7 @@ You find the posts on http://jexp.github.io/blog
 
 == Spring Data Neo4j
 
+* link:{base}/html/improving_remote_spring_data_neo4j_performance.html[Spring Data Neo4j 3.3.0 - Improving Remoting Performance]
 * link:{base}/html/sdn_config.html[Spring Data Neo4j 3.0 - Configuration Changes]
 
 //* link:{base}/html/impermanent_server.html[]
