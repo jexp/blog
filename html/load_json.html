@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Latest (2015-05-31)</title>
+<title>Cypher: LOAD JSON from URL AS data</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,169 +413,448 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_cypher_load_json_from_url_as_data">Cypher: LOAD JSON from URL AS data</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>///
+Some time ago, my friend <a href="http://twitter.com/markhneedham">Mark</a> and I wrote a proposal implementation for a <code>LOAD JSON</code> clause for the <a href="http://neo4j.com/developer/cypher">Cypher Query language</a> of Neo4j.
+Unfortunately it never made it in.
+///</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>Neo4j&#8217;s query language <a href="http://neo4j.com/developer/cypher">Cypher</a> supports loading data from CSV directly but not from JSON files or URLs.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>Almost every site offers some kind of API or endpoint that returns JSON and we can also query many NOSQL databases via HTTP and get JSON responses back.</p>
 </div>
-<div class="sect1">
-<h2 id="_latest_2015_05_31">Latest (2015-05-31)</h2>
-<div class="sectionbody">
+<div class="paragraph">
+<p>It&#8217;s quite useful to be able to ingest document structured information from all those different sources into a more usable graph model.</p>
+</div>
+<div class="paragraph">
+<p>I want to show here that retrieving that data and ingesting it into Neo4j using Cypher is really straightforward and takes only little effort.</p>
+</div>
+<div class="paragraph">
+<p>As Cypher is already pretty good at deconstructing nested documents, it&#8217;s actually not that hard to achieve it from a tiny program.</p>
+</div>
+<div class="paragraph">
+<p>I want to show you today how you can achieve this from Python, Javascript, Ruby, Java, and Bash.</p>
+</div>
+<div class="sect2">
+<h3 id="_the_domain_stackoverflow">The Domain: StackOverflow</h3>
+<div class="paragraph">
+<p>Being a developer I love StackOverflow. Just crossed 20k reputation by only answering 1100 <a href="http://stackoverflow.com/questions/tagged/neo4j">Neo4j related questions</a> :). You can do that too.
+That&#8217;s why I want to use StackOverflow users with their question, answers and comments and tags as our domain today.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="http://logonoid.com/images/stack-overflow-logo.png" alt="stack overflow logo" width="600">
+</div>
+</div>
+<div class="paragraph">
+<p>Pulling StackOverflow information into a graph model allows me to find interesting insights, like:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
+<p>what are the people asking or answering about Neo4j also interested in,</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
+<p>how is their activity distributed across tags and between questions, answers and comments</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
+<p>which kinds of questions attract answers and which don&#8217;t</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
+<p>looking at my own data, which answers to what kinds of questions got the highest approval rates</p>
 </li>
 </ul>
 </div>
+<div class="paragraph">
+<p>We need some data and a model suited to answer those questions.</p>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_stackoverflow_api">StackOverflow API</h3>
+<div class="paragraph">
+<p>Stackoverflow offers an API to retrieve that information, it&#8217;s credential protected as usual, but there is the cool option to pre-generate an API-URL that encodes your secrets and allows you to retrieve data without sharing them.
+You can still control some parameters like tags, page size and page-number though.</p>
 </div>
+<div class="paragraph">
+<p>With this API-URL</p>
 </div>
+<div class="paragraph">
+<p><a href="https://api.stackexchange.com/2.2/questions?pagesize=100&amp;order=desc&amp;sort=creation&amp;tagged=neo4j&amp;site=stackoverflow&amp;filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf" class="bare">https://api.stackexchange.com/2.2/questions?pagesize=100&amp;order=desc&amp;sort=creation&amp;tagged=neo4j&amp;site=stackoverflow&amp;filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf</a></p>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>We load the last 10 questions with the <code>Neo4j</code> tag.
+You get a <a href="#response">like this</a>.</p>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="title">Overall Response Structure</div>
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">{ "items": [{
+	"question_id": 24620768,
+	"link": "http://stackoverflow.com/questions/24620768/neo4j-cypher-query-get-last-n-elements",
+	"title": "Neo4j cypher query: get last N elements",
+ 	"answer_count": 1,
+ 	"score": 1,
+ 	.....
+ 	"creation_date": 1404771217,
+ 	"body_markdown": "I have a graph that contains a relationship between users, s....\r\nWhat I need is to delete the first relationship in this list. How can I do that?",
+ 	"tags": ["neo4j", "cypher"],
+ 	"owner": {
+ 		"reputation": 815,
+ 		"user_id": 1212067,
+        ....
+ 		"link": "http://stackoverflow.com/users/1212067/c%c3%a9sar-garc%c3%ada-tapia"
+ 	},
+ 	"answers": [{
+ 		"owner": {
+ 			"reputation": 488,
+ 			"user_id": 737080,
+ 			"display_name": "Chris Leishman",
+            ....
+ 		},
+ 		"answer_id": 24620959,
+ 		"share_link": "http://stackoverflow.com/a/24620959",
+        ....
+ 		"body_markdown": "The simplest would be to use an ... some discussion on this here: http://docs.neo4j.org/chunked/stable/cypherdoc-linked-lists.html)",
+ 		"title": "Neo4j cypher query: get last N elements"
+ 	}]
+ }</code></pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_graph_model">Graph Model</h3>
+<div class="paragraph">
+<p>So what does the graph-model look like?
+We can develop it by looking at the questions we want to answer and the entities and relationships they refer to.</p>
+</div>
+<div class="paragraph">
+<p>We need this model upfront to know where to put our data when we insert it into the graph.
+After all we don&#8217;t want to have loose ends.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="http://dl.dropboxusercontent.com/u/14493611/blog/img/stackoverflow_model.svg" alt="stackoverflow model">
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_cypher_import_statement">Cypher Import Statement</h3>
+<div class="paragraph">
+<p>The Cypher query to create that domain is also straightforward. You can deconstruct maps with dot notation <code>map.key</code> and arrays with slices <code>array[0..4]</code>.
+You&#8217;d use <code>UNWIND</code> to convert collections into rows and <code>FOREACH</code> to iterate over a collection with update statements.
+To create nodes and relationships we use <code>MERGE</code> and <code>CREATE</code> commands.</p>
+</div>
+<div class="paragraph">
+<p>The JSON response that we retrieved from the API call is passed in as a parameter <code>{json}</code> to the Cypher statement.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH {json} as data
+UNWIND data.items as q
+MERGE (question:Question {id:q.question_id}) ON CREATE
+  SET question.title = q.title, question.share_link = q.share_link, question.favorite_count = q.favorite_count
+
+MERGE (owner:User {id:q.owner.user_id}) ON CREATE SET owner.display_name = q.owner.display_name
+MERGE (owner)-[:ASKED]-&gt;(question)
+
+FOREACH (tagName IN q.tags | MERGE (tag:Tag {name:tagName}) MERGE (question)-[:TAGGED]-&gt;(tag))
+FOREACH (a IN q.answers |
+   MERGE (question)&lt;-[:ANSWERS]-(answer:Answer {id:a.answer_id})
+   MERGE (answerer:User {id:a.owner.user_id}) ON CREATE SET answerer.display_name = a.owner.display_name
+   MERGE (answer)&lt;-[:PROVIDED]-(answerer)
+)</code></pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_calling_cypher_with_the_json_parameters">Calling Cypher with the JSON parameters</h3>
+<div class="paragraph">
+<p>To pass in the JSON to Cypher we have to programmatically call the <a href="http://neo4j.com/docs/stable/rest-api-transactional.html">Cypher endpoint</a> of the Neo4j server, which can be done via one of the many <a href="http://neo4j.com/developer/language-guides">drivers for Neo4j</a> or manually.
+We can also call the Java API.</p>
+</div>
+<div class="paragraph">
+<p>So without further ado here are our examples:</p>
+</div>
+<div class="sect3">
+<h4 id="_python">Python</h4>
+<div class="paragraph">
+<p>We use the <a href="http://neo4j.com/developer/python/#_py2neo">py2neo driver</a> by Nigel Small to execute the statement:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-python" data-lang="python">import os
+import requests
+from py2neo import neo4j
+
+# Connect to graph and add constraints.
+neo4jUrl = os.environ.get('NEO4J_URL',"http://localhost:7474/db/data/")
+graph = neo4j.GraphDatabaseService(neo4jUrl)
+
+# Add uniqueness constraints.
+neo4j.CypherQuery(graph, "CREATE CONSTRAINT ON (q:Question) ASSERT q.id IS UNIQUE;").run()
+
+# Build URL.
+apiUrl = "https://api.stackexchange.com/2.2/questions...." % (tag,page,page_size)
+# Send GET request.
+json = requests.get(apiUrl, headers = {"accept":"application/json"}).json()
+
+# Build query.
+query = """
+UNWIND {json} AS data ....
+"""
+
+# Send Cypher query.
+neo4j.CypherQuery(graph, query).run(json=json)</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>We did something similar with getting <a href="http://neo4j.com/blog/oscon-twitter-graph/">tweets from the Twitter search API</a> into Ne4oj for the OSCON conference.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_javascript">Javascript</h4>
+<div class="paragraph">
+<p>For <a href="http://neo4j.com/developer/javascript/">JavaScript</a> I want to show how to call the transactional Cypher endpoint directly, by just using the <code>request</code> node module.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">var r=require("request");
+var neo4jUrl = (env["NEO4J_URL"] || "http://localhost:7474") + "/db/data/transaction/commit";
+
+function cypher(query,params,cb) {
+  r.post({uri:neo4jUrl,
+          json:{statements:[{statement:query,parameters:params}]}},
+         function(err,res) { cb(err,res.body)})
+}
+
+var query="UNWIND {json} AS data ....";
+var apiUrl = "https://api.stackexchange.com/2.2/questions....";
+
+r.get({url:apiUrl,json:true,gzip:true}, function(err,res,json) {
+  cypher(query,{json:json},function(err, result) { console.log(err, JSON.stringify(result))});
+});</code></pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="sect3">
+<h4 id="_java">Java</h4>
+<div class="paragraph">
+<p>With Java I want to show how to use the Neo4j embedded API.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-java" data-lang="java">import org.apache.http.*;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.neo4j.graphdb.*;
+
+// somewhere in your application-scoped setup code
+ObjectMapper mapper = new ObjectMapper();
+HttpClient http = HttpClients.createMinimal();
+GraphDatabaseService db = new GraphDatabaseFactory().newEmbeddedGraphDatabase(PATH);
+
+// execute API request and parse response as JSON
+HttpResponse response = http.execute(new HttpGet( apiUrl ));
+Map json = mapper.readValue(response.getEntity().getContent(), Map.class)
+
+// execute Cypher
+String query = "UNWIND {json} AS data ....";
+db.execute(query, singletonMap("json",json));
+
+// application scoped shutdown, or JVM-shutdown-hook
+db.shutdown();</code></pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_ruby">Ruby</h4>
+<div class="paragraph">
+<p>Using the neo4j-core Gem, we can talk to Neo4j server or embedded (using jRuby) by just changing a single line of configuration.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-ruby" data-lang="ruby">require 'rubygems'
+require 'neo4j-core'
+require 'rest-client'
+require 'json'
+
+QUERY="UNWIND {json} AS data ...."
+API = "https://api.stackexchange.com/2.2/questions...."
+
+res = RestClient.get(API)
+json = JSON.parse(res.to_str)
+
+session = Neo4j::Session.open
+session.query(QUERY, json: json)</code></pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_bash">Bash</h4>
+<div class="paragraph">
+<p>Bash is of course most fun, as we have to do fun substitutions to make this work.</p>
+</div>
+<div class="listingblock">
+<div class="title">load_json.sh</div>
+<div class="content">
+<pre class="highlight"><code class="language-shell" data-lang="shell">#!/bin/bash
+echo "Usage load_json.sh 'http://json.api.com?params=values' import_json.cypher"
+echo "Use {data} as parameter in your query for the JSON data"
+JSON_API="$1"
+QUERY=`cat "$2"` # cypher file
+JSON_DATA=`curl --compress -s -H accept:application/json -s "$JSON_API"`
+POST_DATA="{\"statements\":[{\"statement\": \"$QUERY\", \"parameters\": {\"data\":\"$JSON_DATA\"}}]}"
+DB_URL=${NEO4J_URL-http://localhost:7474}
+curl -i -H accept:application/json -H content-type:application/json -d "$POST_DATA" -XPOST "$DB_URL/db/data/transaction/commit"</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>So as you can see, even with <code>LOAD JSON</code> not being part of the language, it&#8217;s possible to retrieve JSON data from an API endpoint and deconstruct and insert it into Neo4j by just using plain Cypher.</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_example_use_cases">Example Use-Cases</h3>
+<div class="paragraph">
+<p>Here are some simple example queries that I now can run on top of this imported dataset.</p>
+</div>
+<div class="paragraph">
+<p>To not overload this blog post with too much information, we&#8217;ll answer our original questions in Part 2.</p>
+</div>
+<div class="sect3">
+<h4 id="_find_the_user_who_was_most_active">Find the User who was most active</h4>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (u:User)
+OPTIONAL MATCH (u)-[:PROVIDED|ASKED|COMMENTED]-&gt;()
+RETURN u,count(*)
+ORDER BY count(*) DESC
+LIMIT 5</code></pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="_find_co_used_tags">Find co-used Tags</h4>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (t:Tag)
+OPTIONAL MATCH (t)&lt;-[:TAGGED]-(question)-[:TAGGED]-&gt;(t2)
+RETURN t.name,t2.name,count(distinct question) as questions
+ORDER BY questions DESC</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (t:Tag)&lt;-[r:TAGGED]-&gt;(question)
+RETURN t,r,question</code></pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="response">Stackoverflow Response</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">{
+	"items": [{
+		"answers": [{
+			"owner": {
+				"reputation": 488,
+				"user_id": 737080,
+				"user_type": "registered",
+				"accept_rate": 45,
+				"profile_image": "https://www.gravatar.com/avatar/ffa6eed1e8a9c1b2adb37ca88c07dede?s=128&amp;d=identicon&amp;r=PG",
+				"display_name": "Chris Leishman",
+				"link": "http://stackoverflow.com/users/737080/chris-leishman"
+			},
+			"tags": [],
+			"comment_count": 0,
+			"down_vote_count": 0,
+			"up_vote_count": 2,
+			"is_accepted": false,
+			"score": 2,
+			"last_activity_date": 1404772223,
+			"creation_date": 1404772223,
+			"answer_id": 24620959,
+			"question_id": 24620768,
+			"share_link": "http://stackoverflow.com/a/24620959",
+			"body_markdown": "The simplest would be to use an ... some discussion on this here: http://docs.neo4j.org/chunked/stable/cypherdoc-linked-lists.html)",
+			"link": "http://stackoverflow.com/questions/24620768/neo4j-cypher-query-get-last-n-elements/24620959#24620959",
+			"title": "Neo4j cypher query: get last N elements"
+		}],
+		"tags": ["neo4j", "cypher"],
+		"owner": {
+			"reputation": 815,
+			"user_id": 1212067,
+			"user_type": "registered",
+			"accept_rate": 73,
+			"profile_image": "http://i.stack.imgur.com/nnyS1.png?s=128&amp;g=1",
+			"display_name": "C&amp;#233;sar Garc&amp;#237;a Tapia",
+			"link": "http://stackoverflow.com/users/1212067/c%c3%a9sar-garc%c3%ada-tapia"
+		},
+		"comment_count": 0,
+		"delete_vote_count": 0,
+		"close_vote_count": 0,
+		"is_answered": true,
+		"view_count": 14,
+		"favorite_count": 0,
+		"down_vote_count": 0,
+		"up_vote_count": 1,
+		"answer_count": 1,
+		"score": 1,
+		"last_activity_date": 1404772230,
+		"creation_date": 1404771217,
+		"question_id": 24620768,
+		"share_link": "http://stackoverflow.com/q/24620768",
+		"body_markdown": "I have a graph that contains a relationship between users, s....\r\nWhat I need is to delete the first relationship in this list. How can I do that?",
+		"link": "http://stackoverflow.com/questions/24620768/neo4j-cypher-query-get-last-n-elements",
+		"title": "Neo4j cypher query: get last N elements"
+	}, {
+		"tags": ["neo4j", "cypher"],
+		"owner": {
+			"reputation": 63,
+			"user_id": 845435,
+			"user_type": "registered",
+			"accept_rate": 67,
+			"profile_image": "https://www.gravatar.com/avatar/610458a30958c9d336ee691fa1a87369?s=128&amp;d=identicon&amp;r=PG",
+			"display_name": "user845435",
+			"link": "http://stackoverflow.com/users/845435/user845435"
+		},
+		"comment_count": 0,
+		"delete_vote_count": 0,
+		"close_vote_count": 0,
+		"is_answered": false,
+		"view_count": 16,
+		"favorite_count": 0,
+		"down_vote_count": 0,
+		"up_vote_count": 0,
+		"answer_count": 0,
+		"score": 0,
+		"last_activity_date": 1404768987,
+		"creation_date": 1404768987,
+		"question_id": 24620297,
+		"share_link": "http://stackoverflow.com/q/24620297",
+		"body_markdown": "I&amp;#39;m trying to implement a simple graph db for NYC subway................Thanks!\r\n",
+		"link": "http://stackoverflow.com/questions/24620297/cypher-query-with-infinite-relationship-takes-forever",
+		"title": "Cypher query with infinite relationship takes forever"
+	}],
+	"has_more": true,
+	"quota_max": 300,
+	"quota_remaining": 205
+}</code></pre>
+</div>
+</div>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-05-31 00:48:35 CEST
+Last updated 2015-03-19 03:17:26 CET
 </div>
 </div>
 </body>

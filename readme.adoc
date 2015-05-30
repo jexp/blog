@@ -5,7 +5,25 @@ Here is a list of the https://github.com/jexp/blog/tree/gh-pages/adoc[AsciiDoc s
 
 You find the posts on http://jexp.github.io/blog
 
+:toc:
+
+== Latest (2015-05-31)
+
+* link:{base}/html/load_json.html[LOAD JSON with Cypher]
+* link:{base}/html/neo4j_web_extension.html[Neo4j Server Extension to serve small Web-UI]
+* link:{base}/html/relational_to_neo4j_import_tool_weekend.html[Import Relational Database directly into Neo4j]
+* link:{base}/html/teaching_skills.html[Teaching Skills inspired by "Badass", Kathy Sierra]
+* link:{base}/html/simplest_import_example.html[Simplest LOAD CSV Import Example]
+
+== Learning & Teaching
+
+* link:{base}/html/teaching_skills.html[Teaching Skills inspired by "Badass", Kathy Sierra]
+
 == Import
+
+* link:{base}/html/load_json.html[LOAD JSON with Cypher]
+* link:{base}/html/relational_to_neo4j_import_tool_weekend.html[Import Relational Database directly into Neo4j]
+* link:{base}/html/simplest_import_example.html[Simplest LOAD CSV Import Example]
 
 * link:{base}/html/load_csv_with_success.html[Load CSV with Success]
 * link:{base}/html/flexible-batch-import.html[Flexible Neo4j Batch Import with Groovy]
@@ -21,14 +39,19 @@ You find the posts on http://jexp.github.io/blog
 
 == Cypher
 
-* link:{base}/html/cleaning_up_cypher.html[Cleaning Out Your Graph]
 * link:{base}/html/simple_nlp_with_graphs.html[Natural Language Analytics made simple and visual with Neo4j]
+* link:{base}/html/cleaning_up_cypher.html[Cleaning Out Your Graph]
 
 == Neo4j
+
+* link:{base}/html/xrebel_with_neo4j.html[Using XRebel 2 with Neo4j]
+* link:{base}/html/neo4j_indexes_match_and_merge.html[On Neo4j Indexes, MATCH and MERGE]
 
 * link:{base}/html/styling_neo4j_server_visualisation.html[Styling Neo4j Server Visualisation]
 
 == Visualization
+
+* link:{base}/html/neo4j_web_extension.html[Neo4j Server Extension to serve small Web-UI]
 
 * link:{base}/html/ubigraph.html[Rendering a Neo4j Database in UbiGraph]
 

@@ -31,7 +31,7 @@ What would that mean for us? Some ideas:
 * Understand and internalize core concepts (graph thinking, patterns)
 * Quicker to useful skills / results (able to do stuff in 10 or 30 mins)
 * Master *smaller* skills faster
-* Don't teach bad skills (global graph queries, match/merge node w/o index, no limit, cartesian product)
+* Don't teach bad skills (global graph queries, match/merge node w/o index, no limit, cartesian	 product)
 * Let them run into problems firsthand, teach how to solve them
 * Eagerly use Query Plan Viz to highlight issues (typos, missing indexes, cartesian products, high db-hits, high cardinalities)
 * Use the Cypher Refcard and a FAQ much more for self-help
@@ -44,4 +44,4 @@ which is much more focused on practise, acquiring skills, applying them and enab
 
 Here is the first draft, I'd love if you could give us some feedback on it:
 
-http://gist.asciidoctor.org/?dropbox-14493611%2Fskill_based_neo4j_training.adoc
+http://gist.asciidoctor.org/?dropbox-14493611%2Fskill_based_neo4j_training.adoc[Draft "Neo4j Workshop"]

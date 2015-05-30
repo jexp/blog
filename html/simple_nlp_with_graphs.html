@@ -473,11 +473,6 @@ MERGE (w1)-[:NEXT]-&gt;(w2);</code></pre>
 <div class="paragraph">
 <p>Running this statement with the two example reviews from the aforementioned blog post generates this graph representation:</p>
 </div>
-<div class="imageblock">
-<div class="content">
-<img src="https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_phones.svg" alt="nlp cypher phones">
-</div>
-</div>
 <div class="paragraph">
 <p>Pretty cool, I can also run queries for instance to find common phrases (for phones):</p>
 </div>
@@ -488,31 +483,6 @@ RETURN [n in nodes(path) | n.name] as phrase
 LIMIT 5;</code></pre>
 </div>
 </div>
-<table class="tableblock frame-all grid-all spread">
-<colgroup>
-<col style="width: 100%;">
-</colgroup>
-<tbody>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">phrase</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop]</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, frequently]</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, frequently, with]</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, too]</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">[calls, drop, too, frequently]</p></td>
-</tr>
-</tbody>
-</table>
 <div class="paragraph">
 <p>The Cypher features used so far:</p>
 </div>
@@ -772,11 +742,6 @@ MERGE (w2:Word {name:words[idx+1]})
 MERGE (w1)-[r:NEXT]-&gt;(w2)</code></pre>
 </div>
 </div>
-<div class="imageblock">
-<div class="content">
-<img src="https://dl.dropboxusercontent.com/u/14493611/blog/img/nlp_cypher_ring.svg" alt="nlp cypher ring">
-</div>
-</div>
 <div class="paragraph">
 <p>There are many ways how you can use the data, either follow what Kavita suggests in her paper or just play around freely with the graph, like I did below.</p>
 </div>
@@ -793,24 +758,8 @@ ORDER BY score DESC
 LIMIT 1</code></pre>
 </div>
 </div>
-<table class="tableblock frame-all grid-all spread">
-<colgroup>
-<col style="width: 50%;">
-<col style="width: 50%;">
-</colgroup>
-<tbody>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">phrase</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">score</p></td>
-</tr>
-<tr>
-<td class="tableblock halign-left valign-top"><p class="tableblock">[one, ring, to]</p></td>
-<td class="tableblock halign-left valign-top"><p class="tableblock">6</p></td>
-</tr>
-</tbody>
-</table>
 <div class="paragraph">
-<p>You can also see this post in the full beauty of a [Neo4j Graph-Gist].</p>
+<p>You can also see this post in the full beauty of a <a href="http://gist.neo4j.org/?dropbox-14493611%2Fblog%2Fadoc%2Fsimple_nlp_with_graphs.adoc">Neo4j Graph-Gist</a>.</p>
 </div>
 </div>
 </div>
@@ -818,7 +767,7 @@ LIMIT 1</code></pre>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-01-08 15:56:36 CET
+Last updated 2015-01-08 15:58:16 CET
 </div>
 </div>
 </body>

@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Latest (2015-05-31)</title>
+<title>Using XRebel 2 with Neo4j</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,169 +413,106 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_using_xrebel_2_with_neo4j">Using XRebel 2 with Neo4j</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>At Spring.IO in Barcelona I met my pal Oleg from ZeroTurnaround and we looked at how the new <a href="https://zeroturnaround.com/software/xrebel">XRebel 2</a>
+integrates with <a href="http://neo4j.com">Neo4j</a>, especially with the remote access using the <strong>transactional Cypher http-endpoint</strong>.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>As you probably know, Neo4j currently offers a remoting API based on HTTP requests (a new binary protocol is in development).</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>Our <strong>JDBC driver</strong> utilizes that http-based protocol to connect to the database and execute parameterized statements while adhering to the JDBC APIs.</p>
 </div>
-<div class="sect1">
-<h2 id="_latest_2015_05_31">Latest (2015-05-31)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p><strong>XRebel</strong> is a lightweight Java Application Profiler which is loaded as java-agent and instruments your application.
+It traces runtime for web requests and records your backend-application CPU usage, database- (JDBC) and http-requests to other services.
+For web-applications it integrates automatically with the http-processing and injects profiling information into the response.</p>
 </div>
+<div class="sect2">
+<h3 id="_movies_webapp">Movies Webapp</h3>
+<div class="paragraph">
+<p>For this quick demo, we use the example <a href="http://neo4j.com/developer/example-project">Movies application</a> which is available for many programming languages from our <a href="http://neo4j.com/developer/language-guides">developer resources</a>.
+The application is just a plain Java webapp that serves three JSON endpoints to a simple Javascript frontend page.
+The backend connects to Neo4j via JDBC to retrieve the requested information via our <a href="http://neo4j.com/developer/cypher">Cypher</a> query language.</p>
 </div>
+<div class="paragraph">
+<p>To prepare for running our app, just <a href="http://neo4j.com/download">download, unzip and start Neo4j</a>, open it on <a href="http://localhost:7474/" class="bare">http://localhost:7474/</a> and run the <code>:play movies</code> statement in the Neo4j browser.
+Then we can get and build the application and run it.
+To test that it works, open the app in your browser at <a href="http://localhost:8080" class="bare">http://localhost:8080</a></p>
 </div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre>git clone http://github.com/neo4j-contrib/developer-resources
+cd developer-resources/language-guides/java/jdbc
+
+mvn compile exec:java -DmainClass="org.neo4j.example.movies.Movies"</pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_setup_with_xrebel">Setup with XRebel</h3>
+<div class="paragraph">
+<p>To use XRebel we just <a href="https://zeroturnaround.com/software/xrebel">download it, get an eval license</a> and attach the jar as a java-agent to our application.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code>MAVEN_OPTS="-javaagent:$HOME/Downloads/xrebel/xrebel.jar" mvn compile exec:java -DmainClass="org.neo4j.example.movies.Movies"</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>If we check our example application page again, we see a small green XRebel icon in the left corner.
+It provides access to the XRebel UI which has tabs for application performance, database queries, exceptions and more.</p>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="imageblock">
+<div class="content">
+<img src="../img/xrebel_icon.png" alt="xrebel icon">
 </div>
 </div>
+<div class="paragraph">
+<p>For our initial query for the "Matrix" movie, it shows both the request time for the web-application, as well as the database calls to Neo4j.
+Interestingly both the JDBC level as well as the underlying http calls to Neo4j are displayed.</p>
 </div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="imageblock">
+<div class="content">
+<img src="../img/xrebel_app.png" alt="xrebel app">
 </div>
 </div>
+<div class="paragraph">
+<p>If we uglify our app, that our queries are executed incorrectly, simulating a n+1 select, then that shows clearly up in XRebel as massive database interaction.</p>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="imageblock">
+<div class="content">
+<img src="../img/xrebel_database_n_plus_one.png" alt="xrebel database n plus one">
 </div>
 </div>
+<div class="paragraph">
+<p>Runtime Exceptions due to a programming error are also made immediately accessible from the XRebel UI.</p>
 </div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>For non-visual REST-services you can access the same profiling information via a special endpoint that is added to your application, in our case: <a href="http://localhost:8080/xrebel" class="bare">http://localhost:8080/xrebel</a></p>
 </div>
+<div class="paragraph">
+<p>As you can see, XRebel can give you quick insights in the performance profile of your Neo4j backed application and highlights which queries / pages / secondary requests
+need further optimization.</p>
 </div>
+<div class="paragraph">
+<p>Ping <a href="http://twitter.com/shelajev">Oleg</a> or <a href="http://twitter.com/mesirii">me</a> if you have more questions.</p>
 </div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>If you&#8217;re in London this week and want to have a relaxing election day,
+make sure to grab a seat for <a href="http://graphconnect.com">GraphConnect</a> on May 7, <strong>the</strong> Neo4j conference.
+Ping me via email (michael at neo4j.org) for a steep discount a an avid reader of this blog.</p>
+</div>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-05-31 00:48:35 CEST
+Last updated 2015-05-05 14:08:37 CEST
 </div>
 </div>
 </body>

@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Latest (2015-05-31)</title>
+<title>Building an Import Tool for Relational to Neo4j over one Weekend</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,169 +413,166 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_building_an_import_tool_for_relational_to_neo4j_over_one_weekend">Building an Import Tool for Relational to Neo4j over one Weekend</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>Last Saturday Night around 11pm when the family was fast asleep, I decided to finally write a tool that I had wanted to build for a while&#8230;&#8203;</p>
+</div>
+<div class="sect2">
+<h3 id="_an_automatic_importer_for_relational_databases_into_neo4j">An automatic importer for relational databases into Neo4j.</h3>
+<div class="paragraph">
+<p>I had all the ingredients at hand</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>JDBC for accessing relational databases, and <a href="http://schemacrawler.sourceforge.net/how-to.html">SchemaCrawler</a> for a convenient way of extracting the meta-information. SchemaSpy would have worked as well.</p>
+</li>
+<li>
+<p><a href="http://neo4j.com/download#milestone">Neo4j 2.2</a> with its massively scalable parallel batch importer API (which is also the foundation for the <a href="http://neo4j.com/docs/milestone/import-tool.html">neo4j-import tool</a>).<br>
+This API also takes care of linking of nodes via external id&#8217;s (which don&#8217;t have to be stored).</p>
+</li>
+<li>
+<p>And a bunch of ideas on how to declare rules for deciding what should become a node and what a relationship:</p>
+</li>
+</ol>
+</div>
+<div class="sect3">
+<h4 id="_my_transformation_rules">My Transformation Rules:</h4>
+<div class="ulist">
+<ul>
+<li>
+<p>tables become <strong>nodes</strong>, the primary key becomes the linking-id (doesn&#8217;t have to be stored)</p>
+</li>
+<li>
+<p>foreign keys for 1:1, 1:n and n:1 references become relationships from that node</p>
+</li>
+<li>
+<p>if a table has no primary key and two foreign-keys it becomes a <strong>relationship</strong></p>
+</li>
+<li>
+<p>tables and fields can be skipped</p>
+</li>
+<li>
+<p>their names can be transformed (with a distinction between labels and relationship-types)</p>
+</li>
+<li>
+<p>column values can be transformed as well (e.g. dates or decimals), null values are skipped</p>
+</li>
+</ul>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>Implementing the tool was pretty straightforward, so everyone should be able to do something similar.
+Some details were a bit devilish, I&#8217;ll mention these in the appropriate places.
+The following sections explain some of the technical details, if you&#8217;re only interested in how to use the tool jump forward to the <a href="#example_section">Example</a>.</p>
+</div>
+<div class="sidebarblock">
+<div class="content">
+<div class="paragraph">
+<p>The class orchestrating the import is called <code>DataImporter</code>. You can call its main method with JDBC-URL, schema-name and Neo4j directory name.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>The first step was connecting to the relational database using the provided <em>JDBC-URL</em>.
+Extracting the database metadata into our own <code>TableInfo</code>-objects was next. I extracted table name, primary and foreign keys. This happens in <code>MetaDataReader</code>.</p>
 </div>
-<div class="sect1">
-<h2 id="_latest_2015_05_31">Latest (2015-05-31)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Next in line was setting up the [ParallelBatchImporter] with default values for configuration, loggers and monitors.
+It expects its <code>Input</code> as two Iterables for <code>InputNodes</code> and <code>InputRelationships</code>.</p>
+</div>
+<div class="paragraph">
+<p>For each of the tables found, I read their content using plain SQL in <code>DataReader</code> returning a <code>ResultSet</code>.
+Those results are transformed in <code>Transformer.stream()</code> into InputNodes and InputRelationships according to the rules listed above.</p>
+</div>
+<div class="paragraph">
+<p>The tricky thing here was that one row can result in multiple Inputs (e.g. a row with several foreign keys to other tables), so I couldn&#8217;t use the Iterator abstraction.
+That&#8217;s why I decided to go with two blocking, limited Queues for nodes and relationships respectively which are filled from the transformed relational result streams.
+Using a Tombstone to signal the end of processing, I could convert the Queues to Iterators in a straightforward manner.</p>
+</div>
+<div class="paragraph">
+<p>The multi-pass approach of the parallel-importer API posed another challenge, which I worked around by filling multiple queues. This is an area that has to be improved.</p>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>My first test was a simple <em>Users being Friends</em> database that I created in memory using Apache Derby, that went pretty well.</p>
+</div>
+<div class="paragraph">
+<p>Looking for some MySQL demo databases, I found the <a href="http://dev.mysql.com/doc/sakila/en/sakila-structure.html">Sakila artist database</a> which could be imported out of the box but highlighted a concurrency issue - the parallel importer had to be started in a separate thread so that the reading from the relational database could progress in parallel.</p>
+</div>
+<div class="paragraph">
+<p>And the much larger <a href="https://dev.mysql.com/doc/employee/en/sakila-structure.html">employees database</a>.
+This one showed some peculiarities especially around composite primary and foreign keys. Especially foreign keys that are the same time part of the primary key are nasty.
+This forced me to extend the originally simple meta-data-model to cater for these cases.</p>
+</div>
+<div class="paragraph">
+<p>But all prepared the tool really well for the final example.</p>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
+<div class="sect2">
+<h3 id="example_section">Example</h3>
+<div class="paragraph">
+<p>Of course the obligatory Northwind example couldn&#8217;t be left out.
+We also use it as an <a href="http://neo4j.com/developer/guide-importing-data-and-etl/">example for Cypher&#8217;s LOAD CSV statement</a> and to compare <a href="http://neo4j.com/developer/guide-sql-to-cypher">Cypher with SQL</a>.
+So I downloaded the import script
+<a href="https://code.google.com/p/northwindextended/downloads/detail?name=Northwind.MySQL5.sql">from here</a> and ran the it in my local MySQL server.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>myql -u root &lt; /path/to/Northwind.MySQL5.sql</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>I ran the import tool with these parameters: <code>import-rdbms-mvn.sh "jdbc:mysql://localhost:3306/northwind?user=root" "northwind" "northwind.db"</code>
+It extracted the metadata, and the row-data from MySQL and imported it in into Neo4j. All in 3 seconds.</p>
+</div>
+<div class="paragraph">
+<p>Looking at the meta-information in the Neo4j Browser shows that all expected labels and relationships are there.
+It nicely imported the <code>OrderDetails</code> and <code>EmployeeTerritories</code> JOIN-tables as relationships.</p>
+</div>
+<div class="sidebarblock">
+<div class="content">
+<div class="paragraph">
+<p>To see the database in Neo4j Browser, shutdown Neo4j first with <code>bin/neo4j stop</code> then you either have to</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
+<p>configure the path to the database in <code>conf/neo4j-server.properties</code> or</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
+<p>copy the directory contents into <code>data/graph.db</code></p>
 </li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+</ol>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="imageblock">
+<div class="content">
+<img src="../img/neo4j-import/northwind_import.png" alt="northwind import">
 </div>
 </div>
+<div class="paragraph">
+<p>As I was flying to London on Sunday I had enough time to finish the first iteration and write this blog post. So a weekend well spent.</p>
 </div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Here you can find the tool: <a href="https://github.com/jexp/neo4j-rdbms-import" class="bare">https://github.com/jexp/neo4j-rdbms-import</a></p>
 </div>
+<div class="paragraph">
+<p><strong>PLEASE</strong> test it out with your relational databases and send me feedback, best as <a href="https://github.com/jexp/neo4j-rdbms-import/issues">GitHub Issues</a>.</p>
 </div>
+<div class="paragraph">
+<p>There are some more ideas, especially around parallelizing the reads from the relational database,
+configuring the mentioned rules and transformation and packaging it all up in to a nice little tool that can also be used by non-developers.</p>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-05-31 00:48:35 CEST
+Last updated 2015-03-04 02:34:35 CET
 </div>
 </div>
 </body>
