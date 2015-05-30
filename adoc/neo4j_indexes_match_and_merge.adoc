@@ -1,0 +1,169 @@
+== On Neo4j Indexes, Match & Merge
+
+We at Neo4j do our fair share to cause confusion of our users. I'm talking about indexes my friends.
+My trusted colleague Nigel Small already did a great job explaining the http://nigelsmall.com/neo4j/index-confusion[Index Confusion], 
+I want to add a few more aspects here.
+
+[quote,Nigel Small]
+____
+Since the release of Neo4j 2.0 and the introduction of schema indexes, I have had to answer an increasing number of questions arising from confusion between the two types of index now available: http://neo4j.com/docs/stable/query-schema-index.html[schema indexes] and http://neo4j.com/docs/stable/indexing.html[legacy indexes]. 
+*For clarification, these are two completely different concepts and are not interchangable or compatible in any way.*
+It is important, therefore, to make sure you know which you are using.
+____
+
+Why do we indexes in a graph database at all, aren't we all about graph navigation? 
+To quickly find *starting points* for your graph traversals or pattern matches.
+
+== Schema Indexes
+
+[quote,Nigel Small]
+____
+Neo4j 2.0 introduced the optional schema which was built around the concept of node labels. 
+Labels can be used for path matching and - along with properties - are used as the basis for schema indexes and constraints. 
+Schema indexes can automatically speed up queries, unlike legacy indexes which you have to use excplicitely.
+
+*Note: Only schema indexes are aware of labels; legacy indexes are completely and utterly unaware of labels.*
+
+Further Note: Schema indexes are also only available for nodes whereas legacy indexes allowed relationships to be indexed as well. 
+The use cases for relationship indexing were few and could generally be worked around by introducing extra nodes.
+____
+
+Today Neo4j uses *exact, case sensitive* automatic schema indexes and constraints based on a *single* label and *single* property.
+Labels and indexes are part of Neo4j's "optional" schema concept.
+
+=== Schema Indexes and MATCH
+
+You create a schema index with `CREATE INDEX ON :Label(property)` e.g. `CREATE INDEX ON :Person(name)`.
+
+You list available schema indexes (and constraints) and their status (`POPULATING`,`ONLINE`,`FAILED`) with `:schema` in the browser or `schema` in the shell.
+Always make sure that the indexes and constraints you want to use in your operations are *ONLINE* otherwise they won't be used and your queries will be slow.
+
+When you create a new schema index, it will also asynchronously index all existing nodes with that label and property combination. 
+After the index is available it will show as "ONLINE". Later changes to nodes (label addition and removal and property updates) are automatically and transactionally reflected in the index as well.
+
+You can await the index creation with `schema await`.
+
+[NOTE]
+Fulltext, spatial and composite schema indexes are not available as of Neo4j 2.2.
+
+*You need* to have an index or constraint to efficiently find starting nodes via `MATCH`, otherwise Neo4j has to run a full label scan with property comparisons to find your node which can be very expensive.
+
+Schema indexes will be used for both inline syntax `MATCH (p:Person {name:"Mark"})` as well as `WHERE` conditions `MATCH (p:Person) WHERE p.name="Mark"` and also IN predicates like  `MATCH (p:Person) WHERE p.name IN ["Mark","Max"]`.
+
+Neo4j uses schema indexes automatically, yet you can force certain index usage with hints like `USING INDEX p:Person(name)` after a `MATCH` clause.
+
+You can check that Neo4j actually uses an index, by prefixing your query with `EXPLAIN` and looking at the query plan visualization.
+It should show a `NodeIndexSeek` instead of a `NodeByLabelScan` + `Filter`
+
+Remember, that only a *single property* and *only the label* that you defined an index for is considered for lookups!
+
+=== Constraints and MERGE
+
+A `MERGE` operation will also use the index for faster lookups, but an index alone doesn't guarantee uniqueness of nodes.
+
+That's where *unique constraints* come into play, again for a *single label and single property.*
+You create them with this unwieldy syntax `CREATE CONSTRAINT ON (n:Label) ASSERT n.property IS UNIQUE`, e.g. `CREATE CONSTRAINT ON (b:Book) ASSERT b.isbn IS UNIQUE`
+
+Constraints will, on creation check all nodes in the database with that label and property combination for uniqueness and will fail if there are duplicates and list them.
+Constraint creation is blocking.
+It will only return after the constraint has been either successfully created ("ONLINE") or been aborted ("FAILED").
+
+Each constraint creates an accompanying index which is noted in the listing, the constraint creation will fail if the same index already existed.
+
+Unique constraints will ensure that no other operation will create a node with a duplicate label+property-value combination by failing the transaction with an exception.
+That goes for all operations like `CREATE` node, `SET` propert-value, `ADD` label and also for calls via the Java-API.
+
+`MERGE` uses constraints for an *efficient lookup and uniqueness check* as well as acquiring a *focused lock* which guarantees uniqueness even in concurrent operations and across a cluster.
+
+If you need to set other properties as part of your node-creation, use the `ON CREATE SET` option: 
+`MERGE (b:Book {isbn:{isbn}}) ON CREATE SET p.title = {title}, p.year = {year}`
+
+[NOTE]
+Other types of constraints, e.g. property (type) or composite constraints are not available as of Neo4j 2.2
+
+=== Composite Constraints (and Indexes)
+
+If you really need composite-key constraints or index lookups consider concatenating the values into an artificial id-property or use an array with those composite values as "id". For example:
+
+[source,cypher]
+----
+CREATE CONSTRAINT ON (a:Address) assert a.composite_id IS UNIQUE;
+
+MERGE (a:Address {composite_id: [{zip},{street},{number}]}) ON CREATE SET a.zip = {zip}, a.street={street}, a.number = {number};
+// or
+MERGE (a:Address {composite_id: {zip}+"_"+{street}+"_"+{number}}) ON CREATE SET a.zip = {zip}, a.street={street}, a.number = {number};
+----
+
+== Manual (Legacy,Deprecated) Indexes
+
+[quote,Nigel Small]
+____
+Prior to the release of Neo4j 2.0, legacy indexes were just called indexes. These were powered by Lucene outside the graph and allowed nodes and relationships to be indexed under a key:value pair. From the perspective of the REST interface, http://neo4j.com/docs/stable/rest-api-indexes.html[most things called "index"] will still refer to these legacy indexes.
+
+*Note: Legacy indexes were generally used as pointers to start nodes for a query; they provided no automatic ability to speed up queries.*
+____
+
+Historically there were *manual indexes* that you will come across in the documentation, old blog posts or examples.
+
+[NOTE]
+If you don't need a fulltext, spatial or relationship index or you don't have to deal with a "legacy" Neo4j application, *you can ignore them*. 
+Stop reading here.
+
+You had to add nodes and relationships (with key and value) to a named index yourself, that's why they're called "manual indexes".
+
+Those indexes were exact or fulltext Lucene indexes for nodes or relationships or spatial indexes for nodes.
+
+The Lucene indexes also optionally exposed the lucene query syntax and had configurable cases and analyzers.
+
+You could use manual indexes via the Java API or the `START` clause in Cypher, e.g. +
+`START post=node:posts("title:Graphs") match (post)<-[:WROTE]-(author) RETURN post,author`
+
+You manage them with the `index` command in the shell, you list them with `index --indexes`.
+
+There is also a http://localhost:7474/webadmin/#/index/[tab in the old Webadmin UI] that lists them.
+
+Legacy indexes also had options for unique node- and relationship-creation, which is now *superceded by MERGE with CONSTRAINTs*.
+
+== Deprecated Auto-Indexes
+
+Because people didn't like adding nodes and relationship manually but we didn't have labels back then, there was a way of having "automatic" indexes.
+
+You could configure exactly _one_ automatic index for all nodes (`node_auto_index`) and _one_ for all relationships (`relationship_auto_index`) by listing the properties that were to be indexed.
+
+You could use them again with the Java API and the `START` clause but this time with the fixed `_auto_index` name (see above).
+
+You still find the configuration options in the `neo4j.properties`config file, and the APIs both in Java as well as the REST endpoints.
+All of those are *safe to ignore*, except if you know what you're doing and you want to try to use an automatic spatial or fulltext index.
+Be aware that that is a tricky business.
+
+== So which should I use?
+
+[quote,Nigel Small]
+____
+
+If you are using Neo4j 2.0 or above and do not have to support legacy code from a pre-2.0 era, use only schema indexes and avoid legacy indexes. 
+Conversely, if you are stuck with an earlier version of Neo4j and are unable to upgrade, you only have one type of index available to you anyway.
+
+If you need full text indexing, regardless of Neo4j version, you will need to use legacy indexes.
+
+The more complicated scenarios are those that involve a period of transition from one type of index to another. 
+In these cases, make sure you are fully aware of the differences and try, wherever possible, to use either schema or legacy indexes but not both. 
+Mixing the two will often lead to more confusion.
+____
+
+*And if in doubt, ask a question on the http://groups.google.com/group/neo4j[Neo4j mailing list] or on http://stackoverflow.com/questions/tagged/neo4j[StackOverflow].*
+
+=== Indexing Information
+
+* http://nigelsmall.com/neo4j/index-confusion[Neo4j Index Confusion] by Nigel Small
+
+* http://neo4j.com/docs/stable/graphdb-neo4j.html#graphdb-neo4j-schema[Docs: Schema]
+* http://neo4j.com/docs/stable/query-schema-index.html[Docs: Schema Indexes]
+* http://neo4j.com/docs/stable/query-constraints.html[Docs: Schema Constraints]
+
+=== Legacy
+
+* http://jexp.de/blog/2014/03/full-text-indexing-fts-in-neo4j-2-0/[Full-Text Indexing in Neo4j 2.x]
+* http://neo4j.com/docs/stable/rest-api-indexes.html[Docs: Legacy Index: REST API]
+* http://neo4j.com/docs/stable/indexing.html[Docs: Legacy Index: Java API and Details]
+* http://neo4j.com/docs/stable/auto-indexing.html[Docs: Legacy Auto Index]

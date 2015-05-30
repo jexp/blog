@@ -1,0 +1,314 @@
+http://www.markhneedham.com/blog/2015/03/27/neo4j-generating-real-time-recommendations-with-cypher/
+
+http://graphgen.neoxygen.io/documentation/generic-faker-types
+http://graphgen.neoxygen.io/documentation/person-faker-types
+
+// Example :
+(person:Person {name:firstName,gender:{randomElement:["male","female"]},age: {randomElement: [20,25,30,35,40]}} *990)-[:FRIEND_OF *n..n]->(person)
+(person)-[:LIVES_IN *n..1]->(city:City {city: city} *10)
+
+create index on :Person(name);
+create index on :City(name);
+
+// Cypher version: CYPHER 2.2, planner: COST. 96394 total db hits in 490 ms.
+
+PROFILE
+MATCH (me:Person {name: "Alice"})
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend, COUNT(*) AS friendsInCommon
+ 
+WITH me,
+     potentialFriend,
+     SIZE((potentialFriend)-[:LIVES_IN]->()<-[:LIVES_IN]-(me)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+ 
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       sameLocation * 10 AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+RETURN potentialFriend,
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC
+
+// Cypher version: CYPHER 2.2, planner: COST. 48198 total db hits in 273 ms.
+// Displaying 774 nodes, 12452 relationships (completed with 12452 additional relationships).
+// todo returned nodes -> 943 nodes, 18k rels rendered -> massive UI load
+// todo mention returning nodes vs. just attributes 
+
+-> change to return only person.name
+
+PROFILE
+MATCH (me:Person {name: "Alice"})
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend, COUNT(*) AS friendsInCommon
+ 
+WITH me,
+     potentialFriend,
+     SIZE((potentialFriend)-[:LIVES_IN]->()<-[:LIVES_IN]-(me)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+ 
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       sameLocation * 10 AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+RETURN potentialFriend.name,
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC
+
+// no_index_return_prop
+Cypher version: CYPHER 2.2, planner: COST. 52715 total db hits in 165 ms.
+
+
+create index on :Person(name);
+
+// person_index_return_prop
+Cypher version: CYPHER 2.2, planner: COST. 49746 total db hits in 92 ms.
+
+// person_index_provide_city_return_prop
+
+Fetch the City upfront to save repeated lookup costs, and also to avoid the supernode problem (traverse across a city with million citizens)
+
+PROFILE
+MATCH (me:Person {name: "Alice"})-[:LIVES_IN]->(city)
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend,city, COUNT(*) AS friendsInCommon
+ 
+WITH me,
+     potentialFriend,
+     SIZE((potentialFriend)-[:LIVES_IN]->(city)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+ 
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       sameLocation * 10 AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+RETURN potentialFriend.name,
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC
+
+// Cypher version: CYPHER 2.2, planner: COST. 48124 total db hits in 189 ms.
+
+// pull friend filter first
+
+PROFILE
+MATCH (me:Person {name: "Alice"})-[:LIVES_IN]->(city)
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend,city, COUNT(*) AS friendsInCommon
+ 
+WITH me,
+     potentialFriend,
+     SIZE((potentialFriend)-[:LIVES_IN]->(city)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       sameLocation * 10 AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+RETURN potentialFriend.name,
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC
+
+
+person_index_friend_filter
+// Cypher version: CYPHER 2.2, planner: COST. 90737 total db hits in 113 ms.
+
+
+// city exists
+
+PROFILE
+MATCH (me:Person {name: "Alice"})-[:LIVES_IN]->(city)
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend,city, COUNT(*) AS friendsInCommon
+ 
+WITH me,
+     potentialFriend,
+     exists((potentialFriend)-[:LIVES_IN]->(city)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       case when sameLocation then 10 else 0 end AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+RETURN potentialFriend.name,
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC;
+
+// Cypher version: CYPHER 2.2, planner: COST. 90737 total db hits in 118 ms.
+
+
+PROFILE
+MATCH (me:Person {name: "Alice"})-[:LIVES_IN]->(city)
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend,city, COUNT(*) AS friendsInCommon
+
+WITH me,
+     potentialFriend,
+     exists((potentialFriend)-[:LIVES_IN]->(city)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       case when sameLocation then 10 else 0 end AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+RETURN potentialFriend.name,
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC
+LIMIT 10;
+
+// Cypher version: CYPHER 2.2, planner: COST. 90737 total db hits in 88 ms.
+
+// TODO
+PROFILE
+MATCH (me:Person {name: "Alice"})-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend:Person)
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend, COUNT(*) AS friendsInCommon
+RETURN count(*)
+```
+this results in a query plan with an expand-into but with massive db-hit costs, I expected those db-hits to be not bigger than the # of distinct friends (812) but it does 78000 db-hits
+
+// add WHERE friendsInCommon > 1
+
+PROFILE
+MATCH (me:Person {name: "Alice"})-[:LIVES_IN]->(city)
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend,city, COUNT(*) AS friendsInCommon
+WHERE friendsInCommon > 1
+ 
+WITH me,
+     potentialFriend,
+     exists((potentialFriend)-[:LIVES_IN]->(city)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+
+
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       case when sameLocation then 10 else 0 end AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+RETURN potentialFriend.name,
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC LIMIT 10;
+
+==> +---------------------------------------------------------------------------------------------------------------------------------------------------------------+
+==> | potentialFriend.name | parts                                                                                                              | score             |
+==> +---------------------------------------------------------------------------------------------------------------------------------------------------------------+
+==> | "Nona"               | {friendsInCommon -> 72.4054067707757, sameLocation -> 10, ageDifference -> -3.312596950235779, sameGender -> 0}    | 79.09280982053991 |
+==> | "Leslie"             | {friendsInCommon -> 55.278640450004204, sameLocation -> 10, ageDifference -> -0.0, sameGender -> 10}               | 75.2786404500042  |
+==> | "Lera"               | {friendsInCommon -> 55.278640450004204, sameLocation -> 10, ageDifference -> -3.312596950235779, sameGender -> 10} | 71.96604349976843 |
+==> | "Ford"               | {friendsInCommon -> 55.278640450004204, sameLocation -> 10, ageDifference -> -3.312596950235779, sameGender -> 10} | 71.96604349976843 |
+==> | "Eleazar"            | {friendsInCommon -> 61.92692122568242, sameLocation -> 0, ageDifference -> -3.312596950235779, sameGender -> 10}   | 68.61432427544665 |
+==> | "Rigoberto"          | {friendsInCommon -> 47.46944391192465, sameLocation -> 10, ageDifference -> -0.0, sameGender -> 10}                | 67.46944391192466 |
+==> | "Mabelle"            | {friendsInCommon -> 47.46944391192465, sameLocation -> 10, ageDifference -> -0.0, sameGender -> 10}                | 67.46944391192466 |
+==> | "Melissa"            | {friendsInCommon -> 55.278640450004204, sameLocation -> 0, ageDifference -> -0.0, sameGender -> 10}                | 65.2786404500042  |
+==> | "Orville"            | {friendsInCommon -> 55.278640450004204, sameLocation -> 0, ageDifference -> -0.0, sameGender -> 10}                | 65.2786404500042  |
+==> | "Hollie"             | {friendsInCommon -> 61.92692122568242, sameLocation -> 0, ageDifference -> -7.009302437557558, sameGender -> 10}   | 64.91761878812486 |
+==> +---------------------------------------------------------------------------------------------------------------------------------------------------------------+
+==> 10 rows
+==> 18 ms
+
+
+PROFILE
+MATCH (me:Person {name: "Alice"})-[:LIVES_IN]->(city)
+MATCH (me)-[:FRIEND_OF]-()-[:FRIEND_OF]-(potentialFriend)
+WHERE NOT (me)-[:FRIEND_OF]-(potentialFriend)
+ 
+WITH me, potentialFriend,city, COUNT(*) AS friendsInCommon
+ 
+WITH me,
+     potentialFriend,
+     size((potentialFriend)-[:LIVES_IN]->(city)) AS sameLocation,
+     abs( me.age - potentialFriend.age) AS ageDifference,
+     me.gender = potentialFriend.gender AS gender,
+     friendsInCommon
+
+
+ 
+WITH potentialFriend,
+       100 * (1 - exp((-1.0 * (log(5.0) / 10)) * friendsInCommon)) AS friendsInCommon,
+       case when sameLocation then 10 else 0 end AS sameLocation,
+       -1 * (10 * (1 - exp((-1.0 * (log(5.0) / 20)) * ageDifference))) AS ageDifference,
+       CASE WHEN gender THEN 10 ELSE 0 END as sameGender
+ 
+WITH potentialFriend, // node
+     // all already computed
+      {friendsInCommon: friendsInCommon,
+       sameLocation: sameLocation,
+       ageDifference:ageDifference,
+       sameGender: sameGender} AS parts,
+     friendsInCommon + sameLocation + ageDifference + sameGender AS score
+ORDER BY score DESC LIMIT 10
+RETURN potentialFriend.name, parts, score;

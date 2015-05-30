@@ -1,0 +1,57 @@
+== Neo4j Server Extension for Single Page Experiments
+
+Sometimes you have a nice dataset in Neo4j and you'd want to provide a self-contained way of quickly exposing it to the outside world without a multi-tier setup.
+
+So for experiments and proofs of concepts it would be helpful to be able to extend Neo4j Browser to accomodate new types of frames and commands.
+Unfortunately we're not there yet, there is still some work to be done until this will be possible.
+
+Until then ... why not use what we already have.
+
+I was discussing some helpful database and server extensions which would benefit from a tiny built-in UI with different people.
+Then I had the idea to just use the JAX-RS mechanisms that Neo4j Server supports to not only serve JSON/text or XML but also deliver 
+HTML, JS, CSS and image files to the browser.
+Those files would not live on the file-system but be packaged directly into the jar of the extension, e.g. residing in a `resources/webapp` folder.
+
+=== How it works
+
+This was actually much easier than expected.
+This is a normal JAX-RS resource class that can then be mounted on an endpoint using the neo4j-server.properties configuration.
+
+The HTTP-GET endpoint handles certain patterns declared by a regular expression.
+There is one function that tries to find that file within the `webapp` folder within the JAR classpath, returning null if not found or the InputStream otherwise.
+And one function for determining the content-type to be returned.
+
+++++
+<script src="https://gist.github.com/jexp/af4d0430ddf3c90f229c.js"></script>
+++++
+
+You can easily use this approach for your own Neo4j extension just by copying that `StaticWebResource` into your project and providing the html,js and css files in the `webapp` directory.
+
+=== The Demo: Popoto.js
+
+As my demo I used a setup that exposes http://popotojs.com[popoto.js] automatcially on top of the data you have in your graph.
+
+The `StaticWebResource` provides the web-files of the visualization from the `resources/webapp` directory.
+And `PopotoResource` adds a second endpoint to provide a `config/config.js` file which uses label, property and index information 
+to provide the necessary config for popoto's visualization.
+
+*Note that you have to disable auth for this demo as I haven't added means for it to configure a username/password.*
+
+You can use the demo by cloning and building (`mvn clean install`) http://github.com/jexp/neo4j-web-extension[this repository].
+Copy the resulting jar in the server's plugin directory.
+Edit `conf/neo4j-server.properties` to register the package name with an endpoint.
+
+[source]
+----
+cp target/neo4j-web-extension-2.2-SNAPSHOT.jar /path/to/neo/plugins/
+echo 'org.neo4j.server.thirdparty_jaxrs_classes=extension.web=/popoto' >>  /path/to/neo/conf/neo4j-server.properties
+/path/to/neo/bin/neo4j restart
+open http://localhost:7474/popoto
+----
+
+image::https://raw.githubusercontent.com/jexp/neo4j-web-extension/master/popoto_in_neo_demo.jpg[]
+
+You can also download https://dl.dropboxusercontent.com/u/14493611/neo4j-web-extension-2.2-SNAPSHOT.jar[the JAR from here].
+
+Enjoy exploring!
+

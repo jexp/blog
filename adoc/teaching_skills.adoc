@@ -1,0 +1,47 @@
+== On Teaching Skills
+
+Over the last few weeks my friend http://twitter.com/markhneedham[Mark Needham] and I talked about a different approach to teaching Neo4j.
+
+We read and discussed http://www.oreilly.com/free/badass-making-users-awesome.html[Badass: Making Users Awesome by Kathy Sierra] which is a real gold mine (http://headrush.typepad.com[like her ex-blog]) and also discussed things like Microhabits, the http://media.pragprog.com/titles/ahptl/chap2.pdf[Dreyfus Model of Skill Acquisition], http://en.wikipedia.org/wiki/Flow_%28psychology%29[Flow] and much more.
+
+The idea is not to just pour information over people, like we did in the past, but rather to enable and support the growth of real skills.
+
+So:
+
+For someone to become an badass graph (database) user we have to help them acquire the skills, both by teaching and by improving Neo4j.
+
+Some aspects that Kathy focuses on:
+
+* breakdown of skills into smaller, more managable ones
+* learn a basic set of skills fast to be able to do stuff
+* use deliberate practise to maximize small skills within a short time
+* don't have too many mediocre skills
+* show a growth path, what can you do with X
+* create an environment that fosters the skills you want to have
+* tell the truth: it's hard, everyone struggled with this, it's going to be better
+* be there to help, or provide means if you can't be there
+* remove fear of breaking things, encourage experimentation
+* focus on the compelling context (understanding and handling connected data), not the tool (graph database aka Neo4j)
+
+What would that mean for us? Some ideas:
+
+* Foster more exploration (Neo4j Browser, Guides, Refcard)
+* You can't break anything (Query killing, Show how to reset the database)
+* Focus on real world tasks and exercises (still small enough to comprehend)
+* Understand and internalize core concepts (graph thinking, patterns)
+* Quicker to useful skills / results (able to do stuff in 10 or 30 mins)
+* Master *smaller* skills faster
+* Don't teach bad skills (global graph queries, match/merge node w/o index, no limit, cartesian product)
+* Let them run into problems firsthand, teach how to solve them
+* Eagerly use Query Plan Viz to highlight issues (typos, missing indexes, cartesian products, high db-hits, high cardinalities)
+* Use the Cypher Refcard and a FAQ much more for self-help
+* Short route to Create & Share (GraphGist) and iterate
+* Show also mid- and large size imports
+* Point out config and tuning (page-cache, heap, disk-perf)
+
+Based on our findings I started to create a new type of "Neo4j Workshop", 
+which is much more focused on practise, acquiring skills, applying them and enabling people to be self-sustaining.
+
+Here is the first draft, I'd love if you could give us some feedback on it:
+
+http://gist.asciidoctor.org/?dropbox-14493611%2Fskill_based_neo4j_training.adoc

@@ -1,0 +1,43 @@
+== Copying, Cleanup and Compaction of Neo4j Databases
+
+When you run your Neo4j database in production you sometimes have the issue that a lot of cruft has accumulated over time.
+
+Free space in the array store, unused labels and property-names, spread out relationship and property-records of your nodes and much more.
+
+There is an easy way to get rid of it, just copy the store one node and relationship at a time. 
+It's much faster than you'd think and works pretty well.== Copying, Cleanup and Compaction of Neo4j Databases
+
+When you run your Neo4j database in production you sometimes have the issue that a lot of cruft has accumulated over time.
+
+Free space in the array store, unused labels and property-names, spread out relationship and property-records of your nodes and much more.
+
+There is an easy way to get rid of it, just copy the store one node and relationship at a time. 
+It's much faster than you'd think and works pretty well.
+
+When that problem first appeared some years ago I wrote a small tool that that uses Neo4j's APIs to 
+
+=== Shortcomings
+
+As I didn't want to mess and fix manual indexes, I left the node-id's alone. 
+In principle you can also compact the nodes by having them recreated in the other store with lower and now free id's but it's probably not worth it.
+You would have to keep a mapping between the node-id's either in memory or by storing the new node-id as property in the old store.
+
+As relationships are compacted, existing relationship-indexes won't work anymore.
+
+Schema indexes
+
+When that problem first appeared some years ago I wrote a small tool that that uses Neo4j's APIs to 
+
+=== Shortcomings
+
+As I didn't want to mess and fix manual indexes, I left the node-id's alone.
+Legacy node indexes are copied 1:1.
+
+In principle you can also compact the nodes by having them recreated in the other store with lower and now free id's but it's probably not worth it.
+You would have to keep a mapping between the node-id's either in memory or by storing the new node-id as property in the old store.
+
+As relationships are compacted, existing relationship-indexes won't work anymore.
+
+=== Schema indexes
+
+The store copy tool currently doesn't copy schema index

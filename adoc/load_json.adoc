@@ -1,0 +1,383 @@
+== Cypher: LOAD JSON from URL AS data
+
+///
+Some time ago, my friend http://twitter.com/markhneedham[Mark] and I wrote a proposal implementation for a `LOAD JSON` clause for the http://neo4j.com/developer/cypher[Cypher Query language] of Neo4j.
+Unfortunately it never made it in.
+///
+
+Neo4j's query language http://neo4j.com/developer/cypher[Cypher] supports loading data from CSV directly but not from JSON files or URLs.
+
+Almost every site offers some kind of API or endpoint that returns JSON and we can also query many NOSQL databases via HTTP and get JSON responses back.
+
+It's quite useful to be able to ingest document structured information from all those different sources into a more usable graph model.
+
+I want to show here that retrieving that data and ingesting it into Neo4j using Cypher is really straightforward and takes only little effort.
+
+As Cypher is already pretty good at deconstructing nested documents, it's actually not that hard to achieve it from a tiny program.
+
+I want to show you today how you can achieve this from Python, Javascript, Ruby, Java, and Bash.
+
+=== The Domain: StackOverflow
+
+Being a developer I love StackOverflow. Just crossed 20k reputation by only answering 1100 http://stackoverflow.com/questions/tagged/neo4j[Neo4j related questions] :). You can do that too.
+That's why I want to use StackOverflow users with their question, answers and comments and tags as our domain today.
+
+image::http://logonoid.com/images/stack-overflow-logo.png[width=600]
+
+Pulling StackOverflow information into a graph model allows me to find interesting insights, like: 
+
+* what are the people asking or answering about Neo4j also interested in,
+* how is their activity distributed across tags and between questions, answers and comments
+* which kinds of questions attract answers and which don't
+* looking at my own data, which answers to what kinds of questions got the highest approval rates
+
+We need some data and a model suited to answer those questions.
+
+=== StackOverflow API
+
+Stackoverflow offers an API to retrieve that information, it's credential protected as usual, but there is the cool option to pre-generate an API-URL that encodes your secrets and allows you to retrieve data without sharing them.
+You can still control some parameters like tags, page size and page-number though.
+
+With this API-URL
+
+link:https://api.stackexchange.com/2.2/questions?pagesize=100&order=desc&sort=creation&tagged=neo4j&site=stackoverflow&filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf[]
+
+We load the last 10 questions with the `Neo4j` tag.
+You get a <<response,like this>>.
+
+.Overall Response Structure
+[source,javascript]
+----
+{ "items": [{
+	"question_id": 24620768,
+	"link": "http://stackoverflow.com/questions/24620768/neo4j-cypher-query-get-last-n-elements",
+	"title": "Neo4j cypher query: get last N elements",
+ 	"answer_count": 1,
+ 	"score": 1,
+ 	.....
+ 	"creation_date": 1404771217,
+ 	"body_markdown": "I have a graph that contains a relationship between users, s....\r\nWhat I need is to delete the first relationship in this list. How can I do that?",
+ 	"tags": ["neo4j", "cypher"],
+ 	"owner": {
+ 		"reputation": 815,
+ 		"user_id": 1212067,
+        ....
+ 		"link": "http://stackoverflow.com/users/1212067/c%c3%a9sar-garc%c3%ada-tapia"
+ 	},
+ 	"answers": [{
+ 		"owner": {
+ 			"reputation": 488,
+ 			"user_id": 737080,
+ 			"display_name": "Chris Leishman",
+            ....
+ 		},
+ 		"answer_id": 24620959,
+ 		"share_link": "http://stackoverflow.com/a/24620959",
+        ....
+ 		"body_markdown": "The simplest would be to use an ... some discussion on this here: http://docs.neo4j.org/chunked/stable/cypherdoc-linked-lists.html)",
+ 		"title": "Neo4j cypher query: get last N elements"
+ 	}]
+ }
+----
+
+=== Graph Model
+
+So what does the graph-model look like?
+We can develop it by looking at the questions we want to answer and the entities and relationships they refer to.
+
+We need this model upfront to know where to put our data when we insert it into the graph. 
+After all we don't want to have loose ends.
+
+image::http://dl.dropboxusercontent.com/u/14493611/blog/img/stackoverflow_model.svg[]
+
+=== Cypher Import Statement
+
+The Cypher query to create that domain is also straightforward. You can deconstruct maps with dot notation `map.key` and arrays with slices `array[0..4]`.
+You'd use `UNWIND` to convert collections into rows and `FOREACH` to iterate over a collection with update statements. 
+To create nodes and relationships we use `MERGE` and `CREATE` commands.
+
+The JSON response that we retrieved from the API call is passed in as a parameter `{json}` to the Cypher statement.
+
+[source,cypher]
+----
+WITH {json} as data
+UNWIND data.items as q
+MERGE (question:Question {id:q.question_id}) ON CREATE 
+  SET question.title = q.title, question.share_link = q.share_link, question.favorite_count = q.favorite_count
+
+MERGE (owner:User {id:q.owner.user_id}) ON CREATE SET owner.display_name = q.owner.display_name
+MERGE (owner)-[:ASKED]->(question)
+
+FOREACH (tagName IN q.tags | MERGE (tag:Tag {name:tagName}) MERGE (question)-[:TAGGED]->(tag))
+FOREACH (a IN q.answers | 
+   MERGE (question)<-[:ANSWERS]-(answer:Answer {id:a.answer_id})
+   MERGE (answerer:User {id:a.owner.user_id}) ON CREATE SET answerer.display_name = a.owner.display_name
+   MERGE (answer)<-[:PROVIDED]-(answerer)
+)
+
+----
+
+=== Calling Cypher with the JSON parameters
+
+To pass in the JSON to Cypher we have to programmatically call the http://neo4j.com/docs/stable/rest-api-transactional.html[Cypher endpoint] of the Neo4j server, which can be done via one of the many http://neo4j.com/developer/language-guides[drivers for Neo4j] or manually.
+We can also call the Java API.
+
+So without further ado here are our examples:
+
+==== Python
+
+We use the http://neo4j.com/developer/python/#_py2neo[py2neo driver] by Nigel Small to execute the statement:
+
+[source,python]
+----
+import os
+import requests
+from py2neo import neo4j
+
+# Connect to graph and add constraints.
+neo4jUrl = os.environ.get('NEO4J_URL',"http://localhost:7474/db/data/")
+graph = neo4j.GraphDatabaseService(neo4jUrl)
+
+# Add uniqueness constraints.
+neo4j.CypherQuery(graph, "CREATE CONSTRAINT ON (q:Question) ASSERT q.id IS UNIQUE;").run()
+
+# Build URL.
+apiUrl = "https://api.stackexchange.com/2.2/questions...." % (tag,page,page_size)
+# Send GET request.
+json = requests.get(apiUrl, headers = {"accept":"application/json"}).json()
+
+# Build query.
+query = """
+UNWIND {json} AS data ....
+"""
+
+# Send Cypher query.
+neo4j.CypherQuery(graph, query).run(json=json)
+----
+
+We did something similar with getting http://neo4j.com/blog/oscon-twitter-graph/[tweets from the Twitter search API] into Ne4oj for the OSCON conference.
+
+==== Javascript
+
+For http://neo4j.com/developer/javascript/[JavaScript] I want to show how to call the transactional Cypher endpoint directly, by just using the `request` node module.
+
+[source,javascript]
+----
+var r=require("request");
+var neo4jUrl = (env["NEO4J_URL"] || "http://localhost:7474") + "/db/data/transaction/commit";
+
+function cypher(query,params,cb) {
+  r.post({uri:neo4jUrl,
+          json:{statements:[{statement:query,parameters:params}]}},
+         function(err,res) { cb(err,res.body)})
+}
+
+var query="UNWIND {json} AS data ....";
+var apiUrl = "https://api.stackexchange.com/2.2/questions....";
+
+r.get({url:apiUrl,json:true,gzip:true}, function(err,res,json) {
+  cypher(query,{json:json},function(err, result) { console.log(err, JSON.stringify(result))});
+});
+----
+
+==== Java
+
+With Java I want to show how to use the Neo4j embedded API.
+
+[source,java]
+----
+import org.apache.http.*;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.neo4j.graphdb.*;
+
+// somewhere in your application-scoped setup code
+ObjectMapper mapper = new ObjectMapper();
+HttpClient http = HttpClients.createMinimal();
+GraphDatabaseService db = new GraphDatabaseFactory().newEmbeddedGraphDatabase(PATH);
+
+// execute API request and parse response as JSON
+HttpResponse response = http.execute(new HttpGet( apiUrl ));
+Map json = mapper.readValue(response.getEntity().getContent(), Map.class)
+
+// execute Cypher
+String query = "UNWIND {json} AS data ....";
+db.execute(query, singletonMap("json",json));
+
+// application scoped shutdown, or JVM-shutdown-hook
+db.shutdown();
+----
+
+==== Ruby
+
+Using the neo4j-core Gem, we can talk to Neo4j server or embedded (using jRuby) by just changing a single line of configuration.
+
+[source,ruby]
+----
+require 'rubygems'
+require 'neo4j-core'
+require 'rest-client'
+require 'json'
+
+QUERY="UNWIND {json} AS data ...."
+API = "https://api.stackexchange.com/2.2/questions...."
+
+res = RestClient.get(API)
+json = JSON.parse(res.to_str)
+
+session = Neo4j::Session.open
+session.query(QUERY, json: json)
+----
+
+==== Bash
+
+Bash is of course most fun, as we have to do fun substitutions to make this work.
+
+.load_json.sh
+[source,shell]
+----
+#!/bin/bash
+echo "Usage load_json.sh 'http://json.api.com?params=values' import_json.cypher"
+echo "Use {data} as parameter in your query for the JSON data"
+JSON_API="$1"
+QUERY=`cat "$2"` # cypher file
+JSON_DATA=`curl --compress -s -H accept:application/json -s "$JSON_API"`
+POST_DATA="{\"statements\":[{\"statement\": \"$QUERY\", \"parameters\": {\"data\":\"$JSON_DATA\"}}]}"
+DB_URL=${NEO4J_URL-http://localhost:7474}
+curl -i -H accept:application/json -H content-type:application/json -d "$POST_DATA" -XPOST "$DB_URL/db/data/transaction/commit"
+----
+
+So as you can see, even with `LOAD JSON` not being part of the language, it's possible to retrieve JSON data from an API endpoint and deconstruct and insert it into Neo4j by just using plain Cypher.
+
+
+=== Example Use-Cases
+
+Here are some simple example queries that I now can run on top of this imported dataset.
+
+To not overload this blog post with too much information, we'll answer our original questions in Part 2.
+
+==== Find the User who was most active
+
+[source,cypher]
+----
+MATCH (u:User)
+OPTIONAL MATCH (u)-[:PROVIDED|ASKED|COMMENTED]->()
+RETURN u,count(*)
+ORDER BY count(*) DESC
+LIMIT 5
+----
+
+//table
+
+==== Find co-used Tags
+
+[source,cypher]
+----
+MATCH (t:Tag)
+OPTIONAL MATCH (t)<-[:TAGGED]-(question)-[:TAGGED]->(t2)
+RETURN t.name,t2.name,count(distinct question) as questions
+ORDER BY questions DESC
+----
+
+//table
+
+[source,cypher]
+----
+MATCH (t:Tag)<-[r:TAGGED]->(question)
+RETURN t,r,question
+----
+
+//graph_result
+
+[[response]]
+=== Stackoverflow Response
+
+[source,javascript]
+----
+{
+	"items": [{
+		"answers": [{
+			"owner": {
+				"reputation": 488,
+				"user_id": 737080,
+				"user_type": "registered",
+				"accept_rate": 45,
+				"profile_image": "https://www.gravatar.com/avatar/ffa6eed1e8a9c1b2adb37ca88c07dede?s=128&d=identicon&r=PG",
+				"display_name": "Chris Leishman",
+				"link": "http://stackoverflow.com/users/737080/chris-leishman"
+			},
+			"tags": [],
+			"comment_count": 0,
+			"down_vote_count": 0,
+			"up_vote_count": 2,
+			"is_accepted": false,
+			"score": 2,
+			"last_activity_date": 1404772223,
+			"creation_date": 1404772223,
+			"answer_id": 24620959,
+			"question_id": 24620768,
+			"share_link": "http://stackoverflow.com/a/24620959",
+			"body_markdown": "The simplest would be to use an ... some discussion on this here: http://docs.neo4j.org/chunked/stable/cypherdoc-linked-lists.html)",
+			"link": "http://stackoverflow.com/questions/24620768/neo4j-cypher-query-get-last-n-elements/24620959#24620959",
+			"title": "Neo4j cypher query: get last N elements"
+		}],
+		"tags": ["neo4j", "cypher"],
+		"owner": {
+			"reputation": 815,
+			"user_id": 1212067,
+			"user_type": "registered",
+			"accept_rate": 73,
+			"profile_image": "http://i.stack.imgur.com/nnyS1.png?s=128&g=1",
+			"display_name": "C&#233;sar Garc&#237;a Tapia",
+			"link": "http://stackoverflow.com/users/1212067/c%c3%a9sar-garc%c3%ada-tapia"
+		},
+		"comment_count": 0,
+		"delete_vote_count": 0,
+		"close_vote_count": 0,
+		"is_answered": true,
+		"view_count": 14,
+		"favorite_count": 0,
+		"down_vote_count": 0,
+		"up_vote_count": 1,
+		"answer_count": 1,
+		"score": 1,
+		"last_activity_date": 1404772230,
+		"creation_date": 1404771217,
+		"question_id": 24620768,
+		"share_link": "http://stackoverflow.com/q/24620768",
+		"body_markdown": "I have a graph that contains a relationship between users, s....\r\nWhat I need is to delete the first relationship in this list. How can I do that?",
+		"link": "http://stackoverflow.com/questions/24620768/neo4j-cypher-query-get-last-n-elements",
+		"title": "Neo4j cypher query: get last N elements"
+	}, {
+		"tags": ["neo4j", "cypher"],
+		"owner": {
+			"reputation": 63,
+			"user_id": 845435,
+			"user_type": "registered",
+			"accept_rate": 67,
+			"profile_image": "https://www.gravatar.com/avatar/610458a30958c9d336ee691fa1a87369?s=128&d=identicon&r=PG",
+			"display_name": "user845435",
+			"link": "http://stackoverflow.com/users/845435/user845435"
+		},
+		"comment_count": 0,
+		"delete_vote_count": 0,
+		"close_vote_count": 0,
+		"is_answered": false,
+		"view_count": 16,
+		"favorite_count": 0,
+		"down_vote_count": 0,
+		"up_vote_count": 0,
+		"answer_count": 0,
+		"score": 0,
+		"last_activity_date": 1404768987,
+		"creation_date": 1404768987,
+		"question_id": 24620297,
+		"share_link": "http://stackoverflow.com/q/24620297",
+		"body_markdown": "I&#39;m trying to implement a simple graph db for NYC subway................Thanks!\r\n",
+		"link": "http://stackoverflow.com/questions/24620297/cypher-query-with-infinite-relationship-takes-forever",
+		"title": "Cypher query with infinite relationship takes forever"
+	}],
+	"has_more": true,
+	"quota_max": 300,
+	"quota_remaining": 205
+}
+----

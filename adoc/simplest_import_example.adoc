@@ -1,0 +1,133 @@
+= How To: Neo4j Data Import - Minimal Example
+
+We want to import data into Neo4j, there are too many resources with a lot of information which makes it confusing.
+Here is the *minimal thing* you need to know. 
+
+Imagine the data coming from the export of a relational or legacy system, just plain CSV files without headers (this time).
+One for the "people" and one for the "friendships"-table.
+
+.people.csv
+[source,csv]
+----
+1,"John"
+10,"Jane"
+234,"Fred"
+4893,"Mark"
+234943,"Anne"
+----
+
+.friendships.csv
+[source,csv]
+----
+1,234
+10,4893
+234,1
+4893,234943
+234943,234
+234943,1
+----
+
+== Graph Model
+
+Our graph Model would be very simple:
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/img/import_data_model.jpg[width=300]
+
+----
+(p1:Person {userId:10, name:"Anne"})-[:KNOWS]->(p2:Person {userId:123,name:"John"})
+----
+
+== Import with Neo4j Server & Cypher
+
+1. Download, install and start http://neo4j.com/download[Neo4j Server].
+2. Open http://localhost:7474
+3. Run the following statements one by one:
+
+I used http-urls here to run this as an interactive, live http://graphgist.neo4j.com/#!/gists/d8f251a948f5df83473a[Graph Gist].
+
+[source,cypher]
+----
+CREATE CONSTRAINT ON (p:Person) ASSERT p.userId IS UNIQUE;
+----
+
+[source,cypher]
+----
+LOAD CSV FROM "https://gist.githubusercontent.com/jexp/d8f251a948f5df83473a/raw/people.csv" AS row
+CREATE (:Person {userId: toInt(row[0]), name:row[1]});
+----
+
+[source,cypher]
+----
+USING PERIODIC COMMIT
+LOAD CSV FROM "https://gist.githubusercontent.com/jexp/d8f251a948f5df83473a/raw/friendships.csv" AS row
+MATCH (p1:Person {userId: toInt(row[0])}), (p2:Person {userId: toInt(row[1])})
+CREATE (p1)-[:KNOWS]->(p2);
+----
+
+//graph
+
+[NOTE]
+You can also use file-urls. 
+Best with absolute paths like `file:/path/to/data.csv`, on Windows use: `file:c:/path/to/data.csv`
+
+If you want to find your people not only by id but also by name quickly, also run:
+
+[source,cypher]
+----
+CREATE INDEX ON :Person(name);
+----
+
+For instance all second degree friends of "Anne" and on how many ways they can be reached.
+
+[source,cypher]
+----
+MATCH (:Person {name:"Anne"})-[:KNOWS*2..2]-(p2)
+RETURN p2.name, count(*) as freq
+ORDER BY freq DESC;
+----
+
+//table
+
+
+== Bulk Data Import
+
+For *tens of millions up to billions* of rows.
+
+*Shutdown the server first!!*
+
+Create two additional header files:
+
+.people_header.csv
+[source,csv]
+----
+userId:ID,name
+----
+
+
+.friendships_header.csv
+[source,csv]
+----
+:START_ID,:END_ID
+----
+
+Execute from the terminal:
+
+----
+path/to/neo/bin/neo4j-import --into path/to/neo/data/graph.db  \
+--nodes:Person people_header.csv,people.csv --relationships:KNOWS friendships_header.csv,friendships.csv
+----
+
+After starting your database again, run:
+
+[source,cypher]
+----
+CREATE CONSTRAINT ON (p:Person) ASSERT p.userId IS UNIQUE;
+----
+
+== Resources
+
+* http://neo4j.com/download[Neo4j Download]
+* http://neo4j.com/developer/guide-import-csv[CSV Import Guide]
+* http://neo4j.com/docs/milestone/query-load-csv.html[Manual: LOAD CSV]
+* http://neo4j.com/docs/stable/cypher-refcard[Reference Card: Cypher]
+* http://neo4j.com/docs/milestone/import-tool.html[Manual: Bulk Import Tool]
