@@ -13,6 +13,7 @@ You find the posts on http://jexp.github.io/blog
 * link:{base}/html/neo4j_web_extension.html[Neo4j Server Extension to serve small Web-UI]
 * link:{base}/html/relational_to_neo4j_import_tool_weekend.html[Import Relational Database directly into Neo4j]
 * link:{base}/html/teaching_skills.html[Teaching Skills inspired by "Badass", Kathy Sierra]
+* link:{base}/html/store_copy.html[Neo4j Store Copy & Cleanup Tool]
 * link:{base}/html/simplest_import_example.html[Simplest LOAD CSV Import Example]
 
 == Learning & Teaching
@@ -44,8 +45,9 @@ You find the posts on http://jexp.github.io/blog
 
 == Neo4j
 
-* link:{base}/html/xrebel_with_neo4j.html[Using XRebel 2 with Neo4j]
+* link:{base}/html/store_copy.html[Neo4j Store Copy & Cleanup Tool]
 * link:{base}/html/neo4j_indexes_match_and_merge.html[On Neo4j Indexes, MATCH and MERGE]
+* link:{base}/html/xrebel_with_neo4j.html[Using XRebel 2 with Neo4j]
 
 * link:{base}/html/styling_neo4j_server_visualisation.html[Styling Neo4j Server Visualisation]
 

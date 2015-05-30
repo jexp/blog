@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.1">
-<title>Latest (2015-05-31)</title>
+<title>Copying, Cleanup and Compaction of Neo4j Databases</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,175 +413,118 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_copying_cleanup_and_compaction_of_neo4j_databases">Copying, Cleanup and Compaction of Neo4j Databases</h2>
+<div class="sectionbody">
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Warning</div>
+</td>
+<td class="content">
+Use this tool at your own risk, make sure to make a backup of the source database before.
+I don&#8217;t guarantee anything to anyone.
+You should run a <a href="http://www.markhneedham.com/blog/2014/01/22/neo4j-backup-store-copy-and-consistency-check/">consistency check</a> on the new store and a sanity check of your domain as well. Also recreate your schema indexes.
+</td>
+</tr>
+</table>
+</div>
+<div class="sect2">
+<h3 id="_why_do_i_need_this">Why do I need this?</h3>
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>When you run your Neo4j database in production you sometimes have the issue that a lot of cruft has accumulated over time.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>Free space in the array store, unused labels and property-names, spread out relationship and property-records of your nodes and much more.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
-</div>
-<div class="sect1">
-<h2 id="_latest_2015_05_31">Latest (2015-05-31)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-</ul>
+<p>There is an easy way to get rid of it, just copy the store one node and relationship at a time.
+It&#8217;s much faster than you&#8217;d think and works pretty well.</p>
 </div>
 </div>
+<div class="sect2">
+<h3 id="_how_does_it_work">How does it work?</h3>
+<div class="paragraph">
+<p>When that problem first appeared some years ago I wrote a small tool that that uses Neo4j&#8217;s APIs to read the source store and recreate nodes and relationships
+using the batch-inserter API in the target store.
+I kept node-id&#8217;s the same but relationships were created with new ids.</p>
 </div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>There are means to filter relationship-types, properties and labels if you don&#8217;t want them to appear in the new store.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_status">Status</h3>
+<div class="paragraph">
+<p>Lately I updated the tool to Neo4j 2.1 and 2.2 and rewrote it slightly to use the Batch-Inserter-API also to read the store files to improve performance.
+I had to work around a bug that caused it to accumulate memory.
+But then it worked really well and was used by customers to migrate and clean out huge stores with almost a billion entries in reasonable time.</p>
+</div>
+<div class="paragraph">
+<p>You can find the tool <a href="https://github.com/jexp/store-utils">here on GitHub</a>. There are different branches for different Neo4j versions.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_usage_storecopy">Usage StoreCopy</h3>
+<div class="listingblock">
+<div class="title">Usage StoreCopy</div>
+<div class="content">
+<pre>mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopy" \
+  -Dexec.args="source-dir target-dir [rel,types,to,ignore] [properties,to,ignore] [labels,to,ignore]"
+
+mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopy" \
+  -Dexec.args="test.db new.db DELETED,KNEW owner,since Account,Source"</pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_up_and_downgrading_stores_across_neo4j_versions">Up- and Downgrading Stores across Neo4j Versions</h3>
+<div class="paragraph">
+<p>There is also a tool which compares stores, by looking at nodes and relationships with the same id&#8217;s and checks that they are equal.</p>
+</div>
+<div class="paragraph">
+<p>And there is a <a href="https://github.com/jexp/store-utils/tree/revert-store">branch with a tool</a> that can up- or downgrade Neo4j stores to previous versions of the database.
+It uses different class-loaders to load two versions of Neo4j-libraries (jars) from the local maven repository, one for the source, one for the target database.
+I didn&#8217;t find the time to update it to recent versions though, that&#8217;s tbd.</p>
+</div>
+<div class="listingblock">
+<div class="title">Usage StoreCopyRevert</div>
+<div class="content">
+<pre>mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopyRevert" \
+  -Dexec.args="source:version target:version [rel,types,to,ignore] [properties,to,ignore]"
+
+mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopyRevert" \
+  -Dexec.args="test.db:1.9.8 fixed.db:2.0.0 :FOO bar"</pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_shortcomings">Shortcomings</h3>
+<div class="paragraph">
+<p>As I didn&#8217;t want to mess and fix manual indexes, I left the node-id&#8217;s alone.
+Legacy node indexes are copied 1:1.</p>
+</div>
+<div class="paragraph">
+<p>In principle you can also compact the nodes by having them recreated in the other store with lower and now free id&#8217;s but it&#8217;s probably not worth it.
+You would have to keep a mapping between the node-id&#8217;s either in memory or by storing the new node-id as property in the old store.</p>
+</div>
+<div class="paragraph">
+<p>As relationships are compacted, existing relationship-indexes won&#8217;t work anymore.</p>
 </div>
 </div>
+<div class="sect2">
+<h3 id="_schema_indexes">Schema indexes</h3>
+<div class="paragraph">
+<p>The store copy tool currently doesn&#8217;t copy schema index.</p>
 </div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-05-31 01:07:30 CEST
+Last updated 2015-05-31 01:06:17 CEST
 </div>
 </div>
 </body>

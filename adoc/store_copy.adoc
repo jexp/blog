@@ -1,11 +1,11 @@
 == Copying, Cleanup and Compaction of Neo4j Databases
 
-When you run your Neo4j database in production you sometimes have the issue that a lot of cruft has accumulated over time.
+[WARNING]
+Use this tool at your own risk, make sure to make a backup of the source database before.
+I don't guarantee anything to anyone.
+You should run a http://www.markhneedham.com/blog/2014/01/22/neo4j-backup-store-copy-and-consistency-check/[consistency check] on the new store and a sanity check of your domain as well. Also recreate your schema indexes.
 
-Free space in the array store, unused labels and property-names, spread out relationship and property-records of your nodes and much more.
-
-There is an easy way to get rid of it, just copy the store one node and relationship at a time. 
-It's much faster than you'd think and works pretty well.== Copying, Cleanup and Compaction of Neo4j Databases
+=== Why do I need this?
 
 When you run your Neo4j database in production you sometimes have the issue that a lot of cruft has accumulated over time.
 
@@ -14,19 +14,49 @@ Free space in the array store, unused labels and property-names, spread out rela
 There is an easy way to get rid of it, just copy the store one node and relationship at a time. 
 It's much faster than you'd think and works pretty well.
 
-When that problem first appeared some years ago I wrote a small tool that that uses Neo4j's APIs to 
+=== How does it work?
 
-=== Shortcomings
+When that problem first appeared some years ago I wrote a small tool that that uses Neo4j's APIs to read the source store and recreate nodes and relationships
+using the batch-inserter API in the target store.
+I kept node-id's the same but relationships were created with new ids.
 
-As I didn't want to mess and fix manual indexes, I left the node-id's alone. 
-In principle you can also compact the nodes by having them recreated in the other store with lower and now free id's but it's probably not worth it.
-You would have to keep a mapping between the node-id's either in memory or by storing the new node-id as property in the old store.
+There are means to filter relationship-types, properties and labels if you don't want them to appear in the new store.
 
-As relationships are compacted, existing relationship-indexes won't work anymore.
+=== Status
 
-Schema indexes
+Lately I updated the tool to Neo4j 2.1 and 2.2 and rewrote it slightly to use the Batch-Inserter-API also to read the store files to improve performance.
+I had to work around a bug that caused it to accumulate memory.
+But then it worked really well and was used by customers to migrate and clean out huge stores with almost a billion entries in reasonable time.
 
-When that problem first appeared some years ago I wrote a small tool that that uses Neo4j's APIs to 
+You can find the tool https://github.com/jexp/store-utils[here on GitHub]. There are different branches for different Neo4j versions.
+
+=== Usage StoreCopy
+
+.Usage StoreCopy
+----
+mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopy" \
+  -Dexec.args="source-dir target-dir [rel,types,to,ignore] [properties,to,ignore] [labels,to,ignore]"
+
+mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopy" \
+  -Dexec.args="test.db new.db DELETED,KNEW owner,since Account,Source"
+----
+
+=== Up- and Downgrading Stores across Neo4j Versions
+
+There is also a tool which compares stores, by looking at nodes and relationships with the same id's and checks that they are equal.
+
+And there is a https://github.com/jexp/store-utils/tree/revert-store[branch with a tool] that can up- or downgrade Neo4j stores to previous versions of the database.
+It uses different class-loaders to load two versions of Neo4j-libraries (jars) from the local maven repository, one for the source, one for the target database.
+I didn't find the time to update it to recent versions though, that's tbd.
+
+.Usage StoreCopyRevert
+----
+mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopyRevert" \
+  -Dexec.args="source:version target:version [rel,types,to,ignore] [properties,to,ignore]"
+
+mvn compile exec:java -Dexec.mainClass="org.neo4j.tool.StoreCopyRevert" \
+  -Dexec.args="test.db:1.9.8 fixed.db:2.0.0 :FOO bar"
+----
 
 === Shortcomings
 
@@ -40,4 +70,4 @@ As relationships are compacted, existing relationship-indexes won't work anymore
 
 === Schema indexes
 
-The store copy tool currently doesn't copy schema index
+The store copy tool currently doesn't copy schema index.
