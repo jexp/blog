@@ -1,0 +1,24 @@
+== Lessons Learned when Performance Testing Neo4j
+
+ArangoDB benchmark
+
+* Use labels and Indexes
+
+* Import correctly
+** don't store null values
+** store correct types
+**
+
+=== Use a recent and up-to-date driver
+
+The benchmark started with seraph, which while being a really good driver, still used Neo4j-APIs that were 2 years old and not the most efficient ones.
+
+current transactional cypher endpoint
+
+going forward binary
+
+=== Make 
+
+=== Don't measure on cold caches
+
+* Use the second or third run

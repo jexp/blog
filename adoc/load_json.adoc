@@ -1,9 +1,9 @@
 == Cypher: LOAD JSON from URL AS data
 
-///
+////
 Some time ago, my friend http://twitter.com/markhneedham[Mark] and I wrote a proposal implementation for a `LOAD JSON` clause for the http://neo4j.com/developer/cypher[Cypher Query language] of Neo4j.
 Unfortunately it never made it in.
-///
+////
 
 Neo4j's query language http://neo4j.com/developer/cypher[Cypher] supports loading data from CSV directly but not from JSON files or URLs.
 

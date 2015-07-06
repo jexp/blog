@@ -1,0 +1,56 @@
+== 7 Things you should know for a smooth Neo4j Import
+
+== 7 Tips for effectively importing data into Neo4j
+
+The built in LOAD CSV clause of our Cypher query language allows you to quickly map CSV rows into complex graph structures.
+
+There are a few things to keep in mind though.
+This article aims to make the import experience as smooth as possible for you.
+
+=== 1. Memory Setup
+
+Configure your Neo4j Instance to use a sensible amount of memory, for medium sized imports we recommend these configurations:
+
+----
+conf/neo4j.properties
+
+dbms.pagecache.size=2G
+
+conf/neo4j-wrapper.conf
+
+wrapper.java.maxmemory=4000
+----
+
+For larger imports, just multiply those numbers.
+
+=== 2. Use neo4j-shell
+
+If you use the neo4j-shell, you'll have a better experience importing your data, you can easily copy and paste semicolon-terminated, statements or run the shell with a complete import file (`-file import.cypher`)
+
+While `neo4j-shell` usually connects to a running server, you can also choose to use an independed on disk datastore, which can be quickly deleted again for repeated runs (`--path test.db`).
+
+=== 3. Data Quality
+
+Make sure that you import the data you want.
+You can easily test this with cypher itself.
+Here are 3 statements you should run for every CSV file to make sure it is sane.
+
+
+
+=== 4. Control Cardinality
+
+=== 5. 
+=== More Tips
+
+
+
+
+=== Alternatives
+
+The `neo4j-import` tool is a bulk inserter, that ingests huge source files into an initial datastore.
+It uses mapping information from file headers and
+
+=== Resources
+
+* http://neo4j.com/developer/guide-import-csv[CSV Import Guide]
+* http://neo4j.com/docs/stable/query-load-csv.html[LOAD CSV in the Neo4j Manual]

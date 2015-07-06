@@ -1,0 +1,133 @@
+== Neo4j Java Object Graph Mapper 1.1.0 Released
+
+Many of you might be aware of the effort, we're putting behind the http://neo4j.com/blog/announcing-spring-data-neo4j-4-0/[Spring Data Neo4j 4]
+development with our partner http://graphaware.com[GraphAware].
+
+What you may not know, is that we learned from the past and separated the Graph Object Mapping functionality from the Spring Data project.
+
+*Today we want to publicly announce the availability of version 1.1.0 of this library which allows you to use Object Graph Mapping from any Java or JVM-based application with no other dependency.*
+
+The core of the mapping, querying and conversion facilities live in an officially supported project and library called Neo4j-OGM which you can http://github.com/neo4j/neo4j-ogm[find on GitHub] permissively licensed under http://www.apache.org/licenses/LICENSE-2.0[Apache License v2.0].
+
+=== Background & Features
+
+This library was written completely from scratch with special focus on *performance*. 
+or now, it's focused on working with the Neo4j server and using Cypher and the transactional Cypher endpoint to interact with Neo4j.
+
+That translates into high-performance transactional operations over the wire.
+
+Other features include:
+
+* Fast byte code scanning for gathering the mapping metadata
+* Tunable read and write depths for immediate loading and updating of the neighborhood of an entity
+* Session-based delta tracking so only minimal updates are send to Neo4j
+* Simple configuration
+* Support for auth and Neo4j 2.2.x and 2.3.x
+
+Some notable differences to other OGMs and Spring Data Neo4j 3.x include:
+
+* Indexing is a concern outside of the application
+* Other Neo4j REST endpoints are not supported
+
+=== Setup & Configuration
+
+Just add http://search.maven.org/#artifactdetails%7Corg.neo4j%7Cneo4j-ogm%7C1.1.0%7Cjar[this library] to your dependency declaration and you're good to go:
+
+[source,xml]
+----
+<dependency>
+  <groupId>org.neo4j</groupId>
+  <artifactId>neo4j-ogm</artifactId>
+  <version>1.1.0</version>
+</dependency>
+----
+
+If you want to use the library in your project you can do so by setting up the dependencies and this configuration
+
+[source,java,tab-size=2]
+----
+public class Neo4jSessionFactory {
+  
+  private final static SessionFactory sessionFactory = 
+                                new SessionFactory("school.domain"); <1>
+  private static Neo4jSessionFactory factory = new Neo4jSessionFactory();
+  
+  public static Neo4jSessionFactory getInstance() {
+    return factory;
+  }
+  
+  public Session getNeo4jSession() {
+    return sessionFactory.openSession(System.getenv("NEO4J_URL")); <2>
+  }
+}
+----
+
+<1> Session factory with base domain package
+<2> Neo4j Connection, here a remote server
+
+=== Entities & Services
+
+For your entities, you can choose to annotate them or not. By default, (though overridable with annotations) it uses the class name for labels and field names for properties and relationship types.
+
+An entity looks like this:
+
+[source,java]
+----
+public class Student  {
+  private Long id;
+  private String name;
+  
+  @Relationship(type = "ENROLLED")
+  private Set<Enrollment> enrollments;
+  
+  private Set<Course> courses;
+  
+  @Relationship(type = "BUDDY", direction = Relationship.INCOMING)
+  private Set<StudyBuddy> studyBuddies;
+}
+----
+
+And a concrete service to provide persistence:
+
+[source,java]
+----
+public class StudentService implements Service<Student> {
+  
+  private static final int DEPTH_LIST = 0;
+  private static final int DEPTH_ENTITY = 1;
+  private Session session = Neo4jSessionFactory.getInstance().getNeo4jSession();
+  
+  public Iterable<Student> findAll() {
+    return session.loadAll(Student.class, DEPTH_LIST);
+  }
+  
+  public Student find(Long id) {
+    return session.load(Student.class, id, DEPTH_ENTITY);
+  }
+  
+  public void delete(Long id) {
+    session.delete(session.load(Student.class, id));
+  }
+  
+  public Student createOrUpdate(Student entity) {
+    session.save(entity, DEPTH_ENTITY);
+    return find(student.getId());
+  }
+}
+----
+
+=== Feedback
+
+Find more details on how to use the Java Object Graph Mapper in the online documentation and the example project.
+
+Please provide us with feedback and ideas by testing it out, raising http://github.com/neo4j/neo4j-ogm/issues[GitHub issues] or via mailto:spring-data-neo4j@neotechnology.com[email].
+
+Happy mapping!
+--Michael
+
+=== References
+
+* http://github.com/neo4j/neo4j-ogm[Neo4j-OGM on GitHub]
+* http://neo4j.com/docs/ogm/java/stable[Online Documentation]
+* http://github.com/neo4j-examples/neo4j-ogm-university[Example University Angular + Neo4j OGM Application]
+* http://github.com/neo4j/neo4j-ogm/issues[GitHub issues]

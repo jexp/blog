@@ -1,0 +1,120 @@
+== Export CSV from Neo4j with Curl, Cypher and JQ
+
+I've often been asked how to export CSV data from Neo4j. 
+Since we support multiple ways of importing CSV there should naturally be an easy way to export CSV as well. 
+
+Here's how you do it:
+
+You can already export CSV from the Neo4j browser by clicking the download icon on the table view of your Cypher query results. 
+Alternatively you can also use my `neo4j-shell-tools` to export results of a Cypher query to a CSV file.
+
+Something I had wanted to do was to use the awesome `jq` tool for this purpose, a very powerful and fast command-line JSON processor. 
+With just a few selectors you transform JSON, extract and convert values and much more. 
+
+In this example, we'll use the Pokec social network dataset (from Stanford SNAP), which contains about 1.6M people and 30M connections.
+
+We will execute a Cypher statement against the transactional, HTTP-API endpoint, which is what most http://neo4j.com/developer/language-guides[Neo4j drivers] use as well.
+
+This is the query showing who is connected to whom:
+
+[source,cypher]
+----
+MATCH (p1:PROFILES)-[:RELATION]-(p2)
+RETURN p1._key as id1, p1.AGE as age1, p1.gender as gender1,
+       p2._key as id2, p2.AGE as age2, p2.gender as gender2
+LIMIT 4
+----
+
+The result looks like this:
+
+[options=headers]
+,===
+id1,age1,gender1,id2,age2,gender2
+1,26,1,16,23,1
+1,26,1,10,22,0
+1,26,1,9,0,0
+1,26,1,12,26,1
+,===
+
+We can POST that query using `curl` against the Cypher endpoint:
+
+[source,bash]
+----
+curl -H accept:application/json -H content-type:application/json \
+  -d '{"statements":[{"statement":"MATCH ... RETURN ..."}]}' \
+  http://localhost:7474/db/data/transaction/commit
+----
+
+[NOTE]
+Here we only use one of the multiple statements that can be passed as payload of the http request, and no query parameters.
+
+For our query the resulting JSON looks like this:
+
+// curl -H accept:application/json -H content-type:application/json -d '{"statements":[{"statement":"MATCH (p1:PROFILES)-[:RELATION]-(p2) RETURN p1._key as id1, p1.AGE as age1, p1.gender as gender1,      p2._key as id2, p2.AGE as age2, p2.gender as gender2 LIMIT 4"}]}' http://localhost:7474/db/data/transaction/commit
+
+[source,json]
+----
+{"results":[
+  {"columns":["id1","age1","gender1","id2","age2","gender2"],
+   "data":[{"row":[1,26,1,16,23,1]},
+           {"row":[1,26,1,10,22,0]},
+		   {"row":[1,26,1,9,0,0]},
+		   {"row":[1,26,1,12,26,1]}]
+   }],
+   "errors":[]}
+----
+
+Now we have to take this JSON and transform it to CSV using `jq`.
+Follow these simple steps:
+
+. Select results with `.results`
+. Take the first entry as we only send one query `.results[0]`
+. Let's then take the columns array out of this `.results[0].columns` and convert it to CSV, piping it to `@csv` with `.results[0].columns | @csv`
+. Next, do the same for the `data` field `.results[0].data`
+. While we're there, we also need to grab each entry and extract the content of the `row` field `.results[0].data[].row` and convert it to CSV `.results[0].data[].row | @csv`
+. Now, we combine both by wrapping the first `results` object and piping it into both selectors separated by a comma  `(.results[0]) | .columns,.data[].row` and finally convert it to CSV: `jq '(.results[0]) | .columns,.data[].row | @csv'`
+. Finally, we use the `-r` parameter for jq to output raw data, so that quotes are not quoted twice
+
+So when we execute our `curl` command but pipe the result to `jq` it looks like this:
+
+[source,bash]
+----
+curl -H accept:application/json -H content-type:application/json \
+     -d '{"statements":[{"statement":"MATCH (p1:PROFILES)-[:RELATION]-(p2) RETURN ... LIMIT 4"}]}' \
+     http://localhost:7474/db/data/transaction/commit \
+     | jq -r '(.results[0]) | .columns,.data[].row | @csv'
+
+"id1","age1","gender1","id2","age2","gender2"
+1,26,1,16,23,1
+1,26,1,10,22,0
+1,26,1,9,0,0
+1,26,1,12,26,1
+----
+
+Of course we also want to see how quickly we can extract data from Neo4j. 
+In total, our query returns 60 million rows (Twice 30 as we ignore the direction) if we remove the `LIMIT` clause. 
+I don't really want to store that data, that's why I pipe it to `/dev/null`
+
+[source,bash]
+----
+curl -H accept:application/json -H content-type:application/json \
+     -d '{"statements":[{"statement":"MATCH (p1:PROFILES)-[:RELATION]-(p2) RETURN ..."}]}' \
+     http://localhost:7474/db/data/transaction/commit \
+     | jq -r '(.results[0]) | .columns,.data[].row | @csv' | /dev/null
+
+% Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                               Dload  Upload   Total   Spent    Left  Speed
+100  970M    0  970M  100   184  6118k      1  0:03:04  0:02:42  0:00:22 6035k
+----
+
+This transfers 60 million rows totalling 1 Gigabyte with 6.2MB per second on average, taking 3 minutes to finish.
+
+**Not bad.**
+
+=== References
+
+* https://github.com/jexp/neo4j-shell-tools#cypher-import[neo4j-shell-tools]
+* http://stedolan.github.io/jq/manual/[JQ manual]
+* http://neo4j.com/docs/stable/rest-api-transactional.html[transactional http endpoint]
+* https://snap.stanford.edu/data/soc-pokec.html[pokec social network dataset]
+* https://gist.github.com/jexp/280ed1a37368e24357c5[import script]

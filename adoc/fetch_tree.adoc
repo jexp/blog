@@ -1,0 +1,126 @@
+== Fetch a tree with Neo4j
+
+Today I came across a really interesting http://stackoverflow.com/questions/30940411/fetch-a-tree-with-neo4j[StackOverflow question]:
+
+> Given a forest of trees in a Neo4j REST server, I`m trying to return a single tree given the root vertex.
+Being each tree quite large, I need a de-duplicated list of all vertices and edges in order to be able to reconstruct the full tree on the client side.
+
+//setup
+[source,cypher]
+----
+CREATE (r:root)
+FOREACH (i IN range(1,5)| 
+         CREATE (r)-[:PARENT]->(c:child { id:i }));
+		 
+MATCH (c:child)
+         FOREACH (j IN range(1,5)| 
+            CREATE (c)-[:PARENT]->(:child { id:c.id*10+j }));
+----
+
+//graph		
+
+How many nodes and rels do we have in the graph ? One root node, 5 children and 25 grandchildren, makes 31 nodes, 30 relationships.
+
+[source,cypher]
+----
+match (n)-[r]-()
+return count(distinct n) as nodes, count(distinct r) as rels
+----
+
+//table
+
+=== Answer by Brian Underwood	
+	
+http://twitter.com/cheerfulstoic[Brian] http://stackoverflow.com/a/30944366/728812[answered] the question with this suggestion:
+
+> if you want to get all of the nodes and relationships in one go, you may need to execute two queries:
+
+[source,cypher]
+----
+MATCH p = (r:root)-[*]->(x)
+WHERE NOT(x-->())
+UNWIND nodes(p) AS Vertex
+RETURN DISTINCT Vertex;
+----
+
+//table 
+
+[source,cypher]
+----
+MATCH p = (r:root)-[*]->(x)
+WHERE NOT(x-->())
+UNWIND rels(p) AS Edge
+RETURN DISTINCT startNode(Edge), endNode(Edge);
+----
+
+//table
+
+
+=== Update 1: Combine queries
+
+I thought about it that it should be easy to combine both queries into one:
+
+
+[source,cypher]
+----
+MATCH p = (r:root)-[*]->(x)
+WHERE NOT(x-->())
+UNWIND nodes(p) AS Vertex
+WITH collect(DISTINCT Vertex) as nodes, collect(rels(p)) as paths
+UNWIND paths AS Edges
+UNWIND Edges as Edge
+WITH nodes, collect(distinct Edge) as rels
+RETURN size(nodes),size(rels),nodes,rels
+----
+
+//table
+
+=== Update 2: Only return ids
+
+Speed it up by just ignoring the additional (expensive) where condition and let `distinct` do its job.
+
+[source,cypher]
+----			
+MATCH p = (r:root)-[*]->(x)
+UNWIND nodes(p) AS Vertex
+WITH collect(DISTINCT id(Vertex)) as nodes, collect(rels(p)) as paths
+UNWIND paths AS Edges
+UNWIND Edges as Edge
+WITH nodes, collect(distinct [id(startNode(Edge)),id(endNode(Edge))]) as rels
+RETURN size(nodes),size(rels),nodes,rels
+----
+
+//table
+
+=== Update 3: The "Cypher" Way
+
+Actually cypher returns one path per match-step, so even the sub-paths that build up the tree are returned, so each `x` is returned once from the match.
+(Those intermediate ones were filtered out before).
+
+So we can just use them and `collect` them in a distinct list. That's for the nodes.
+
+For the rels we only need to look at the `last` relationship before `x` as the others were already returned by previous paths.
+We collect the distinct last rels and extract the id's of the start- and end-nodes to be returned.
+
+[source,cypher]
+----			
+MATCH p = (:root)-[r*]->(x)
+WITH collect(DISTINCT id(x)) as nodes, [r in collect(distinct last(r)) | [id(startNode(r)),id(endNode(r))]] as rels
+RETURN size(nodes),size(rels), nodes, rels
+----
+
+//table
+
+
+=== Update 4: Including the root node
+
+If you also want to include the root node, just change `*` to `*0..` like here:
+
+[source,cypher]
+----			
+MATCH p = (:root)-[r*0..]->(x)
+WITH collect(DISTINCT id(x)) as nodes, [r in collect(distinct last(r)) | [id(startNode(r)),id(endNode(r))]] as rels
+RETURN size(nodes),size(rels), nodes, rels
+----
+
+//table

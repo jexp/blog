@@ -1,0 +1,87 @@
+== Neo4j Docker Image
+
+We're happy to announce our first _semi-official_ https://hub.docker.com/u/neo4j/neo4j[Neo4j - Docker image], after getting many requests for it from our users and customers.
+
+It is _semi-official_, because it doesn't come with guarantees, official customer support and has not been as tested as the rest of our product packaging.
+
+First of all, I want to thank everyone in our community who already provided great Docker images for Neo4j, we took inspiration from those when creating our own.
+Special thanks to Abed Halawi, Kenny Bastani, Dennis Wilson and Ben Butler-Cole.
+
+We're also grateful for the feedback that we already got in the discussion around the requirements and realisiation of the image.
+
+We make the recent versions available
+
+=== Run it
+
+
+----
+docker run -i -t --rm --name neo4j -v $HOME/neo4j-data:/data -p 8476:7474 neo4j/neo4j
+----
+
+There are several tags available:
+
+* `2.2.3`: Neo4j Community 2.2.3 Stable Version
+* `2.3-M02`: Neo4j Community 2.3-M02 Milestone Preview
+* `latest`:  latest stable version (now 2.2.3) (master)
+
+These are built from branches of the GitHub Repository.
+
+=== Implementation
+
+The implementation is pretty straightforward, you can see it in the https://github.com/neo4j-contrib/docker-neo4j/blob/master/Dockerfile[`Dockerfile`]
+
+* based on ubuntu + java8 image
+* download and extract Neo4j to `/var/lib/neo4j`
+* mount `/data` directory within volume
+* update some configuration values (enable shell, set max tx-log-file size, data directory, fix RRD issue) 
+* expose ports `7474` and `7473` for http(s) and `1337` and `1099` for neo4j-shell
+* add and run a start script `neo4j.sh` 
+* the start script sets some runtime configuration parameters
+* links the `/data` directory to `/var/lib/neo4j/data`
+* optionally disables auth
+* starts Neo4j in console mode
+
+=== Building the Image
+
+1. Build & Run:
+
+```
+git clone https://github.com/neo4j-contrib/docker-neo4j
+cd docker-neo4j
+docker build .
+
+# note the resulting image-id
+# run the image, -i -t for interactive and terminal so you can stop the server with ctrl-c
+# `--rm` deletes the image instance after it has stopped
+# pass in the path to an existing neo4j `data` directory or just an empty directory
+# `-d` would run it in detached daemon mode, which is the opposite of `-i -t`
+
+# docker run -i -t --rm --name neo4j -v </path/to/neo4j/data-dir>:/data -p <external port>:7474 <image-id>
+# for example:
+
+docker run -i -t --rm --name neo4j -v $HOME/neo4j-data:/data -p 8476:7474 <image-id>
+```
+
+2. Open in browser
+
+     `http://localhost:8474` 
+
+On OSX use http://boot2docker.io/[boot2docker] and replace localhost with the IP from `$DOCKERHOST` instead.
+
+### Authentication
+
+
+Please note that Neo4j 2.2.x requires authentication.
+You have to login with `neo4j/neo4j` at the first connection and set a new password.
+The auth credentials are stored in the `/data/dbms/auth` file, which will reside in your external directory.
+
+You can also access the Neo4j log-files in `data/log` and `data/graph.db/messages.log`
+
+If you set an environment variable `NEO4J_NO_AUTH` to a non-empty value, Neo4j's authentication will be disabled.
+
+
+=== References
+
+* https://hub.docker.com/u/neo4j/neo4j[Neo4j on Docker Hub]
+* https://github.com/neo4j-contrib/docker-neo4j[Docker GitHub Repository]
+* http://neo4j.com/developer/docker[Neo4j with Docker Developer Pages]
