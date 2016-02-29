@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.4">
-<title>Quick Neo4j Export - Import Roundtrip via CSV</title>
+<title>Neo4j Stored Procedures</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -419,105 +419,205 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
-<h1>Quick Neo4j Export - Import Roundtrip via CSV</h1>
+<h1>Neo4j Stored Procedures</h1>
 </div>
 <div id="content">
 <div id="preamble">
 <div class="sectionbody">
 <div class="paragraph">
-<p>I just quickly want to show how to roundtrip an export of a small Neo4j database using Neo4j-Browser and Cypher.</p>
+<p>One of the many exciting features of Neo4j 3.0 are "Stored Procedures" that, unlike the existing Neo4j-Server extensions are directly callable from Cypher.</p>
+</div>
+<div class="paragraph">
+<p>At the time of this writing it is only possible to call them in a stand-alone statement with <code>CALL package.procedure(params)</code>
+but the plan is to make them a fully integrated part of Cypher statements.
+Either by making <code>CALL</code> a clause or by turning procedures into function-expressions (which would be my personal favorite).</p>
+</div>
+<div class="paragraph">
+<p>Currently procedures can only be written in Java (or other JVM languages).
+You might say, "WTF &#8230;&#8203; Java", but it is less tedious than it sounds.</p>
+</div>
+<div class="paragraph">
+<p>First of all, the effort of setting up a procedure project, writing and building it is minimal.</p>
+</div>
+<div class="paragraph">
+<p>To get up and running you first need a recent copy of Neo4j 3.0,
+either the <a href="http://neo4j.com/download/other-releases">3.0.0-M04 milestone</a> or the latest build from the <a href="http://alpha.neohq.net">Alpha Site</a>.</p>
+</div>
+<div class="paragraph">
+<p>To get you started you also need a JDK and a build tool like Gradle or Maven.</p>
+</div>
+<div class="paragraph">
+<p>You can effectively copy the procedure template example that Jake Hansson <a href="https://github.com/neo4j-examples/neo4j-procedure-template">provided in neo4j-examples</a> as a starting point.</p>
+</div>
+<div class="paragraph">
+<p>But let me quickly walk you through an even simpler example (<a href="https://github.com/jexp/neo4j-procedures-demo">GitHub Repository</a>).</p>
+</div>
+<div class="paragraph">
+<p>You need to declare the <code>org.neo4j:neo4j:3.0.0[-M04]</code> dependency in the <code>provided</code> scope, to get the necessary annotations and the Neo4j API to talk to the database.</p>
+</div>
+<div class="listingblock">
+<div class="title">pom.xml</div>
+<div class="content">
+<pre class="highlight"><code class="language-xml" data-lang="xml">&lt;dependency&gt;
+  &lt;groupId&gt;org.neo4j&lt;/groupId&gt;
+  &lt;artifactId&gt;neo4j&lt;/artifactId&gt;
+  &lt;version&gt;${neo4j.version}&lt;/version&gt;
+  &lt;scope&gt;provided&lt;/scope&gt;
+&lt;/dependency&gt;</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">build.gradle</div>
+<div class="content">
+<pre class="highlight"><code class="language-groovy" data-lang="groovy">project.ext {
+    neo4j_version = ""
+}
+dependencies {
+	compile group: "org.neo4j", name:"neo4j", version:project.neo4j_version
+	testCompile group: "org.neo4j", name:"neo4j-kernel", version:project.neo4j_version, classifier:"tests"
+	testCompile group: "org.neo4j", name:"neo4j-io", version:project.neo4j_version, classifier:"tests"
+	testCompile group: "junit", name:"junit", version:4.12
+}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>If you have a great idea on what kind of procedure you want to write, just open a file with a new class.</p>
+</div>
+<div class="paragraph">
+<p>Please note that the only package and method names become the procedure name (but <strong>not</strong> the class name).</p>
+</div>
+<div class="paragraph">
+<p>In our example we will create a very simple procedure that just computes the minimum and maximum degrees of a certain label.</p>
+</div>
+<div class="paragraph">
+<p>The reference to Neo4j&#8217;s <code>GraphDatabaseService</code> instance is injected into your class into the field annotated with <code>@Context</code>.
+As procedures are meant to be stateless, declaring non-injected non-static fields is not allowed.</p>
+</div>
+<div class="paragraph">
+<p>In our case the procedure will be named <code>stats.degree</code> and called like <code>CALL stats.degree('User')</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-java" data-lang="java">package stats;
+
+public class GraphStatistics {
+
+    @Context private GraphDatabaseService db;
+
+    // Result class
+    public static class Degree {
+        public String label;
+        // note, that "int" values are not supported
+        public long count, max, min = Long.MAX_VALUE;
+
+        // method to consume a degree and compute min, max, count
+        private void add(long degree) {
+          if (degree &lt; min) min = degree;
+          if (degree &gt; max) max = degree;
+          count ++;
+        }
+    }
+
+    @Procedure
+    public Stream&lt;Degree&gt; degree(String label) {
+        // create holder class for results
+        Degree degree = new Degree(label);
+        // iterate over all nodes with label
+        try (ResourceIterator it = db.findNodes(Label.label(label))) {
+            while (it.hasNext()) {
+               // submit degree to holder for consumption (i.e. max, min, count)
+               d.add(it.next().getDegree());
+            }
+        }
+        // we only return a "Stream" of a single element in this case.
+        return Stream.of(degree);
+    }
+}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>If you want to test the procedures quickly without spinning up an in-process server and connecting to it remotely (e.g. via the new binary bolt protocol as shown in the <a href="https://github.com/neo4j-examples/neo4j-procedure-template">procedure-template</a>), then you can use the test-facilities of Neo4j&#8217;s Java API.</p>
+</div>
+<div class="paragraph">
+<p>Now we can test our new and shiny procedure by writing a small unit-test.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-java" data-lang="java">package stats;
+
+class GraphStatisticsTest {
+    @Test public void testDegree() {
+        // given Alice knowing Bob and Charlie and Dan knowing no-one
+        db.execute("CREATE (alice:User)-[:KNOWS]-&gt;(bob:User),(alice)-[:KNOWS]-&gt;(charlie:User),(dan:User)").close();
+
+        // when retrieving the degree of the User label
+        Result res = db.execute("CALL stats.degree('User')");
+
+        // then we expect one result-row with min-degree 0 and max-degree 2
+        assertTrue(res.hasNext());
+        Map&lt;String,Object&gt; row = res.next();
+        assertEquals("User", row.get("label"));
+        // Dan has no friends
+        assertEquals(0, row.get("min"));
+        // Alice knows 2 people
+        assertEquals(2, row.get("max"));
+        // We have 4 nodes in our graph
+        assertEquals(4, row.get("count"));
+        // only one result record was produced
+        assertFalse(res.hasNext());
+    }
+}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Of course you can use procedures to create procedures, e.g. in other languages that are supported natively on the JVM like JavaScript via Nashorn, or Clojure, Groovy, Scala, Frege (Haskell), (J)Ruby or (J/P)ython.
+I wrote one for creating and running procedures implemented in JavaScript.</p>
+</div>
+<div class="paragraph">
+<p>There are many other cool things that you can do with procedures, see the resources below.</p>
+</div>
+<div class="paragraph">
+<p>If you have ideas for procedures or wrote some of your own, please <a href="mailto:michael@neo4j.com">let us know</a>.</p>
+</div>
+<div class="paragraph">
+<p>Join our public <a href="http://neo4j.com/slack">Slack channel</a> and visit <code>#neo4j-procedures</code>.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_setup">Setup</h2>
+<h2 id="_resources">Resources</h2>
 <div class="sectionbody">
-<div class="paragraph">
-<p>We use the movie example data-set. Just run <code>:play movies</code> in your browser and insert the data.</p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_export">Export</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>Then to export the CSV run this statement which returns the graph structure as tabular result, exporting one relationship-pair from person to movie per row.</p>
-</div>
-<div class="paragraph">
-<p>For your own export you would have to adapt the statement.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (p:Person)-[r]-&gt;(m:Movie)
-return p.name as name, p.born as born,
-       type(r) as type, reduce(a="", r in r.roles | a + r + ";") as roles,
-       m.title as title, m.released as released, m.tagline as tagline</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>Please note that I export each property as a single column, we don&#8217;t need to export the labels of the nodes here, as they are fixed.
-If you have a variable dataset, you might want to export the labels of a node as a separate column.
-The roles are a string array, which we turn into a semicolon-separated string in one column.</p>
-</div>
-<div class="paragraph">
-<p>Using the download icon, you can download the results as as CSV, which you can store locally or a accessible HTTP-URL.</p>
-</div>
-<div class="paragraph">
-<p>In my case I put it on DropBox: <a href="https://dl.dropboxusercontent.com/u/14493611/movies_setup.csv" class="bare">https://dl.dropboxusercontent.com/u/14493611/movies_setup.csv</a></p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>To import the data again, we use LOAD CSV.
-We merge the nodes on their primary key, here it is <code>:Movie(title)</code> and <code>:Person(name)</code>.</p>
-</div>
-<div class="paragraph">
-<p>To ensure performant loading and avoiding duplicates it is recommended to create a unique constraint upfront:</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code class="language-cypher" data-lang="cypher">CREATE CONSTRAINT ON (p:Person) ASSERT p.name IS UNIQUE;
-CREATE CONSTRAINT ON (m:Movie)  ASSERT m.title IS UNIQUE;</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>When merging nodes on their primary keys, we only have to set the other properties once, when they are first created.
-Due to the output of pairs, each node might appear multiple times, so MERGE guarantees uniqueness.</p>
-</div>
-<div class="paragraph">
-<p>Unfortunately there is currently no means to dynamically determine labels and relationship-types from input data, so we have to resort to a trick.</p>
-</div>
-<div class="paragraph">
-<p>We use a conditional within FOREACH to create an one-element or empty collection if a certain conditions is met, so that the operation within is executed or not.</p>
-</div>
-<div class="listingblock">
-<div class="content">
-<pre class="highlight"><code class="language-cypher" data-lang="cypher">LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/movies_setup.csv" AS row
-MERGE (m:Movie {title:row.title}) ON CREATE SET m.tagline = row.tagline,m.released=row.released
-MERGE (p:Person {name:row.name}) ON CREATE SET p.born = row.born
-FOREACH (_ in CASE row.type WHEN "ACTED_IN" then [1] else [] end |
-   MERGE (p)-[r:ACTED_IN]-&gt;(m) ON CREATE SET r.roles = split(row.roles,";")[0..-1]
-)
-FOREACH (_ in CASE row.type WHEN "DIRECTED" then [1] else [] end | MERGE (p)-[:DIRECTED]-&gt;(m))
-FOREACH (_ in CASE row.type WHEN "PRODUCED" then [1] else [] end | MERGE (p)-[:PRODUCED]-&gt;(m))
-FOREACH (_ in CASE row.type WHEN "WROTE"    then [1] else [] end | MERGE (p)-[:WROTE]-&gt;(m))
-FOREACH (_ in CASE row.type WHEN "REVIEWED" then [1] else [] end | MERGE (p)-[:REVIEWED]-&gt;(m))</code></pre>
-</div>
-</div>
-<div class="imageblock">
-<div class="content">
-<img src="../img/simple_csv_export_import.jpg" alt="simple csv export import">
-</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Neo4j Manual: <a href="http://neo4j.com/docs/3.0.0-M04/query-call.html">Calling &amp; Writing Procedures</a></p>
+</li>
+<li>
+<p><a href="https://github.com/jexp/neo4j-procedures-demo">GitHub Repository for this example</a></p>
+</li>
+<li>
+<p>Jacon Hansons <a href="https://github.com/neo4j-examples/neo4j-procedure-template">Procedure Template</a> for manual index updates and queries</p>
+</li>
+<li>
+<p>Mark Needham wrote a <a href="http://www.markhneedham.com/blog/2016/02/28/neo4j-a-procedure-for-the-slm-clustering-algorithm">Graph Algorithm Procedure Blog Post</a></p>
+</li>
+<li>
+<p><a href="https://github.com/jexp/neo4j-apoc-procedures">APOC Utility procedures</a>, JSON, Loading, Collection Handling, Timestamps</p>
+</li>
+<li>
+<p>Creating <a href="https://github.com/jexp/neo4j-javascript-procedures">JavaScript based Procedures</a></p>
+</li>
+<li>
+<p><a href="https://github.com/neo4j-contrib/graph-refactoring">Graph Refactorings</a></p>
+</li>
+</ul>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-12-16 21:46:41 CET
+Last updated 2016-02-29 21:48:06 CET
 </div>
 </div>
 </body>

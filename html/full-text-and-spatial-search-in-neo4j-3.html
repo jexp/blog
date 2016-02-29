@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.4">
-<title>Quick Neo4j Export - Import Roundtrip via CSV</title>
+<title>Neo4j 3.x Spatial and Fulltext capabilities</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -419,97 +419,187 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
-<h1>Quick Neo4j Export - Import Roundtrip via CSV</h1>
+<h1>Neo4j 3.x Spatial and Fulltext capabilities</h1>
 </div>
 <div id="content">
 <div id="preamble">
 <div class="sectionbody">
 <div class="paragraph">
-<p>I just quickly want to show how to roundtrip an export of a small Neo4j database using Neo4j-Browser and Cypher.</p>
+<p>If you&#8217;ve followed my blog in the past, you know that Neo4j lagged behind a bit, replacing the old manual indexes with respective schema indexes.</p>
+</div>
+<div class="paragraph">
+<p>But now with Neo4j 3.x on the horizon this will be amended.
+Today I want to present some of the capabilities will be available with version 3.0.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>index supported <code>STARTS WITH</code>, <code>CONTAINS</code>, <code>ENDS WITH</code> text search</p>
+</li>
+<li>
+<p>index supported range searches for strings and numbers</p>
+</li>
+<li>
+<p>combining indexes for multi-faceted lookups</p>
+</li>
+<li>
+<p>spatial point and distance functions</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Some of these capabilities don&#8217;t cover all the use-cases, but already provide great improvements to the existing functionality.</p>
+</div>
+<div class="paragraph">
+<p>Today we&#8217;ll use the <a href="http://factual.com">Factual dataset</a>, which is also nicely demoed in the <a href="http://www.popotojs.com/">popoto.js structural graph search</a> (<a href="http://www.popotojs.com/live/factual/index.html">example app</a>).</p>
+</div>
+<div class="paragraph">
+<p>TODO update all examples as soon as I have the factual dataset.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CREATE INDEX ON :Restaurant(name);
+CREATE INDEX ON :Restaurant(zip);
+
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/02c29202537e893a99f0/raw/factual_ca.csv" AS row
+CREATE (r:Restaurant {name:row.name, latitude:toFloat(row.latitude),toFloat(longitude:row.longitude),zip:toInt(row.zip)});</code></pre>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_setup">Setup</h2>
+<h2 id="_schema_indexes">Schema Indexes</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>We use the movie example data-set. Just run <code>:play movies</code> in your browser and insert the data.</p>
+<p>Schema indexes and constraints are defined like this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CREATE CONSTRAINT ON (r:Restaurant) ASSERT r.id IS UNIQUE;
+CREATE INDEX ON :Restaurant(name);
+CREATE INDEX ON :Restaurant(opened);</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>If you prefix your queries with <code>EXPLAIN</code> or <code>PROFILE</code> you should see the index being used with one of these Operations:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>NodeIndexSeek, NodeUniqueIndexSeek, NodeIndexSeekByRange, NodeUniqueIndexSeekByRange</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The textual query plan of a query looks like this:</p>
+</div>
+<div class="paragraph">
+<p>ANd the visual query plan like this:</p>
+</div>
+<div class="paragraph">
+<p>image::[]</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_export">Export</h2>
+<h2 id="_text_search">Text Search</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>Then to export the CSV run this statement which returns the graph structure as tabular result, exporting one relationship-pair from person to movie per row.</p>
+<p>Since version 2.3 Cypher began to provide support for schema-indexed text search, starting with <code>STARTS WITH</code>.
+In Neo4j 3.x <code>CONTAINS</code> and <code>ENDS WITH</code> will also use existing indexes.</p>
 </div>
-<div class="paragraph">
-<p>For your own export you would have to adapt the statement.</p>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+Currently all 3 functions are case sensitive.
+You might need to use a separate, indexed lower-cased property for text search.
+</td>
+</tr>
+</table>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (p:Person)-[r]-&gt;(m:Movie)
-return p.name as name, p.born as born,
-       type(r) as type, reduce(a="", r in r.roles | a + r + ";") as roles,
-       m.title as title, m.released as released, m.tagline as tagline</code></pre>
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CREATE INDEX ON :Restaurant(name);
+
+MATCH (r:Restaurant) WHERE r.name STARTS WITH "Taco" RETURN count(*);
+MATCH (r:Restaurant) WHERE r.name CONTAINS "Village" RETURN count(*);
+MATCH (r:Restaurant) WHERE r.name ENDS WITH "House" RETURN count(*);</code></pre>
 </div>
-</div>
-<div class="paragraph">
-<p>Please note that I export each property as a single column, we don&#8217;t need to export the labels of the nodes here, as they are fixed.
-If you have a variable dataset, you might want to export the labels of a node as a separate column.
-The roles are a string array, which we turn into a semicolon-separated string in one column.</p>
-</div>
-<div class="paragraph">
-<p>Using the download icon, you can download the results as as CSV, which you can store locally or a accessible HTTP-URL.</p>
-</div>
-<div class="paragraph">
-<p>In my case I put it on DropBox: <a href="https://dl.dropboxusercontent.com/u/14493611/movies_setup.csv" class="bare">https://dl.dropboxusercontent.com/u/14493611/movies_setup.csv</a></p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_range_searches">Range Searches</h2>
 <div class="sectionbody">
 <div class="paragraph">
-<p>To import the data again, we use LOAD CSV.
-We merge the nodes on their primary key, here it is <code>:Movie(title)</code> and <code>:Person(name)</code>.</p>
+<p>With the same 2.3 version, you were also able to use range searches on indexed properties.
+This works for numeric fields like timestamps, years, prices but also on textual properties like date-strings.</p>
 </div>
 <div class="paragraph">
-<p>To ensure performant loading and avoiding duplicates it is recommended to create a unique constraint upfront:</p>
+<p>All of the following predicate expressions work and use an index if available:</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-cypher" data-lang="cypher">CREATE CONSTRAINT ON (p:Person) ASSERT p.name IS UNIQUE;
-CREATE CONSTRAINT ON (m:Movie)  ASSERT m.title IS UNIQUE;</code></pre>
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">restaurant.rating &gt; 4
+restaurant.guests &gt; 200
+90 &lt; restaurant.price &lt; 130
+"2010-01-01" &lt; restaurant.opened &lt; "2010-09-01"</code></pre>
 </div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_multiple_facets">Multiple Facets</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Cypher&#8217;s query planner chooses the most selective index to query for a <em>label-property combination</em> if there are multiple choices.
+Then post-filtering other properties to check upon is the fastst way to get your data.</p>
 </div>
 <div class="paragraph">
-<p>When merging nodes on their primary keys, we only have to set the other properties once, when they are first created.
-Due to the output of pairs, each node might appear multiple times, so MERGE guarantees uniqueness.</p>
+<p>If need be, you can also force it to use an index with an index hint: <code>MATCH (n:Label) USING INDEX n:Label(prop) WHERE n.prop = "foo"</code>.</p>
 </div>
 <div class="paragraph">
-<p>Unfortunately there is currently no means to dynamically determine labels and relationship-types from input data, so we have to resort to a trick.</p>
+<p>Sometimes you have really large datasets (more than ten million entries) to query upon.
+Then two index lookups and joining them together might be the better choice.</p>
 </div>
 <div class="paragraph">
-<p>We use a conditional within FOREACH to create an one-element or empty collection if a certain conditions is met, so that the operation within is executed or not.</p>
+<p>You can achieve it with this (not so pretty variant):</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-cypher" data-lang="cypher">LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/movies_setup.csv" AS row
-MERGE (m:Movie {title:row.title}) ON CREATE SET m.tagline = row.tagline,m.released=row.released
-MERGE (p:Person {name:row.name}) ON CREATE SET p.born = row.born
-FOREACH (_ in CASE row.type WHEN "ACTED_IN" then [1] else [] end |
-   MERGE (p)-[r:ACTED_IN]-&gt;(m) ON CREATE SET r.roles = split(row.roles,";")[0..-1]
-)
-FOREACH (_ in CASE row.type WHEN "DIRECTED" then [1] else [] end | MERGE (p)-[:DIRECTED]-&gt;(m))
-FOREACH (_ in CASE row.type WHEN "PRODUCED" then [1] else [] end | MERGE (p)-[:PRODUCED]-&gt;(m))
-FOREACH (_ in CASE row.type WHEN "WROTE"    then [1] else [] end | MERGE (p)-[:WROTE]-&gt;(m))
-FOREACH (_ in CASE row.type WHEN "REVIEWED" then [1] else [] end | MERGE (p)-[:REVIEWED]-&gt;(m))</code></pre>
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (r:Restaurant)
+WHERE r.name CONTAINS "Village"
+MATCH (o:Restaurant)
+WHERE o.year &gt; 2010 AND r = o
+RETURN r;</code></pre>
 </div>
 </div>
-<div class="imageblock">
+<div class="paragraph">
+<p>TODO explain</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_geospatial_functions">Geospatial Functions</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The <code>point</code> function creates a geo-point from a node, relationship or map with a <code>latitude</code> and a <code>longitude</code> property with floating point values.
+The <code>distance</code> function computes the sperical distances between two of these points in <strong>meters</strong>.</p>
+</div>
+<div class="paragraph">
+<p>So you can filter two locations on distance or order a group of locations by distance.
+Those locations can both be nodes or one node and one point generated from user-input, which would be passed in as <code>geo</code> parameter with the two properties.</p>
+</div>
+<div class="listingblock">
 <div class="content">
-<img src="../img/simple_csv_export_import.jpg" alt="simple csv export import">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (r:Restaurant)
+WHERE r.name CONTAINS "Sushi"
+AND distance(point(r),point({latitude:52.0, longitude:11.0})) &lt; 20*1000
+RETURN r;</code></pre>
 </div>
 </div>
 </div>
@@ -517,7 +607,7 @@ FOREACH (_ in CASE row.type WHEN "REVIEWED" then [1] else [] end | MERGE (p)-[:R
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2015-12-16 21:46:41 CET
+Last updated 2016-02-28 23:33:02 CET
 </div>
 </div>
 </body>
