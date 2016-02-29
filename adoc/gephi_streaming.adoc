@@ -1,0 +1,348 @@
+== Stream your Graph from Neo4j to Gephi
+
+Many of you love Gephi's capabilities for graph rendering, layouting and visualization.
+
+TODO insert pretty gephi image here
+
+For a while now, the Gephi Marketplace hosts a Neo4j plugin that allows you to import data from a Neo4j data directory.
+
+Updating that plugin to work with subsequent versions of Neo4j has been more demanding than it should have been. 
+So unfortunately it has been lagging behind.
+Also only supporting datastore directories instead of Neo4j Server has been limiting.
+
+That's why some months ago I played around with the idea of just using the Gephi Streaming Plugin to send data from a Neo4j Cypher query directly to Gephi.
+
+Initially I thought about writing a Neo4j Server extension that provides an Endpoint for Gephi to read and write data from.
+
+But then I realized that there is a much easier way to achieve that, just by using `curl` and the powerful `jq` tool for JSON processing.
+You might remember my last article on http://neo4j.com/blog/export-csv-from-neo4j-curl-cypher-jq/["using jq to export your graph data to CSV"].
+
+=== Streaming Plugin
+
+The Streaming Plugin can be installed via the "Extras -> Plug-Ins" menu. Just search for the "Graph Streaming" Plugin and install it.
+
+After opening a new Gephi Project, you have a new Toolbar View Tab "Streaming" in the lower left area that allows you to configure it.
+The "Master" entry allows you to right-click a "Master Server" entry to start it.
+This puts Gephi into listening mode at "http://localhost:8080" (configurable via the "Settings" option).
+
+The graph-format that Gephi expects is really simple. It's described on TODO [this wiki page].
+
+The basic format to _add a node_ `"an"` is: `{"an":{"<unique-id>":{<key:value>}}}`.
+The `<unique-id>` is used to re-identify the node for later connecting, updating or deleting it.
+Properties can be any string, number, or boolean value.
+
+We can test it easily by just sending the appropriate JSON to Gephi using `curl` or any http tool (e.g. PostMan).
+
+----
+curl "http://localhost:8080/workspace0?operation=updateGraph" \
+  -d '{"an":{"A":{"label":"Node A"}}}'
+----
+
+We see the single node pop up, great.
+
+For relationships it is _add edge_ `"ae"`: `{"ae":{"<unique-id>":{"source":<source-node-id>, "target":<target-node-id>, "directed":true/false}}}`.
+
+Now let's add two more nodes and connect them with relationships to form a triangle:
+
+[NOTE]
+Please note that Gephi expects each JSON object being separated by a `\r` character (much like the Twitter streaming API) which is a bit cumbersome to achieve with curl (using substitution, see: `echo $'first\n\rsecond line'`)
+
+----
+curl "http://localhost:8080/workspace0?operation=updateGraph" \
+-d $'{"an":{"B":{"label":"Node B"}}}\r
+{"an":{"C":{"label":"Node C"}}}\r
+{"ae":{"AB":{"source":"A","target":"B","directed":false}}}\r
+{"ae":{"BC":{"source":"B","target":"C","directed":false}}}\r
+{"ae":{"CA":{"source":"C","target":"A","directed":false}}}'
+----
+
+=== Data
+
+Ok, now that we know how to create data in Gephi, let's get and convert the actual graph from Neo4j.
+
+You can use any graph data in Neo4j as a source, including the "Movies Graph" that you can import running `:play movies` in the Neo4j Browser.
+
+We're going to use a pretty neat tool by http://twitter.com/ikwattro[Christophe Willemsen] to import a meetup group event's attendees.
+
+You can find it on https://github.com/ikwattro/meetup2neo[GitHub].
+
+Run it:
+
+----
+composer install
+php import.php <meetup-id>
+----
+
+We just use the http://meetup.com/graphdb-london/XXXXX[last meetup of our amazing London User Group] why has been continiously grown by our London team, with http://twitter.com/markhneedham[Mark Needham] leading the effort.
+
+So with `php import.php 223439495` we get a nice big graph with:
+
+[source,cypher]
+----
+match (n) return head(labels(n)) as type, count(*) as count;
+----
+
+,===
+type,count
+Member,1506
+Topic,3127
+City,174
+Country,45
+Group,1459
+Event,1
+,===
+
+image::https://dl.dropboxusercontent.com/u/14493611/london_meetup_graph.jpg[]
+
+Now let's get this data into Gephi.
+
+=== Querying Neo4j
+
+It is very simple to read data from Neo4j via HTTP, from the http://neo4j.com/docs/stable/rest-api-transactional.html[transactional Cypher endpoint] listening on `http://localhost:7474/db/data/transaction/commit`
+
+Let's just find a few nodes, and return their id, label and properties:
+
+[source,cypher]
+----
+MATCH (n) RETURN id(n) as id, head(labels(n)) as type, n limit 4
+----
+
+[source,shell]
+----
+statement="MATCH (n) RETURN id(n) as id, head(labels(n)) as type, n limit 4"
+curl -s -H accept:application/json -H content-type:application/json \
+                   http://localhost:7474/db/data/transaction/commit  \
+     -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | tee nodes.json
+----
+
+.Result
+----
+{"results":[{
+  "columns":["id","type","n"],
+  "data":[
+     {"row":[0,"Event",{"id":223439495,"name":"Intro to Graphs",
+             "url":"http://www.meetup.com/graphdb-london/events/223439495/"}]},
+     {"row":[1,"Group",{"id":1954021,"name":"Neo4j - London User Group",
+             "url":"graphdb-london"}]},
+     {"row":[2,"Country",{"code":"GB"}]},
+     {"row":[3,"City",{"name":"London"}]}]}],"errors":[]}
+----
+
+=== JSON Format Conversion
+
+So now we can use jq to convert that Cypher JSON result. 
+As in the previous article where we converted it to CSV a bit of mangling is needed, we use the file that we created to get to the required format step by step.
+
+. First we select the path `.results[].data[].row` out of our result json
+. Then we start constructing a new JSON object with the _add node_ `an` key and a sub-object with +`... .row | {an: `+
+. The returned id at index 0 as key converted to a string +`...row| {an: {((.[0] | tostring))`+
+. And all the properties at position 2 merged with +`...row | {an: {((.[0] | tostring)) : (.[2] + `+
+. An object of the id again and the node-label renamed to type on position 1 and the name property as display-label for gephi: `(.[2] + {id:.[0], type:.[1], label:.[2].name})`
+. Putting it all together to: `'.results[].data[].row| {an: {((.[0] | tostring)) : (.[2] + {id:.[0], type:.[1], label:.[2].name})}}'`
+
+And running it with jq it creates the required output:
+
+----
+jq -a -c '.results[].data[].row| {an: {((.[0] | tostring)) : (.[2] + {id:.[0], type:.[1], label:.[2].name})}}' nodes.json
+
+{"an":{"0":{"id":0,"name":"Intro to Graphs","url":"http://www.meetup.com/graphdb-london/events/223439495/","type":"Event","label":"Intro to Graphs"}}}
+{"an":{"1":{"id":1,"name":"Neo4j - London User Group","url":"graphdb-london","type":"Group","label":"Neo4j - London User Group"}}}
+{"an":{"2":{"code":"GB","id":2,"type":"Country","label":null}}}
+{"an":{"3":{"name":"London","id":3,"type":"City","label":"London"}}}
+----
+
+So much for the nodes. For the relationships, i.e. the pairs of nodes connected by the relationship we have to extend our cypher statement a bit to:
+
+[source,cypher]
+----
+MATCH (a)-[r]->(b) 
+RETURN id(a) as a_id, head(labels(a)) as a_type, a, 
+       id(b) as b_id, head(labels(b)) as b_type, b, 
+       id(r) as r_id, type(r) as r_type, r limit 3
+----
+
+If we run this we get the information for the source node in positions 0,1,2 for the target node in positions 3,4,5 and for the relationship in 6,7.
+
+[options="autowidth"]
+,===
+a_id,a_type,a,b_id,b_type,b,r_id,r_type,r
+1,Group,"{""id"":1954021,""name"":""Neo4j - London User Group"",""url"":""graphdb-london""}",0,Event,"{""id"":223439495,""name"":""Intro to Graphs"",""url"":""http://www.meetup.com/graphdb-london/events/223439495/""}",0,ORGANISE_EVENT,{}
+5829,Member,"{""id"":141647852,""name"":""Andrew Potgieter""}",0,Event,"{""id"":223439495,""name"":""Intro to Graphs"",""url"":""http://www.meetup.com/graphdb-london/events/223439495/""}",21690,PARTICIPATE,"{""rsvp_id"":1558155804}"
+5170,Member,"{""id"":184431669,""name"":""Amar Menezes""}",0,Event,"{""id"":223439495,""name"":""Intro to Graphs"",""url"":""http://www.meetup.com/graphdb-london/events/223439495/""}",21691,PARTICIPATE,"{""rsvp_id"":1562191901}"
+,===
+
+
+So with a bit of busy typing we end up at a jq script which converts all 3 into the appropriate format expected by Gephi:
+
+----
+statement="MATCH (a)-[r]->(b) RETURN id(a) as a_id, head(labels(a)) as a_type, a, id(b) as b_id, head(labels(b)) as b_type, b, id(r) as r_id, type(r) as r_type, r limit 100"
+curl -s http://localhost:7474/db/data/transaction/commit -H accept:application/json -H content-type:application/json -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | \
+jq -a -c '.results[].data[].row  |
+ {an: {((.[0] | tostring)) : (.[2] + {id:.[0], type:.[1], label:.[2].name})}},
+ {an: {((.[3] | tostring)) : (.[5] + {id:.[3], type:.[4], label:.[5].name})}}, 
+ {ae: {((.[6] | tostring)) : (.[8] + {source: .[0] | tostring , target: .[3] | tostring, id:.[6], label:.[7]})}}' 
+----
+
+Now we have to add the aforementioned carriage returns `\r` to each line (unfortunately I couldn't find a way to do it with `jq`, so we use `sed`).
+And send it all off to Gephi with the curl command we used earlier (with `--data-binary` for keeping the newlines and `@-` to read the payload from STDIN).
+
+So here it is in its full beauty:
+
+----
+statement="MATCH (a)-[r]->(b) RETURN id(a) as a_id, head(labels(a)) as a_label, a, id(b) as b_id, head(labels(b)) as label, b, id(r) as r_id, type(r) as r_type, r"
+
+curl -s http://localhost:7474/db/data/transaction/commit -H accept:application/json -H content-type:application/json -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | \
+jq -a -c '.results[].data[].row  |
+ {an: {((.[0] | tostring)) : (.[2] + {id:.[0], type:.[1], label:.[2].name})}},
+ {an: {((.[3] | tostring)) : (.[5] + {id:.[3], type:.[4], label:.[5].name})}}, 
+ {ae: {((.[6] | tostring)) : (.[8] + {source: .[0] | tostring , target: .[3] | tostring, id:.[6], label:.[7]})}}' | sed -e $'s/}}}/}}}\r/' | \
+curl -s -i --data-binary @- -XPOST "http://localhost:8080/workspace0?operation=updateGraph" |\
+wc -l
+----
+
+Which tells us it sent 768 lines to Gephi.
+
+
+=== Gephi
+
+Within Gephi we can now analyze, cluster, explore and render the data.
+
+Here is a nice rendering of our London Meetup Group:
+
+TODO make it nice
+
+image::http://dl.dropboxusercontent.com/u/14493611/london_meetup_gephi.jpg[]
+
+
+To make this easier to use, I packaged it all into github-gist[a shell script on GitHub] that you can run directly.
+If you want to change the defaults (ports, statement etc.) see the variables at the begining of the script.
+
+It should be pretty easy to build a python, ruby, javascript script that does the same. Just fetch the data, convert the JSON and send it off again.
+
+You can use my "LOAD JSON from URL" article as an inspiration from that, if you send me the script in your favorite programming language I add it on GitHub.
+
+=== Further ideas
+
+We could simplify the whole approach by adding nodes first and relationships later. 
+That would simplify the cypher statements and jq scripts, and reduce the transferred data amount.
+But you have to execute two commands to populate the graph in gephi.
+
+Here is an example:
+
+----
+statement="MATCH (a)-[r]->(b) RETURN id(a), head(labels(a)), a"
+
+curl -s http://localhost:7474/db/data/transaction/commit -H accept:application/json -H content-type:application/json -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | \
+jq -a -c '.results[].data[].row  |
+ {an: {((.[0] | tostring)) : (.[2] + {id:.[0], type:.[1], label:.[2].name})}}' | sed -e $'s/}}}/}}}\r/' | \
+curl -s -i --data-binary @- -XPOST "http://localhost:8080/workspace0?operation=updateGraph" |\
+wc -l
+
+statement="MATCH (a)-[r]->(b) RETURN id(a), id(b), id(r), type(r), r"
+
+curl -s http://localhost:7474/db/data/transaction/commit -H accept:application/json -H content-type:application/json -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | \
+jq -a -c '.results[].data[].row  |
+ {ae: {((.[2] | tostring)) : (.[4] + {source: .[0] | tostring , target: .[1] | tostring, id:.[2], label:.[3]})}}' | sed -e $'s/}}}/}}}\r/' | \
+curl -s -i --data-binary @- -XPOST "http://localhost:8080/workspace0?operation=updateGraph" |\
+wc -l
+----
+
+It would be nice to color the nodes in Gephi by a provided property (like a label), unfortunately I haven't found a way to do that. 
+
+The only built in attribute would be `Component ID` which is usually used for clustering. 
+Now if we could turn the node-label into a numeric value then we could set the `Component ID` to that value. 
+Unfortunately there are no `char` or `hash` functions in Cypher or `jq` yet. 
+
+
+So we would either have to spell it out using `case head(labels(n)) when "Person" then 1 when "Topic" then 2 else 0 end`. 
+If all labels have different text lengths we could get different `Component ID`s with length(label).
+
+For rendering the captions in gephi, it would be nice to exclude them from users to reduce the noise and only keep them on meetup, topic, city. 
+To achieve that we can again in cypher use case-when to only output the text when needed.
+
+----
+MATCH (a)-[r]->(b) 
+RETURN id(a) as a_id, head(labels(a)) as a_type, a, 
+       id(b) as b_id, head(labels(b)) as b_type, b, 
+       id(r) as r_id, type(r) as r_type, r limit 3
+----
+
+=== Running Gephi 0.82 on OSX
+
+As Gephi 0.82 has some problems with Java 1.7+, to make it run on OSX I changed the configuration file `gephi.conf` 
+in: `/Applications/Gephi082.app/Contents/Resources/gephi/etc/gephi.conf`
+to point to a Java 6 installation which I got from https://support.apple.com/kb/DL1572[Apple].
+
+.gephi.conf
+----
+#jdkhome="/Library/Java/JavaVirtualMachines/jdk1.7.0_45.jdk/Contents/Home"
+jdkhome="/System/Library/Java/JavaVirtualMachines/1.6.0.jdk/Contents/Home"
+----
+
+=== Resources
+
+* http://gephi.org[Gephi Website]
+* http://stedolan.github.io/jq/manual/[jq Manual]
+* Visualizing http://gabesawhney.com/visualizing-twitter-clusters-with-gephi-update/[Twitter], http://pegasusdata.com/2013/01/10/facebook-friends-network-mapping-a-gephi-tutorial/[Facebook] and https://www.briggsby.com/how-visualize-open-site-explorer-data-in-gephi/[Website Struture] with Gephi
+* TODO [Gephi Neo4j Plugin]
+
+////
+
+statement="MATCH (n) RETURN '_'+str(id(n)) as id, head(labels(n)) as label, n limit 4"
+curl http://localhost:7474/db/data/transaction/commit -H accept:application/json -H content-type:application/json -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | tee ~/trash/nodes.json
+
+jq -c '.results[].data[].row| {an: {(.[0]) : (.[2] + {id:.[0], label:.[1]})}}' -f ~/trash/nodes.json | tr '\n' '\r' | curl "http://localhost:8080/workspace0?operation=updateGraph" -d -
+
+jq -a -c '.results[].data[].row| {an: {(.[0]) : (.[2] + {id:.[0], label:.[1]})}}'  < ~/trash/nodes.json
+
+
+
+curl "http://localhost:8080/workspace0?operation=updateGraph" -d "{\"an\":{\"A\":{\"label\":\"Node A\"}}}"
+
+jq -a -c '.results[].data[].row| {an: {(.[0]) : (.[2] + {id:.[0], label:.[1]})}}'  < ~/trash/nodes.json | sed -e 's/$/\r/'  | curl -i -XPOST "http://localhost:8080/workspace0?operation=updateGraph" -d - 
+
+
+{"an":{"_0":{"id":"_0","label":"Movie","tagline":"Welcome to the Real World","released":1999,"title":"The Matrix"}}}
+{"an":{"_1":{"id":"_1","label":"Person","born":1964,"name":"Keanu Reeves"}}}
+{"an":{"_2":{"id":"_2","label":"Person","born":1967,"name":"Carrie-Anne Moss"}}}
+{"an":{"_3":{"id":"_3","label":"Person","born":1961,"name":"Laurence Fishburne"}}}
+{\"an\":{\"A\":{\"label\":\"Node A\"}}}"
+
+statement="MATCH (n) RETURN '_'+str(id(n)) as id, head(labels(n)) as label, n limit 4"
+curl http://localhost:7474/db/data/transaction/commit -H accept:application/json -H content-type:application/json -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | \
+jq -a -c '.results[].data[].row| {an: {(.[0]) : (.[2] + {id:.[0], label:.[1]})}}'
+
+
+curl "http://localhost:8080/workspace0?operation=updateGraph" -d '{"an":{"_0":{"id":"_0","label":"Movie","tagline":"Welcome to the Real World","released":1999,"title":"The Matrix"}}}'
+
+
+curl "http://localhost:8080/workspace0?operation=updateGraph" -d $'{"an":{"A":{"label":"Node A"}}}\r
+{"an":{"B":{"label":"Node B"}}}\r
+{"an":{"C":{"label":"Node C"}}}\r
+{"ae":{"AB":{"source":"A","target":"B","directed":false}}}\r
+{"ae":{"BC":{"source":"B","target":"C","directed":false}}}\r
+{"ae":{"CA":{"source":"C","target":"A","directed":false}}}'
+
+statement="MATCH (a)-[r]->(b) RETURN id(a) as a_id, head(labels(a)) as a_label, a, id(b) as b_id, head(labels(b)) as label, b, id(r) as r_id, type(r) as r_type, r limit 100"
+statement="MATCH (a)-[r]->(b) RETURN id(a) as a_id, head(labels(a)) as a_label, a, id(b) as b_id, head(labels(b)) as label, b, id(r) as r_id, type(r) as r_type, r"
+
+statement="MATCH (a)-[r]->(b) RETURN id(a) as a_id, head(labels(a)) as a_label, a, id(b) as b_id, head(labels(b)) as label, b, id(r) as r_id, type(r) as r_type, r limit 100"
+curl -s http://localhost:7474/db/data/transaction/commit -H accept:application/json -H content-type:application/json -d "{\"statements\":[{\"statement\":\"$statement\"}]}" | \
+jq -a -c '.results[].data[].row | 
+ {an: {((.[0] | tostring)) : (.[2] + {id:.[0], label:.[1]})}},
+ {an: {((.[3] | tostring)) : (.[5] + {id:.[3], label:.[4]})}}, 
+ {ae: {((.[6] | tostring)) : (.[8] + {source: .[0] | tostring , target: .[3] | tostring, id:.[6], label:.[7]})}}'  | sed -e $'s/}}}/}}}\r/' | \
+curl -s -i --data-binary @- -XPOST "http://localhost:8080/workspace0?operation=updateGraph" |\
+wc -l
+
+cat football.json | \
+jq -a -c '.results[].data[].row | 
+ {an: {((.[0] | tostring)) : (.[2] + {id:.[0], label:.[1]})}},
+ {an: {((.[3] | tostring)) : (.[5] + {id:.[3], label:.[4]})}}, 
+ {ae: {((.[6] | tostring)) : (.[8] + {source: .[0] | tostring , target: .[3] | tostring, id:.[6], label:.[7]})}}'  | sed -e $'s/}}}/}}}\r/' | \
+curl -s -i --data-binary @- -XPOST "http://localhost:8080/workspace0?operation=updateGraph" |\
+wc -l
+
+
+////
+

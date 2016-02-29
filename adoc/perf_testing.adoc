@@ -1,24 +1,159 @@
-== Lessons Learned when Performance Testing Neo4j
+== Advice for Performance Testing Neo4j
 
-ArangoDB benchmark
+Now and then performance tests pop up that compare Neo4j to other databases. 
+In many cases these might be well meant but don't consider relevant aspects of performance testing Neo4j.
 
-* Use labels and Indexes
+We hope that this article helps you getting as great results from your Neo4j evaluation as we do.
+If not please contact us to help you out before sinking days of time into it.
+You should be able to run your perf-tests after 4 hours max, please timebox it to that effort before reaching out.
 
-* Import correctly
-** don't store null values
-** store correct types
-**
+:toc:
 
 === Use a recent and up-to-date driver
 
 The benchmark started with seraph, which while being a really good driver, still used Neo4j-APIs that were 2 years old and not the most efficient ones.
+Currently http://github.comthingdom/node-neo4j/tree/v2[version 2 of node-neo4j] offers a more up-to-date implementation.
+Seraph will support the current endpoint too, there was a recent update with a new `seraph-core` library.
 
-current transactional cypher endpoint
+**Please make sure to use a driver that either uses the transactional Cypher endpoint or going forward the binary Neo4j protocol.**
 
-going forward binary
+=== Hardware
 
-=== Make 
+Depending on the size of your graph, the concurrency and complexity of your queries, make sure to use adequate hardware for testing.
 
-=== Don't measure on cold caches
+A fast SSD, enough CPUs for concurrent operations and memory to build up the in-memory caching and accomodate the memory usage of active operations should be available.
 
-* Use the second or third run
+A machine with a 240 G SSD, 16GB RAM and 4 cores (with hyperthreading) should be good enough to begin with testing realistic workloads.
+
+If you run within a virtualized environment keep an eye for the provisioned IO-Operations of your disk.
+You should also disable filesystem encryption and virus scanners for the database directory.
+
+On Linux make sure to use a suitable disk scheduler, go for `noop` or `deadline` instead of `cfq`.
+
+If you run your test-client across the network from Neo4j please also take network latency and bandwidth into account.
+
+=== Configuration
+
+Since Neo4j 2.2 configuration has been simplified.
+Here are the few things you should configure accordingly:
+
+----
+# in conf/neo4j.properties
+
+# based on your (expected) store disk size (nodes, rels, (string-)properties)
+dbms.pagecache.size=4G
+keep_logical_logs=100M size
+
+# for Neo4j 2.2.x enterprise
+cache_type=hpc
+
+# for Neo4j 2.2.x community
+cache_type=soft
+
+# in conf/neo4j-server.properties
+
+# database location
+org.neo4j.server.database.location=data/graph.db
+# disable auth as needed
+dbms.security.auth_enabled=false
+
+# in conf/neo4j-wrapper.conf
+
+wrapper.java.initmemory=8000
+wrapper.java.maxmemory=8000
+wrapper.java.additional=-Xmn2G
+----
+
+=== Neo4j Versions and Editions
+
+If you test performance, please keep in mind that with every new version of Neo4j we try to improve efficiency which yields better performance.
+
+So it's best to use the most recent stable (or milestone if your project start date is still a while out) to run your tests.
+
+As you could guess, Neo4j Enterprise is more scalable and performant than Neo4j Community Edition, so if you want to bring home the point that you can really get _from minutes to milliseconds_, grab an eval copy of Neo4j Enterprise and test it with your workload.
+
+Especially scalability across cores and more efficient memory management allow it to utilize system resources better.
+
+=== Import your Data
+
+You should have an idea about your datamodel, either whiteboard it first based on your query use-cases or use a *good, still normalized* ER-model for the time being.
+
+The most performant option of importing CSV data into Neo4j is the bulk importer `neo4j-import`.
+After that comes using the Java-APIs, and then Cypher both individual, parametrized statements as well as `LOAD CSV`.
+
+If you want to measure importing data into Neo4j, make sure you have the data locally available.
+You should check data quality upfront, see our http://neo4j.com/developer/guide-import-csv[import guide for details].
+Check that the relevant constraints and indexes are in place for looking nodes up via `MATCH` or `MERGE`, you can do that with `:schema` in the Neo4j browser (or `schema` in neo4j-shell).
+
+Try to import a small subset of the data first, to make sure everything is ok.
+Use `PERODIC COMMIT` if you import more than 50k elements in one go.
+
+Profiling your queries upfront, saves you from trial and error runs as it clearly shows you the bottlenecks or unwanted operations, like `Eager`, `AllNodesScan`, `NodeByLabelScan`.
+Just prefix your statement with `EXPLAIN` (will only create the plan) or `PROFILE` (will also run it and report rows and db-hits).
+
+If you experience imports that are lasting longer than expected, try to split up your statements into individual ones per node and per relationship that you want to create.
+(esp. if you use `MERGE` a lot).
+If your profiled query plan shows an `Eager` operation that's most likely the culprit.
+
+If you import from denormalized CSV you can speed up imports of repeated information by having Cypher process them only once, by adding a `WITH distinct row.some_id, row.some_name, row.some_value` for that entity after your `LOAD CSV`.
+
+When importing attributes, make sure to convert them to the right datatypes, don't store numbers or boolean as strings.
+*And don't store default values, just leave those properties off, after all Neo4j as a schema free database doesn't need them.*
+
+=== Query your Data
+
+To make sure your statements are run as efficiently as possible, make sure to profile them.
+
+This is done easily in both the Neo4j-Browser as well as the `neo4j-shell`.
+Either way just prefix your query with `PROFILE, you'll then get a query plan with contains the different operators with their individiual costs.
+Namely db-hits, which is a measure for how often the query engine had to go back to the database to ask for a bit of information.
+
+
+TODO finish this section
+
+
+=== Realistic Measurements
+
+As Neo4j is an operational database which is meant to be running for a long time, serving real-time requests, it needs some warmup time.
+This warmup time consists of compiling statements, filling and optimizing the caches for the hot datasets and allowing the Java Virtual Machine to optimize the bytecode of Neo4j.
+
+So don't measure on cold caches and a newly started database but take the second or better third run of your performance measurement.
+
+If you want to measure query times, it is best to get an good initial estimate by running them in the Neo4j-Shell, which connects to a running Neo4j-Server (or can be run standalone).
+There you have minimal overhead for executing queries. 
+You can also use parameters by setting them as shell variables `export name=Michael`.
+Also the profiling output in the `neo4j-shell` is quite understandable, even if it is not as fancy as the graphical query plan.
+
+After establishing a baseline, you can either run the queries multiple times from the shell, e.g. by putting them into a file an running `neo4j-shell -file test.cypher`.
+
+Or you can use a recent driver for your stack to get more realistic results which resemble query times you would get in your application.
+Just make sure to use parameters with your statements and stream the results as quickly as you can to finish completing the query.
+
+When measuring try not to measure the mean avergage response time but the percentiles of throughput and response time.
+Many performance measuring tools already do that.
+
+TODO http://www.azulsystems.com/sites/default/files/images/HowNotToMeasureLatency_LLSummit_NYC_12Nov2013.pdf[Coordinated Omission]
+
+=== Performance measurement tools
+
+TODO finish this section
+
+* Gatling
+* ab
+* jMeter
+* ??
+
+=== We can help
+
+Don't waste your time, fiddling around with configuration tuning, import, or queries. 
+We're here to help you be successful with your test.
+Based on our own comprehensive performance testing and countless proof of concept engagements with users and customers we know best which is the best way to success.
+
+So reach out to us or one of our partners for best results.
+
+
+=== Resources
+
+* MDM Gatling
+* Michael ab
+* jMeter (Stefan?)

@@ -1,0 +1,153 @@
+= Neo4j Stored Procedures
+
+One of the many exciting features of Neo4j 3.0 are "Stored Procedures" that, unlike the existing Neo4j-Server extensions are directly callable from Cypher.
+
+At the time of this writing it is only possible to call them in a stand-alone statement with `CALL package.procedure(params)` 
+but the plan is to make them a fully integrated part of Cypher statements.
+Either by making `CALL` a clause or by turning procedures into function-expressions (which would be my personal favorite).
+
+Currently procedures can only be written in Java (or other JVM languages).
+You might say, "WTF ... Java", but it is less tedious than it sounds.
+
+First of all, the effort of setting up a procedure project, writing and building it is minimal.
+
+To get up and running you first need a recent copy of Neo4j 3.0, 
+either the http://neo4j.com/download/other-releases[3.0.0-M04 milestone] or the latest build from the http://alpha.neohq.net[Alpha Site].
+
+To get you started you also need a JDK and a build tool like Gradle or Maven.
+
+You can effectively copy the procedure template example that Jake Hansson https://github.com/neo4j-examples/neo4j-procedure-template[provided in neo4j-examples] as a starting point.
+
+But let me quickly walk you through an even simpler example (https://github.com/jexp/neo4j-procedures-demo[GitHub Repository]).
+
+You need to declare the `org.neo4j:neo4j:3.0.0[-M04]` dependency in the `provided` scope, to get the necessary annotations and the Neo4j API to talk to the database.
+
+.pom.xml
+[source,xml]
+----
+<dependency>
+  <groupId>org.neo4j</groupId>
+  <artifactId>neo4j</artifactId>
+  <version>${neo4j.version}</version>
+  <scope>provided</scope>
+</dependency>
+----
+
+.build.gradle
+[source,groovy]
+----
+project.ext {
+    neo4j_version = ""
+}
+dependencies {
+	compile group: "org.neo4j", name:"neo4j", version:project.neo4j_version
+	testCompile group: "org.neo4j", name:"neo4j-kernel", version:project.neo4j_version, classifier:"tests"
+	testCompile group: "org.neo4j", name:"neo4j-io", version:project.neo4j_version, classifier:"tests"
+	testCompile group: "junit", name:"junit", version:4.12
+}
+----
+
+If you have a great idea on what kind of procedure you want to write, just open a file with a new class.
+
+Please note that the only package and method names become the procedure name (but *not* the class name).
+
+In our example we will create a very simple procedure that just computes the minimum and maximum degrees of a certain label.
+
+The reference to Neo4j's `GraphDatabaseService` instance is injected into your class into the field annotated with `@Context`.
+As procedures are meant to be stateless, declaring non-injected non-static fields is not allowed.
+
+In our case the procedure will be named `stats.degree` and called like `CALL stats.degree('User')`.
+
+[source,java]
+----
+package stats;
+
+public class GraphStatistics {
+
+    @Context private GraphDatabaseService db;
+
+    // Result class
+    public static class Degree {
+        public String label;
+        // note, that "int" values are not supported
+        public long count, max, min = Long.MAX_VALUE;
+
+        // method to consume a degree and compute min, max, count
+        private void add(long degree) {
+          if (degree < min) min = degree;
+          if (degree > max) max = degree;
+          count ++;
+        }
+    }
+
+    @Procedure
+    public Stream<Degree> degree(String label) {
+        // create holder class for results
+        Degree degree = new Degree(label);
+        // iterate over all nodes with label
+        try (ResourceIterator it = db.findNodes(Label.label(label))) {
+            while (it.hasNext()) {
+               // submit degree to holder for consumption (i.e. max, min, count)
+               d.add(it.next().getDegree());
+            }
+        }
+        // we only return a "Stream" of a single element in this case.
+        return Stream.of(degree);
+    }
+}
+----
+
+If you want to test the procedures quickly without spinning up an in-process server and connecting to it remotely (e.g. via the new binary bolt protocol as shown in the https://github.com/neo4j-examples/neo4j-procedure-template[procedure-template]), then you can use the test-facilities of Neo4j's Java API.
+
+////
+For testing it makes sense to depend on `org.neo4j.test:neo4j-harness` to spin up an in-process server and use the new `org.neo4j.driver:neo4j-java-driver` to communicate with that server.
+////
+
+Now we can test our new and shiny procedure by writing a small unit-test.
+
+[source,java]
+----
+package stats;
+
+class GraphStatisticsTest {
+    @Test public void testDegree() {
+        // given Alice knowing Bob and Charlie and Dan knowing no-one
+        db.execute("CREATE (alice:User)-[:KNOWS]->(bob:User),(alice)-[:KNOWS]->(charlie:User),(dan:User)").close();
+
+        // when retrieving the degree of the User label
+        Result res = db.execute("CALL stats.degree('User')");
+
+        // then we expect one result-row with min-degree 0 and max-degree 2
+        assertTrue(res.hasNext());
+        Map<String,Object> row = res.next();
+        assertEquals("User", row.get("label"));
+        // Dan has no friends
+        assertEquals(0, row.get("min"));
+        // Alice knows 2 people
+        assertEquals(2, row.get("max"));
+        // We have 4 nodes in our graph
+        assertEquals(4, row.get("count"));
+        // only one result record was produced
+        assertFalse(res.hasNext());
+    }
+}
+----
+
+Of course you can use procedures to create procedures, e.g. in other languages that are supported natively on the JVM like JavaScript via Nashorn, or Clojure, Groovy, Scala, Frege (Haskell), (J)Ruby or (J/P)ython.
+I wrote one for creating and running procedures implemented in JavaScript.
+
+There are many other cool things that you can do with procedures, see the resources below.
+
+If you have ideas for procedures or wrote some of your own, please link:mailto:michael@neo4j.com[let us know].
+
+Join our public http://neo4j.com/slack[Slack channel] and visit `#neo4j-procedures`.
+
+== Resources
+
+* Neo4j Manual: http://neo4j.com/docs/3.0.0-M04/query-call.html[Calling & Writing Procedures]
+* https://github.com/jexp/neo4j-procedures-demo[GitHub Repository for this example]
+* Jacon Hansons https://github.com/neo4j-examples/neo4j-procedure-template[Procedure Template] for manual index updates and queries
+* Mark Needham wrote a http://www.markhneedham.com/blog/2016/02/28/neo4j-a-procedure-for-the-slm-clustering-algorithm[Graph Algorithm Procedure Blog Post]
+* https://github.com/jexp/neo4j-apoc-procedures[APOC Utility procedures], JSON, Loading, Collection Handling, Timestamps
+* Creating https://github.com/jexp/neo4j-javascript-procedures[JavaScript based Procedures]
+* https://github.com/neo4j-contrib/graph-refactoring[Graph Refactorings]

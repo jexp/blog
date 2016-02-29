@@ -1,0 +1,645 @@
+== 5 Secrets to Neo4j 2.2 Query Tuning
+
+Even in Neo4j with its high performance graph traversals, there are always queries that could and should be run faster.
+
+Especially if your data is highly connected and global pattern matches make a single query take many million or billion paths into account.
+
+For this article, we're using the http://example-data.neo4j.org/files/cineasts_12k_movies_50k_actors-2.2.zip TODO [larger movie dataset], that is also listed on the http://neo4j.com/developer/example-data[example datasets page].
+
+The domain model that interests us here, is pretty straightforward:
+
+----
+(:Person {name}) -[:ACTS_IN|:DIRECTED]-> (:Movie {title}) -[:GENRE]-> (:Genre {name})
+----
+
+
+=== HARDWARE
+
+I presume you use a sensible machine, with a SSD (or enough IOPS) and decent amount of RAM.
+For highly concurrent load there should be also enough CPU cores to handle it.
+
+Did you monitor io-waits, top, for cpu and memory usage? Any bottlenecks that turn up? 
+If so then there might be other ways that they can be addressed.
+
+On Linux configure your disk scheduler to `noop` or `deadline` and mount the database volume with `noatime`. See this https://structr.org/blog/neo4j-performance-on-ext4[blog post].
+
+=== CONFIG
+
+For *best results*, use the latest stable version, i.e. Neo4j Enterprise 2.2.5.
+There is an Enterprise trial available to give you a high-watermark baseline.
+Compare it to Neo4j Community on your machine as needed.
+
+Set `dbms.pagecache.memory=4G` in `conf/neo4j.properties`
+
+or the size of the store-files (nodes, rels, props, string-props) combined
+
+----
+ls -lt data/graph.db/neostore.*.db
+3802094 16 Jul 14:31 data/graph.db/neostore.propertystore.db
+ 456960 16 Jul 14:31 data/graph.db/neostore.relationshipstore.db
+ 442260 16 Jul 14:31 data/graph.db/neostore.nodestore.db
+   8192 16 Jul 14:31 data/graph.db/neostore.schemastore.db
+   8190 16 Jul 14:31 data/graph.db/neostore.labeltokenstore.db
+   8190 16 Jul 14:31 data/graph.db/neostore.relationshiptypestore.db
+   8175 16 Jul 14:31 data/graph.db/neostore.relationshipgroupstore.db
+----
+
+Set heap to 8 to 16G depending on the RAM size of the machine, also configure young generation in `conf/neo4j-wrapper.conf`.
+
+----
+wrapper.java.initmemory=8000
+wrapper.java.maxmemory=8000
+wrapper.java.additional=-Xmn2G
+----
+
+That's mostly it, config-wise, if you are concurrency heavy you could also set the webserver threads in `conf/neo4j-server.properties`
+
+----
+# cpu * 2
+org.neo4j.server.webserver.maxthreads=24
+----
+
+=== QUERY TUNING
+
+Otherwise it is mostly query tuning (prefixing your statements with `EXPLAIN` to see what Cypher would do and `PROFILE` to retrieve the real execution data as well):
+
+For example this query, which has the `PROFILE` prefix,
+
+[source,cypher]
+----
+PROFILE
+MATCH (g:Genre {name:"Action"})<-[:GENRE]-(m:Movie)<-[:ACTS_IN]-(a)
+WHERE a.name =~ "A.*"
+RETURN distinct a.name;
+----
+
+
+
+image::https://dl.dropboxusercontent.com/u/14493611/query_plan_screenshot.jpg[float="right"]
+
+The visual query plan is nice in browser, the one in Neo4j-shell is easier to compare and it also has more raw numbers.
+
+////
++---------------------+---------------+-------+--------+-----------------------------+-----------------------------+
+|            Operator | EstimatedRows |  Rows | DbHits |                 Identifiers |                       Other |
++---------------------+---------------+-------+--------+-----------------------------+-----------------------------+
+|            Distinct |          2048 |   860 |   2636 |                      a.name |                      a.name |
+|           Filter(0) |          2155 |  1318 |  41532 | anon[32], anon[52], a, g, m | a.name ~= /{  AUTOSTRING1}/ |
+|      Expand(All)(0) |          2874 | 20766 |  23224 | anon[32], anon[52], a, g, m |         (m)<-[:ACTS_IN]-(a) |
+|           Filter(1) |           390 |  2458 |   2458 |              anon[32], g, m |                     m:Movie |
+|      Expand(All)(1) |           390 |  2458 |   2459 |              anon[32], g, m |           (g)<-[:GENRE]-(m) |
+| NodeUniqueIndexSeek |             1 |     1 |      1 |                           g |                :Genre(name) |
++---------------------+---------------+-------+--------+-----------------------------+-----------------------------+
+
+Total database accesses: 72310
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|            Distinct |          2048 |   860 |   2636 |                      a.name |                      a.name
+|           Filter(0) |          2155 |  1318 |  41532 | anon[32], anon[52], a, g, m | a.name ~= /{  AUTOSTRING1}/
+|      Expand(All)(0) |          2874 | 20766 |  23224 | anon[32], anon[52], a, g, m |         (m)<-[:ACTS_IN]-(a)
+|           Filter(1) |           390 |  2458 |   2458 |              anon[32], g, m |                     m:Movie
+|      Expand(All)(1) |           390 |  2458 |   2459 |              anon[32], g, m |           (g)<-[:GENRE]-(m)
+| NodeUniqueIndexSeek |             1 |     1 |      1 |                           g |                :Genre(name)
+6+h|Total database accesses: 72310
+|===
+
+
+===== Use Indexes and Constraints for Nodes you look up by Properties
+
+Check (with `schema` or `:schema`) that there is an index in place for non-unique values and a constraint for unique values.
+Make sure (with `EXPLAIN`) that the index is used in your query.
+
+[source,cypher]
+----
+CREATE INDEX ON :Movie(title);
+CREATE INDEX ON :Person(name);
+CREATE CONSTRAINT ON (g:Genre) ASSERT g.name IS UNIQUE;
+----
+
+Even for range queries (pre 2.3) it might be better to turn them into an `IN` query to leverage an index.
+
+[source,cypher]
+----
+// if :Movie(released) is indexed, this query for the nineties will *not use* an index:
+MATCH (m:Movie) WHERE m.released >= 1990 and m.released < 2000 RETURN count(*);
+
+CREATE INDEX ON :Movie(released);
+
+// but this will
+MATCH (m:Movie) WHERE m.released IN range(1990,1999)  RETURN count(*);
+
+// same for OR queries
+MATCH (m:Movie) WHERE m.released = 1990 OR m.released = 1991 OR ...
+----
+
+==== Patterns with bound Nodes are optimized
+
+If you have a pattern `(node)-[:REL]->(node)` where both nodes on either side are already bound,
+Cypher will optimize the match by taking the node-degree (number of relationships) into account
+when checking for the connection, starting on the smaller side and also caching internally.
+
+I.e. `+(actor)-[:ACTS_IN]->(movie)+` if both `actor` and `movie` are known, turns into that described `Expand(Into)` operation.
+If one side is not known, then it is a normal `Expand(All)` operation.
+
+==== Enforce Index lookups for both sides of a path
+
+Make sure that *if* nodes on both sides of a longer path *can* be found in an index, and are only a few hits of a larger total count,
+to add `USING INDEX` for both sides, in many cases that makes a big difference.
+
+It does not help a lot though if the path explodes in the middle and a simple left to right traversal with property checks would touch fewer paths.
+
+[source,cypher]
+----
+PROFILE 
+MATCH (a:Person {name:"Tom Hanks"})-[:ACTS_IN]->()<-[:ACTS_IN]-(b:Person {name:"Meg Ryan"})
+RETURN count(*);
+----
+
+////
++------------------+---------------+------+--------+------------------------------------+--------------------------------------------------------------------------+
+|         Operator | EstimatedRows | Rows | DbHits |                        Identifiers |                                                                    Other |
++------------------+---------------+------+--------+------------------------------------+--------------------------------------------------------------------------+
+| EagerAggregation |             0 |    1 |      0 |                           count(*) |                                                                          |
+|           Filter |             0 |    3 |    531 | anon[36], anon[49], anon[51], a, b | ((a:Person AND a.name == {  AUTOSTRING0}) AND NOT(anon[36] == anon[51])) |
+|   Expand(All)(0) |             3 |  177 |    204 | anon[36], anon[49], anon[51], a, b |                                                       ()<-[:ACTS_IN]-(a) |
+|   Expand(All)(1) |             2 |   27 |     28 |              anon[49], anon[51], b |                                                       (b)-[:ACTS_IN]->() |
+|    NodeIndexSeek |             1 |    1 |      2 |                                  b |                                                            :Person(name) |
++------------------+---------------+------+--------+------------------------------------+--------------------------------------------------------------------------+
+
+Total database accesses: 765
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+| EagerAggregation |             0 |    1 |      0 |                           count(*) |                                                                         
+|           Filter |             0 |    3 |    531 | anon[36], anon[49], anon[51], a, b | ((a:Person AND a.name == {  AUTOSTRING0}) AND NOT(anon[36] == anon[51]))
+|   Expand(All)(0) |             3 |  177 |    204 | anon[36], anon[49], anon[51], a, b |                                                       ()<-[:ACTS_IN]-(a)
+|   Expand(All)(1) |             2 |   27 |     28 |              anon[49], anon[51], b |                                                       (b)-[:ACTS_IN]->()
+|    NodeIndexSeek |             1 |    1 |      2 |                                  b |                                                            :Person(name)
+6+h|Total database accesses: 765
+|===
+
+
+*If we add the second index-hint, we get 10x fewer database hits.*
+
+[source,cypher]
+----
+PROFILE 
+MATCH (a:Person {name:"Tom Hanks"})-[:ACTS_IN]->()<-[:ACTS_IN]-(b:Person {name:"Meg Ryan"})
+USING INDEX a:Person(name) USING INDEX b:Person(name)
+RETURN count(*);
+----
+
+////
++------------------+---------------+------+--------+------------------------------------+---------------------------+
+|         Operator | EstimatedRows | Rows | DbHits |                        Identifiers |                     Other |
++------------------+---------------+------+--------+------------------------------------+---------------------------+
+| EagerAggregation |             0 |    1 |      0 |                           count(*) |                           |
+|           Filter |             0 |    3 |      0 | anon[36], anon[49], anon[51], a, b | NOT(anon[36] == anon[51]) |
+|     NodeHashJoin |             0 |    3 |      0 | anon[36], anon[49], anon[51], a, b |                  anon[49] |
+|   Expand(All)(0) |             2 |   27 |     28 |              anon[49], anon[51], b |        (b)-[:ACTS_IN]->() |
+| NodeIndexSeek(0) |             1 |    1 |      2 |                                  b |             :Person(name) |
+|   Expand(All)(1) |             2 |   35 |     36 |              anon[36], anon[49], a |        (a)-[:ACTS_IN]->() |
+| NodeIndexSeek(1) |             1 |    1 |      2 |                                  a |             :Person(name) |
++------------------+---------------+------+--------+------------------------------------+---------------------------+
+
+Total database accesses: 68
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+| EagerAggregation |             0 |    1 |      0 |                           count(*) |                           
+|           Filter |             0 |    3 |      0 | anon[36], anon[49], anon[51], a, b | NOT(anon[36] == anon[51]) 
+|     NodeHashJoin |             0 |    3 |      0 | anon[36], anon[49], anon[51], a, b |                  anon[49] 
+|   Expand(All)(0) |             2 |   27 |     28 |              anon[49], anon[51], b |        (b)-[:ACTS_IN]->() 
+| NodeIndexSeek(0) |             1 |    1 |      2 |                                  b |             :Person(name) 
+|   Expand(All)(1) |             2 |   35 |     36 |              anon[36], anon[49], a |        (a)-[:ACTS_IN]->() 
+| NodeIndexSeek(1) |             1 |    1 |      2 |                                  a |             :Person(name) 
+6+h|Total database accesses: 68
+|===
+
+
+==== Defer Property Access
+
+Make sure to access properties only as last operation if possible on the smallest set of nodes and relationships.
+Massive property loading is more expensive than following relationships.
+
+e.g. over this
+
+[source,cypher]
+----
+PROFILE 
+MATCH (p:Person)-[:ACTS_IN]->(m:Movie)
+RETURN p.name, count(*) as c
+ORDER BY c DESC limit 10;
+----
+
+////
++------------------+---------------+-------+--------+-------------------------------+---------------------+
+|         Operator | EstimatedRows |  Rows | DbHits |                   Identifiers |               Other |
++------------------+---------------+-------+--------+-------------------------------+---------------------+
+|    Projection(0) |           308 |    10 |      0 | anon[48], anon[54], c, p.name |  anon[48]; anon[54] |
+|              Top |           308 |    10 |      0 |            anon[48], anon[54] |      {  AUTOINT0};  |
+| EagerAggregation |           308 | 44689 |      0 |            anon[48], anon[54] |            anon[48] |
+|    Projection(1) |         94700 | 94700 | 189400 |      anon[48], anon[17], m, p |              p.name |
+|           Filter |         94700 | 94700 |  94700 |                anon[17], m, p |            p:Person |
+|      Expand(All) |         94700 | 94700 | 107562 |                anon[17], m, p | (m)<-[:ACTS_IN]-(p) |
+|  NodeByLabelScan |         12862 | 12862 |  12863 |                             m |              :Movie |
++------------------+---------------+-------+--------+-------------------------------+---------------------+
+
+Total database accesses: 404525
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|    Projection(0) |           308 |    10 |      0 | anon[48], anon[54], c, p.name |  anon[48]; anon[54] 
+|              Top |           308 |    10 |      0 |            anon[48], anon[54] |      {  AUTOINT0};  
+| EagerAggregation |           308 | 44689 |      0 |            anon[48], anon[54] |            anon[48] 
+|    Projection(1) |         94700 | 94700 | 189400 |      anon[48], anon[17], m, p |              p.name 
+|           Filter |         94700 | 94700 |  94700 |                anon[17], m, p |            p:Person 
+|      Expand(All) |         94700 | 94700 | 107562 |                anon[17], m, p | (m)<-[:ACTS_IN]-(p) 
+|  NodeByLabelScan |         12862 | 12862 |  12863 |                             m |              :Movie 
+6+h|Total database accesses: 404525
+|===
+
+which accesses `p.name` for *all* people totalling in 400.000 database hits.
+Aggregate on the node only first, order and paginate and only in the end access and return the property.
+
+[source,cypher]
+----
+PROFILE MATCH (p:Person)-[:ACTS_IN]->(m:Movie)
+WITH p, count(*) as c
+ORDER BY c DESC LIMIT 10
+RETURN p.name, c;
+----
+
+which only accesses `p.name` for the top ten actors and before groups directly by the nodes.
+And saves us about 200.000 database hits.
+
+////
++------------------+---------------+-------+--------+----------------+---------------------+
+|         Operator | EstimatedRows |  Rows | DbHits |    Identifiers |               Other |
++------------------+---------------+-------+--------+----------------+---------------------+
+|       Projection |           308 |    10 |     20 |   c, p, p.name |           p.name; c |
+|              Top |           308 |    10 |      0 |           c, p |     {  AUTOINT0}; c |
+| EagerAggregation |           308 | 44943 |      0 |           c, p |                   p |
+|           Filter |         94700 | 94700 |  94700 | anon[17], m, p |            p:Person |
+|      Expand(All) |         94700 | 94700 | 107562 | anon[17], m, p | (m)<-[:ACTS_IN]-(p) |
+|  NodeByLabelScan |         12862 | 12862 |  12863 |              m |              :Movie |
++------------------+---------------+-------+--------+----------------+---------------------+
+
+Total database accesses: 215145
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|       Projection |           308 |    10 |     20 |   c, p, p.name |           p.name; c
+|              Top |           308 |    10 |      0 |           c, p |     {  AUTOINT0}; c
+| EagerAggregation |           308 | 44943 |      0 |           c, p |                   p
+|           Filter |         94700 | 94700 |  94700 | anon[17], m, p |            p:Person
+|      Expand(All) |         94700 | 94700 | 107562 | anon[17], m, p | (m)<-[:ACTS_IN]-(p)
+|  NodeByLabelScan |         12862 | 12862 |  12863 |              m |              :Movie
+6+h|Total database accesses: 215145
+|===
+
+
+But that query could even be optimized more, with ...
+
+==== Fast Relationship Counting
+
+There is an optimal implementation for single path-expressions, directly reading the degree of a node.
+
+Which I always prefer over optional matches, exists or general where conditions: `+size((s)-[:REL]->())+` <- uses get-degree which is a constant time operation (similiarly without rel-type or direction).
+
+[source,cypher]
+----
+PROFILE 
+MATCH (n:Person) WHERE EXISTS((n)-[:DIRECTED]->()) 
+RETURN count(*);
+----
+
+Here the plan doesn't count the nested db-hits in the expression, which it should.
+That's why I included the runtime:
+
+////
+1 row 197 ms
+
++------------------+---------------+-------+--------+-------------+-------------------------------------------------+
+|         Operator | EstimatedRows |  Rows | DbHits | Identifiers |                                                 |
++------------------+---------------+-------+--------+-------------+-------------------------------------------------+
+| EagerAggregation |           194 |     1 |  56216 |    count(*) |                                                 |
+|           Filter |         37634 |  6037 |      0 |           n | NestedPipeExpression(ExpandAllPipe(....))       |
+|  NodeByLabelScan |         50179 | 50179 |  50180 |           n |                                                 |
++------------------+---------------+-------+--------+-------------+-------------------------------------------------+
+
+Total database accesses: 106396
+////
+
+1 row 197 ms
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+| EagerAggregation |           194 |     1 |  56216 |    count(*) |                                                 
+|           Filter |         37634 |  6037 |      0 |           n | NestedPipeExpression(ExpandAllPipe(....))       
+|  NodeByLabelScan |         50179 | 50179 |  50180 |           n |                                                 
+6+h|Total database accesses: 106396
+|===
+
+
+vs.
+
+[source,cypher]
+----
+PROFILE 
+MATCH (n:Person) WHERE size((n)-[:DIRECTED]->()) <> 0 
+RETURN count(*);
+----
+
+1 row 90 ms
+
+////
++------------------+---------------+-------+--------+-------------+-----------------------------------------------------------+
+|         Operator | EstimatedRows |  Rows | DbHits | Identifiers |                                                     Other |
++------------------+---------------+-------+--------+-------------+-----------------------------------------------------------+
+| EagerAggregation |           213 |     1 |      0 |    count(*) |                                                           |
+|           Filter |         45161 |  6037 | 100358 |           n | NOT(GetDegree(n,Some(DIRECTED),OUTGOING) == {  AUTOINT0}) |
+|  NodeByLabelScan |         50179 | 50179 |  50180 |           n |                                                   :Person |
++------------------+---------------+-------+--------+-------------+-----------------------------------------------------------+
+
+Total database accesses: 150538
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+| EagerAggregation |           213 |     1 |      0 |    count(*) |                                                           
+|           Filter |         45161 |  6037 | 100358 |           n | NOT(GetDegree(n,Some(DIRECTED),OUTGOING) == {  AUTOINT0}) 
+|  NodeByLabelScan |         50179 | 50179 |  50180 |           n |                                                   :Person 
+6+h|Total database accesses: 150538
+|===
+
+You can use that nicely too for overview pages or inline aggregations:
+
+[source,cypher]
+----
+PROFILE 
+MATCH (m:Movie)
+RETURN m.title, size((m)<-[:ACTS_IN]-()) as actors, size((m)<-[:DIRECTED]-()) as directors 
+LIMIT 10;
+----
+
+----
++-------------------------------------------------------------+
+| m.title                                | actors | directors |
++-------------------------------------------------------------+
+| "Indiana Jones and the Temple of Doom" | 13     | 1         |
+| "King Kong"                            | 1      | 1         |
+| "Stolen Kisses"                        | 21     | 1         |
+| "One Flew Over The Cuckoo's Nest"      | 24     | 1         |
+| "Ziemia obiecana"                      | 17     | 1         |
+| "Scoop"                                | 21     | 1         |
+| "Fire"                                 | 0      | 1         |
+| "Dial M For Murder"                    | 5      | 1         |
+| "Ed Wood"                              | 21     | 1         |
+| "Requiem"                              | 11     | 1         |
++-------------------------------------------------------------+
+10 rows
+13 ms
+----
+
+////
++-----------------+---------------+------+--------+-----------------------+--------------------------------------------------------------+
+|        Operator | EstimatedRows | Rows | DbHits |           Identifiers |                                                        Other |
++-----------------+---------------+------+--------+-----------------------+--------------------------------------------------------------+
+|      Projection |         12862 |   10 |     60 | actors, directors,    | m.title; GetDegree(m,Some(ACTS_IN),INCOMING);                |
+|                 |               |      |        |            m, m.title | GetDegree(m,Some(DIRECTED),INCOMING)                         |
+|           Limit |         12862 |   10 |      0 |                     m |                                                 {  AUTOINT0} |
+| NodeByLabelScan |         12862 |   10 |     11 |                     m |                                                       :Movie |
++-----------------+---------------+------+--------+-----------------------+--------------------------------------------------------------+
+
+Total database accesses: 71
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|      Projection |         12862 |   10 |     60 | actors, directors,    | m.title; GetDegree(m,Some(ACTS_IN),INCOMING);                
+|                 |               |      |        |            m, m.title | GetDegree(m,Some(DIRECTED),INCOMING)                         
+|           Limit |         12862 |   10 |      0 |                     m |                                                 {  AUTOINT0} 
+| NodeByLabelScan |         12862 |   10 |     11 |                     m |                                                       :Movie 
+6+h|Total database accesses: 71
+|===
+
+Our query from the previous section would look like this:
+
+[source,cypher]
+----
+PROFILE 
+MATCH (p:Person)
+WITH p, sum(size((p)-[:ACTS_IN]->())) as c
+ORDER BY c DESC LIMIT 10
+RETURN p.name, c;
+----
+
+So we could shave off another 50.000 database hits. Not bad.
+
+////
++------------------+---------------+-------+--------+--------------+-----------------+
+|         Operator | EstimatedRows |  Rows | DbHits |  Identifiers |           Other |
++------------------+---------------+-------+--------+--------------+-----------------+
+|       Projection |           224 |    10 |     20 | c, p, p.name |       p.name; c |
+|              Top |           224 |    10 |      0 |         c, p | {  AUTOINT0}; c |
+| EagerAggregation |           224 | 50179 | 100358 |         c, p |               p |
+|  NodeByLabelScan |         50179 | 50179 |  50180 |            p |         :Person |
++------------------+---------------+-------+--------+--------------+-----------------+
+
+Total database accesses: 150558
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|       Projection |           224 |    10 |     20 | c, p, p.name |       p.name; c 
+|              Top |           224 |    10 |      0 |         c, p | {  AUTOINT0}; c 
+| EagerAggregation |           224 | 50179 | 100358 |         c, p |               p 
+|  NodeByLabelScan |         50179 | 50179 |  50180 |            p |         :Person 
+6+h|Total database accesses: 150558
+|===
+
+
+*Note to self: optimized Cypher looks more like lisp.*
+
+==== Reduce Cardinality of Work In Progress
+
+When following longer paths, you'll encounter duplicates.
+
+If you're not interested in *all the possible paths*, but just distinct information from stages of the path, make sure that you eagerly
+eliminate duplicates, so that later matches are don't have to be executed multiple (many) times.
+
+This reduction of the cardinality can be done either `WITH DISTINCT` or `WITH` aggregation (which automatically deduplicates)
+
+So for instance for this query of "Movies that Tom Hanks colleagues acted in":
+
+
+[source,cypher]
+----
+PROFILE 
+MATCH (p:Person {name:"Tom Hanks"})-[:ACTS_IN]->(m1)<-[:ACTS_IN]-(coActor)-[:ACTS_IN]->(m2)
+RETURN distinct m2.title;
+----
+
+This query has 10272 db-hits and touches 3020 paths in total.
+
+////
++----------------+---------------+------+--------+--------------------------------------------------+-----------------------------------------------------------+
+|       Operator | EstimatedRows | Rows | DbHits |                                      Identifiers |                                                     Other |
++----------------+---------------+------+--------+--------------------------------------------------+-----------------------------------------------------------+
+|       Distinct |             4 | 2021 |   6040 |                                         m2.title |                                                  m2.title |
+|      Filter(0) |             4 | 3020 |      0 | anon[36], anon[53], anon[75], coActor, m1, m2, p | (NOT(anon[53] == anon[75]) AND NOT(anon[36] == anon[75])) |
+| Expand(All)(0) |             4 | 3388 |   3756 | anon[36], anon[53], anon[75], coActor, m1, m2, p |                                (coActor)-[:ACTS_IN]->(m2) |
+|      Filter(1) |             3 |  368 |      0 |               anon[36], anon[53], coActor, m1, p |                                 NOT(anon[36] == anon[53]) |
+| Expand(All)(1) |             3 |  403 |    438 |               anon[36], anon[53], coActor, m1, p |                                (m1)<-[:ACTS_IN]-(coActor) |
+| Expand(All)(2) |             2 |   35 |     36 |                                  anon[36], m1, p |                                      (p)-[:ACTS_IN]->(m1) |
+|  NodeIndexSeek |             1 |    1 |      2 |                                                p |                                             :Person(name) |
++----------------+---------------+------+--------+--------------------------------------------------+-----------------------------------------------------------+
+
+Total database accesses: 10272
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|       Distinct |             4 | 2021 |   6040 |                                         m2.title |                                                  m2.title 
+|      Filter(0) |             4 | 3020 |      0 | anon[36], anon[53], anon[75], coActor, m1, m2, p | (NOT(anon[53] == anon[75]) AND NOT(anon[36] == anon[75])) 
+| Expand(All)(0) |             4 | 3388 |   3756 | anon[36], anon[53], anon[75], coActor, m1, m2, p |                                (coActor)-[:ACTS_IN]->(m2) 
+|      Filter(1) |             3 |  368 |      0 |               anon[36], anon[53], coActor, m1, p |                                 NOT(anon[36] == anon[53]) 
+| Expand(All)(1) |             3 |  403 |    438 |               anon[36], anon[53], coActor, m1, p |                                (m1)<-[:ACTS_IN]-(coActor) 
+| Expand(All)(2) |             2 |   35 |     36 |                                  anon[36], m1, p |                                      (p)-[:ACTS_IN]->(m1) 
+|  NodeIndexSeek |             1 |    1 |      2 |                                                p |                                             :Person(name) 
+6+h|Total database accesses: 10272
+|===
+
+The first degree neighborhood is unique, as in this data set there is only at most one `:ACTS_IN` relationship between an actor and a movie.
+So the first duplicated nodes appear at the second degree, which we can eliminate like this:
+
+[source,cypher]
+----
+PROFILE 
+MATCH (p:Person {name:"Tom Hanks"})-[:ACTS_IN]->(m1)<-[:ACTS_IN]-(coActor)
+WITH distinct coActor
+MATCH (coActor)-[:ACTS_IN]->(m2)
+RETURN distinct m2.title;
+----
+
+Which reduces the number of paths to match for the last step a bit to 2906.
+In other use-cases with more duplicates the impact is way bigger.
+
+////
++----------------+---------------+------+--------+------------------------------------+----------------------------+
+|       Operator | EstimatedRows | Rows | DbHits |                        Identifiers |                      Other |
++----------------+---------------+------+--------+------------------------------------+----------------------------+
+|    Distinct(0) |             4 | 2031 |   5812 |                           m2.title |                   m2.title |
+| Expand(All)(0) |             4 | 2906 |   3241 |             anon[113], coActor, m2 | (coActor)-[:ACTS_IN]->(m2) |
+|    Distinct(1) |             3 |  335 |      0 |                            coActor |                    coActor |
+|         Filter |             3 |  368 |      0 | anon[36], anon[53], coActor, m1, p |  NOT(anon[36] == anon[53]) |
+| Expand(All)(1) |             3 |  403 |    438 | anon[36], anon[53], coActor, m1, p | (m1)<-[:ACTS_IN]-(coActor) |
+| Expand(All)(2) |             2 |   35 |     36 |                    anon[36], m1, p |       (p)-[:ACTS_IN]->(m1) |
+|  NodeIndexSeek |             1 |    1 |      2 |                                  p |              :Person(name) |
++----------------+---------------+------+--------+------------------------------------+----------------------------+
+
+Total database accesses: 9529
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|    Distinct(0) |             4 | 2031 |   5812 |                           m2.title |                   m2.title 
+| Expand(All)(0) |             4 | 2906 |   3241 |             anon[113], coActor, m2 | (coActor)-[:ACTS_IN]->(m2) 
+|    Distinct(1) |             3 |  335 |      0 |                            coActor |                    coActor 
+|         Filter |             3 |  368 |      0 | anon[36], anon[53], coActor, m1, p |  NOT(anon[36] == anon[53]) 
+| Expand(All)(1) |             3 |  403 |    438 | anon[36], anon[53], coActor, m1, p | (m1)<-[:ACTS_IN]-(coActor) 
+| Expand(All)(2) |             2 |   35 |     36 |                    anon[36], m1, p |       (p)-[:ACTS_IN]->(m1) 
+|  NodeIndexSeek |             1 |    1 |      2 |                                  p |              :Person(name) 
+6+h|Total database accesses: 9529
+|===
+
+
+Of course we would apply our _Minimize Property Access_ knowledge here:
+
+[source,cypher]
+----
+PROFILE 
+MATCH (p:Person {name:"Tom Hanks"})-[:ACTS_IN]->(m1)<-[:ACTS_IN]-(coActor)
+WITH distinct coActor
+MATCH (coActor)-[:ACTS_IN]->(m2)
+WITH distinct m2
+RETURN m2.title;
+----
+
+////
++----------------+---------------+------+--------+------------------------------------+----------------------------+
+|       Operator | EstimatedRows | Rows | DbHits |                        Identifiers |                      Other |
++----------------+---------------+------+--------+------------------------------------+----------------------------+
+|     Projection |             4 | 2037 |   4074 |                       m2, m2.title |                   m2.title |
+|    Distinct(0) |             4 | 2037 |      0 |                                 m2 |                         m2 |
+| Expand(All)(0) |             4 | 2906 |   3241 |             anon[113], coActor, m2 | (coActor)-[:ACTS_IN]->(m2) |
+|    Distinct(1) |             3 |  335 |      0 |                            coActor |                    coActor |
+|         Filter |             3 |  368 |      0 | anon[36], anon[53], coActor, m1, p |  NOT(anon[36] == anon[53]) |
+| Expand(All)(1) |             3 |  403 |    438 | anon[36], anon[53], coActor, m1, p | (m1)<-[:ACTS_IN]-(coActor) |
+| Expand(All)(2) |             2 |   35 |     36 |                    anon[36], m1, p |       (p)-[:ACTS_IN]->(m1) |
+|  NodeIndexSeek |             1 |    1 |      2 |                                  p |              :Person(name) |
++----------------+---------------+------+--------+------------------------------------+----------------------------+
+
+Total database accesses: 7791
+////
+
+[options="header,footer,autowidth"]
+|===
+|            Operator | Est.Rows |  Rows | DbHits |                 Identifiers |                       Other
+|     Projection |             4 | 2037 |   4074 |                       m2, m2.title |                   m2.title 
+|    Distinct(0) |             4 | 2037 |      0 |                                 m2 |                         m2 
+| Expand(All)(0) |             4 | 2906 |   3241 |             anon[113], coActor, m2 | (coActor)-[:ACTS_IN]->(m2) 
+|    Distinct(1) |             3 |  335 |      0 |                            coActor |                    coActor 
+|         Filter |             3 |  368 |      0 | anon[36], anon[53], coActor, m1, p |  NOT(anon[36] == anon[53]) 
+| Expand(All)(1) |             3 |  403 |    438 | anon[36], anon[53], coActor, m1, p | (m1)<-[:ACTS_IN]-(coActor) 
+| Expand(All)(2) |             2 |   35 |     36 |                    anon[36], m1, p |       (p)-[:ACTS_IN]->(m1) 
+|  NodeIndexSeek |             1 |    1 |      2 |                                  p |              :Person(name) 
+6+h|Total database accesses: 7791
+|===
+
+We still need the `distinct m2` at the end, as the co-actors can have played in the same movies and we don't want duplicate results.
+
+This query has 7791 db-hits and touches 2906 paths in total.
+
+If you are also interested in the frequency (e.g. for scoring) you can compute them along with an aggregation instead of distinct.
+You just multiply the path count per co-actor with the number of occurrences per movie in the end.
+
+[source,cypher]
+----
+MATCH (p:Person {name:"Tom Hanks"})-[:ACTS_IN]->(m1)<-[:ACTS_IN]-(coActor)
+WITH coActor, count(*) as freq
+MATCH (coActor)-[:ACTS_IN]->(m2)
+RETURN m2.title, freq * count(*) as occurrence;
+----
+
+
+=== Summary
+
+Best is to take the slowest queries, `PROFILE` them and optimize them using the mentioned tips.
+
+If you need help, you can always reach out to us on http://stackoverflow.com/questions/tagged/neo4j[StackOverflow], 
+our http://groups.google.com/group/neo4j[Google Group] or our http://neo4j.com/slack[Public Slack].
+
+If you are part of a project that is adopting Neo4j or putting it into production, make sure to get some expert help to ensure you're successful. 
+
+[NOTE]
+If you do ask for help, please provide enough information for others to be able to help you. 
+Explain your graph model, share your queries, their profile output and best of all a dataset to run them on.

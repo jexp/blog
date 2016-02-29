@@ -1,0 +1,151 @@
+= Importing a CSV of Categories in one Pass
+:csv-url: https://gist.githubusercontent.com/rvanbruggen/adaac7415eb42912e950/raw/taxonomy.csv
+:attribute-missing: skip
+
+ifdef::env-graphgist[]
+:neo4j-version: 2.2
+:load-csv-url: https://gist.githubusercontent.com/rvanbruggen/adaac7415eb42912e950/raw/taxonomy.csv
+:import-limit: limit 100
+endif::[]
+
+ifndef::env-graphgist[]
+:load-csv-url: file:/tmp/taxonomy.csv
+endif::[]
+
+My colleague http://twitter.com/rvanbruggen[Rik van Bruggen] wrote a wonderful http://blog.bruggen.com/2015/07/hierarchies-and-google-product-taxonomy.html[blog post about importing the Google Merchant Category Hierarchy] into Neo4j.
+
+I enjoyed reading it and then wondered if we can't import it in a single run, when we treat the CSV file just as collection of columns which we can access using Cypher's collection functions.
+
+ifndef::env-graphgist[]
+
+Having http://neo4j.com/download[downloaded] and installed and started, Neo4j, let's download the CSV data, so we have it available locally.
+
+[source,shell,subs="attributes"] 
+----
+curl {csv-url} -o /tmp/taxonomy.csv
+----
+
+Then we can use the `neo4j-shell` to import the data. Just start it with `bin/neo4j-shell` and paste the statements as you go.
+endif::[]
+
+== Data Checking
+
+.How many rows?
+[source,cypher,subs="attributes"] 
+----
+load csv with headers from "{load-csv-url}" as row fieldterminator ';' 
+return count(*);
+----
+
+//table
+
+.Check the Data
+[source,cypher,subs="attributes"] 
+----
+load csv with headers from "{load-csv-url}" as row fieldterminator ';' 
+return row limit 3;
+----
+
+//table
+
+.Look at the bare rows
+[source,cypher,subs="attributes"] 
+----
+load csv from "{load-csv-url}" as row fieldterminator ';' 
+// skip header
+with row skip 1
+return row limit 3;
+----
+
+//table
+
+== Convert CSV into simpler format
+
+We treat the row as collection of strings this time.
+First col is id, then names up to first null
+
+[source,cypher,subs="attributes"] 
+----
+load csv from "{load-csv-url}" as row fieldterminator ';'
+// skip header
+with row skip 1
+return toInt(row[0]) as id,
+// keep non null columns
+     filter(name in row[1..] WHERE NOT (name is null or name = "")) as names
+limit 3;
+----
+
+//table
+
+== Duplicate Checking
+
+Let's check for duplicate names by taking the last non-null category-name, aggregating on it, counting the occurrences and reporting those that have more than one.
+
+[source,cypher,subs="attributes"] 
+----
+load csv from "{load-csv-url}" as row fieldterminator ';'
+with row skip 1
+with filter(name in row[1..] WHERE NOT (name is null or name = "")) as names
+// split into two WITHs for readability
+with names[-1] as name, count(*) as c
+where c > 1
+return name,c;
+----
+
+//table
+
+// NO DUPLICATES !!!
+
+== Import
+
+Now let's set up a constraint on `:Cat(id)` and an index on `:Cat(name)` and create the "Root" category.
+
+//setup
+[source,cypher,subs="attributes"] 
+----
+create constraint on (c:Cat) assert c.id is unique;
+create index on :Cat(name);
+create (:Cat {id:0,name:"Root"});
+----
+
+My colleague http://twitter.com/markhneedham[Mark Needham] had the idea to convert he full denormalized tree into the minimal data we need to create the hiearchy.
+
+We're only interested in the leaf which we have to create with id and name.
+And then connect it to its direct parent, the rest of the hierarchy was already created in previous rows.
+
+//setup
+[source,cypher,subs="attributes"] 
+----
+load csv from "{load-csv-url}" as row fieldterminator ';'
+with toInt(row[0]) as id, 
+     filter(name in row[1..] WHERE NOT (name is null or name = "")) as names 
+skip 1 {import-limit}
+WITH id, 
+     coalesce(names[-2],"Root") as parentName, 
+	 names[-1] as childName
+MERGE (child:Cat {id:id}) ON CREATE SET child.name = childName
+WITH child,parentName
+MATCH (parent:Cat {name:parentName})
+CREATE (parent)<-[:PART_OF]-(child);
+----
+
+// graph
+
+////
+
+[source,cypher,subs="attributes"] 
+----
+create constraint on (c:Cat) assert c.id is unique;
+create index on :Cat(name);
+create (:Cat {id:0,name:"Root"});
+
+load csv from "{load-csv-url}" as csv fieldterminator ';'
+with toInt(csv[0]) as id, ["Root"] + filter(x in csv[1..] WHERE NOT x is null) as cats
+skip 1
+merge (leaf:Cat {id:id}) on create set leaf.name=last(cats)
+with cats
+unwind range(size(cats)-2,0,-1) as idx
+match (c2:Cat {name:cats[idx+1]})  	
+match (c1:Cat {name:cats[idx]})
+merge (c1)<-[:PART_OF]-(c2);
+----

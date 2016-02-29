@@ -96,7 +96,12 @@ The Cypher query to create that domain is also straightforward. You can deconstr
 You'd use `UNWIND` to convert collections into rows and `FOREACH` to iterate over a collection with update statements. 
 To create nodes and relationships we use `MERGE` and `CREATE` commands.
 
-The JSON response that we retrieved from the API call is passed in as a parameter `{json}` to the Cypher statement.
+My friend Mark just http://www.markhneedham.com/blog/2015/07/23/neo4j-loading-json-documents-with-cypher/[published a blog post] explaining in detail how you apply these operations to your data.
+
+The JSON response that we retrieved from the API call is passed in as a parameter `{json}` to the Cypher statement, which we alias with the more handy `data` identifier.
+Then we use the aforementioned means to extract the relevant information out of the `data` collection of questions, treating each as `q`.
+
+For each question we access the direct attributes but also related information like the owner or contained collections like tags or answers which we deconstruct in turn.
 
 [source,cypher]
 ----
@@ -119,10 +124,10 @@ FOREACH (a IN q.answers |
 
 === Calling Cypher with the JSON parameters
 
-To pass in the JSON to Cypher we have to programmatically call the http://neo4j.com/docs/stable/rest-api-transactional.html[Cypher endpoint] of the Neo4j server, which can be done via one of the many http://neo4j.com/developer/language-guides[drivers for Neo4j] or manually.
+To pass in the JSON to Cypher we have to programmatically call the http://neo4j.com/docs/stable/rest-api-transactional.html[Cypher endpoint] of the Neo4j server, which can be done via one of the many http://neo4j.com/developer/language-guides[drivers for Neo4j] or manually by POSTing the necessary payload to Neo4j.
 We can also call the Java API.
 
-So without further ado here are our examples:
+So without further ado here are our examples for a selection of different languages, drivers and APIs:
 
 ==== Python
 
@@ -182,7 +187,7 @@ r.get({url:apiUrl,json:true,gzip:true}, function(err,res,json) {
 
 ==== Java
 
-With Java I want to show how to use the Neo4j embedded API.
+With Java I want to show how to use the http://neo4j.com/docs/stable/tutorials-cypher-java.html[Neo4j embedded API] to execute Cypher.
 
 [source,java]
 ----
@@ -209,7 +214,7 @@ db.shutdown();
 
 ==== Ruby
 
-Using the neo4j-core Gem, we can talk to Neo4j server or embedded (using jRuby) by just changing a single line of configuration.
+Using the http://neo4j.com/developer/ruby[neo4j-core Gem], we can talk to Neo4j Server or embedded (using jRuby) by just changing a single line of configuration.
 
 [source,ruby]
 ----
@@ -230,7 +235,7 @@ session.query(QUERY, json: json)
 
 ==== Bash
 
-Bash is of course most fun, as we have to do fun substitutions to make this work.
+Bash is of course most fun, as we have to do fancy text substitutions to make this work.
 
 .load_json.sh
 [source,shell]
@@ -245,9 +250,6 @@ POST_DATA="{\"statements\":[{\"statement\": \"$QUERY\", \"parameters\": {\"data\
 DB_URL=${NEO4J_URL-http://localhost:7474}
 curl -i -H accept:application/json -H content-type:application/json -d "$POST_DATA" -XPOST "$DB_URL/db/data/transaction/commit"
 ----
-
-So as you can see, even with `LOAD JSON` not being part of the language, it's possible to retrieve JSON data from an API endpoint and deconstruct and insert it into Neo4j by just using plain Cypher.
-
 
 === Example Use-Cases
 
@@ -288,8 +290,21 @@ RETURN t,r,question
 
 //graph_result
 
+
+=== Conclusion
+
+So as you can see, even with `LOAD JSON` not being part of the language, 
+it's easy enough to retrieve JSON data from an API endpoint and deconstruct and insert it into Neo4j by just using plain Cypher.
+
+Accessing Web-APIs is a simple task in all stacks and languages and JSON as transport format is ubiquitous.
+
+Fortunately, the unfortunately lesser known capabilities of Cypher to deconstruct complex JSON documents allow us to quickly turn them into a really nice
+graph structure without duplication of information and rich relationships.
+
+I encourage you to try it with your favorite Web-APIs and send us your example with graph model, Cypher import query and 2-3 use-case queries that reveal some interesting insights into the data you ingested to content@neo4j.com.
+
 [[response]]
-=== Stackoverflow Response
+=== Appendix: Stackoverflow Response
 
 [source,javascript]
 ----

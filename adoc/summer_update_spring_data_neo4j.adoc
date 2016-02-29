@@ -1,0 +1,92 @@
+== Summer Update on Spring Data Neo4j
+
+image::https://dl.dropboxusercontent.com/u/14493611/sdn_logo.png[float="right"]
+I'm happy to announce good progress on our continuous efforts to integrate Neo4j with the Spring Framework, namely Spring Data.
+
+Our Spring Data Neo4j project started more than 5 years ago and it has been my challenge to keep it in sync and catching up with the Neo4j development.
+
+Last week Spring Data Neo4j 3.3.2.RELEASE and 3.4.0.RC1 were published as part of the https://spring.io/blog/2015/07/28/spring-data-fowler-sr2-released[Spring Data release train].
+
+Two weeks ago we made Spring Data Neo4j 4.0.RC1 available to the public. 
+RC2 should be published next week.
+
+=== Compatibilities
+
+The main feature of these two releases is the compatibility with Neo4j 2.2.3 in the embedded integration.
+
+This is especially tricky, as Spring Data Neo4j 3.3.x has to be compatible both with Neo4j 2.1 and Neo4j 2.2
+
+Going forward, I will remove Neo4j 2.1 compatibility from Spring Data Neo4j 3.4 and look into upgrading it to support Neo4j 2.3.
+
+[NOTE]
+Please note that version 3.4 will be the last version of the longer existing Spring Data project, which will continue to get service releases.
+
+Spring Data Neo4j 4 is compatible with all versions from Neo4j 2.1 going forward as it integrates with Neo4j Server using our remote Cypher APIs.
+Our main focus going forward is the development of Spring Data Neo4j 4 and the http://neo4j.com/blog/neo4j-java-object-graph-mapper-released/[Neo4j-OGM library] that it is based on, which will also support Neo4j embedded in a future version.
+
+.Compatibility Matrix
+[opts="header"]
+|===
+| SDN versions | Neo4j versions
+| 3.2.x | 2.0, 2.1
+| 3.3.0, 3.3.1 | 2.1
+| 3.3.2 | 2.1, 2.2
+| 4.0 | 2.1, 2.2, 2.3
+|===
+
+=== New Developer Pages for Spring
+
+You will find new pages on the Neo4j.com developer site to help you http://neo4j.com/developer/spring-data-neo4j[get started with Spring and Neo4j].
+
+We detail the steps needed to use Spring Boot with JDBC to connect to Neo4j and explain the setup required for both Spring Data Neo4j 3.3.x and 4.x.
+
+The example project is a simple, single page web application for our well known movies database.
+Each backend implementation is specific to the library and implements the same 3 HTTP endpoints to provide 
+
+. a movie search and list, 
+. detail listing with cast, and
+. a simple graph rendering of the whole network.
+
+image::http://dev.assets.neo4j.com.s3.amazonaws.com/wp-content/uploads/movie_application.png[]
+
+=== Get Started
+
+It is easy to get started by cloning one of the provided http://github.com/neo4j-examples[example project repositories on GitHub] as starting ground.
+You will quickly understand the concepts which are very similar to all the other Spring Data projects and Object-Database-Mappers in general.
+
+Especially the "Cineasts" movie database project is a well documented tutorial both for http://docs.spring.io/spring-data/neo4j/docs/3.3.2.RELEASE/reference/html/#tutorial[Spring Data Neo4j 3] and also for https://github.com/neo4j-examples/sdn4-cineasts/wiki[version 4].
+
+http://twitter.com/luannem[Luanne Misquitta], the core maintainer of Spring Data Neo4j 4 wrote an competition winning introductory article on the http://airpair.com/neo4j/posts/the-essence-of-spring-data-neo4j-4[Essence of Spring Data Neo4j 4].
+
+=== Thank YOU
+
+I want to thank everyone who contributed to and used the projects over the years.
+But special thanks go to http://twitter.com/olivergierke[Oliver Gierke's] Spring Data Team at Pivotal as well as our trusted partner http://graphaware.com[GraphAware] for developing Spring Data Neo4j 4.
+
+If you are a Spring (Data) Developer and want to work with a new, exciting database
+or a Neo4j user who wants to integrate with a Spring Framework application,
+please go ahead and use Spring Data Neo4j.
+
+Please provide feedback for the libraries in the https://jira.spring.io/browse/DATAGRAPH[Spring Data Neo4j issue tracker] or send us an email to link:mailto:spring-data-neo4j@neotechnology.com[spring-data-neo4j@neotechnology.com].
+
+Happy Coding,
+
+Michael
+
+=== References
+
+==== Spring Data Neo4j 3.3.x
+
+* http://github.com/neo4j-examples?query=spring-data[Example Projects]
+* http://docs.spring.io/spring-data/neo4j/docs/3.3.2.RELEASE/reference/html[Documentation]
+* https://jira.spring.io/browse/DATAGRAPH[Issue Tracker]
+* https://github.com/spring-projects/spring-data-neo4j/[GitHub]
+
+==== Spring Data Neo4j 4.x
+
+* http://github.com/neo4j-examples?query=sdn4[Example Projects]
+* http://airpair.com/neo4j/posts/the-essence-of-spring-data-neo4j-4[Article: Essence of Spring Data Neo4j 4]
+* http://docs.spring.io/spring-data/neo4j/docs/4.0.0.RC1/reference/html[Documentation]
+* https://jira.spring.io/browse/DATAGRAPH[Issue Tracker]
+* https://github.com/spring-projects/spring-data-neo4j/tree/4.0.x[GitHub]
+

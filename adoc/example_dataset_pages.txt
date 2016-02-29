@@ -1,0 +1,25 @@
+== Example Dataset Guide
+
+Use Datasets from ICFY
+
+* prose about dataset
+* provide domain model
+* provide original source (Data Provenance) and how they were imported (import script + explanation)
+* links to downloads for versions: 2.1, 2.2, 2.3
+* example queries from ICFY
+* host a live, readonly database of the dataset (Ben,GraphGrid,GrapheneDB)
+
+
+=== Neo4j Console
+
+neo4j-version:hosted
+
+provide server url
+
+?url=...&expose
+
+Don't return "graph"
+
+use "REST" 
+Limit results to reasonable size (max 1k nodes and rels?)
+

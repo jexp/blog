@@ -1,0 +1,121 @@
+= Neo4j 3.x Spatial and Fulltext capabilities
+
+If you've followed my blog in the past, you know that Neo4j lagged behind a bit, replacing the old manual indexes with respective schema indexes.
+
+But now with Neo4j 3.x on the horizon this will be amended.
+Today I want to present some of the capabilities will be available with version 3.0.
+
+* index supported `STARTS WITH`, `CONTAINS`, `ENDS WITH` text search
+* index supported range searches for strings and numbers
+* combining indexes for multi-faceted lookups
+* spatial point and distance functions
+
+Some of these capabilities don't cover all the use-cases, but already provide great improvements to the existing functionality.
+
+Today we'll use the http://factual.com[Factual dataset], which is also nicely demoed in the http://www.popotojs.com/[popoto.js structural graph search] (http://www.popotojs.com/live/factual/index.html[example app]).
+
+TODO update all examples as soon as I have the factual dataset.
+
+//setup
+[source,cypher]
+----
+CREATE INDEX ON :Restaurant(name);
+CREATE INDEX ON :Restaurant(zip);
+
+LOAD CSV WITH HEADERS FROM "https://gist.githubusercontent.com/jexp/02c29202537e893a99f0/raw/factual_ca.csv" AS row
+CREATE (r:Restaurant {name:row.name, latitude:toFloat(row.latitude),toFloat(longitude:row.longitude),zip:toInt(row.zip)});
+----
+
+== Schema Indexes
+
+Schema indexes and constraints are defined like this:
+
+[source,cypher]
+----
+CREATE CONSTRAINT ON (r:Restaurant) ASSERT r.id IS UNIQUE;
+CREATE INDEX ON :Restaurant(name);
+CREATE INDEX ON :Restaurant(opened);
+----
+
+If you prefix your queries with `EXPLAIN` or `PROFILE` you should see the index being used with one of these Operations:
+
+* NodeIndexSeek, NodeUniqueIndexSeek, NodeIndexSeekByRange, NodeUniqueIndexSeekByRange 
+
+The textual query plan of a query looks like this:
+
+ANd the visual query plan like this:
+
+image::[]
+
+== Text Search
+
+Since version 2.3 Cypher began to provide support for schema-indexed text search, starting with `STARTS WITH`.
+In Neo4j 3.x `CONTAINS` and `ENDS WITH` will also use existing indexes.
+
+[NOTE]
+Currently all 3 functions are case sensitive.
+You might need to use a separate, indexed lower-cased property for text search.
+
+[source,cypher]
+----
+CREATE INDEX ON :Restaurant(name);
+
+MATCH (r:Restaurant) WHERE r.name STARTS WITH "Taco" RETURN count(*);
+MATCH (r:Restaurant) WHERE r.name CONTAINS "Village" RETURN count(*);
+MATCH (r:Restaurant) WHERE r.name ENDS WITH "House" RETURN count(*);
+----
+
+== Range Searches
+
+With the same 2.3 version, you were also able to use range searches on indexed properties.
+This works for numeric fields like timestamps, years, prices but also on textual properties like date-strings.
+
+All of the following predicate expressions work and use an index if available:
+
+[source,cypher]
+----
+restaurant.rating > 4
+restaurant.guests > 200
+90 < restaurant.price < 130
+"2010-01-01" < restaurant.opened < "2010-09-01"
+----
+
+== Multiple Facets
+
+Cypher's query planner chooses the most selective index to query for a _label-property combination_ if there are multiple choices.
+Then post-filtering other properties to check upon is the fastst way to get your data.
+
+If need be, you can also force it to use an index with an index hint: `MATCH (n:Label) USING INDEX n:Label(prop) WHERE n.prop = "foo"`.
+
+Sometimes you have really large datasets (more than ten million entries) to query upon.
+Then two index lookups and joining them together might be the better choice.
+
+You can achieve it with this (not so pretty variant):
+
+[source,cypher]
+----
+MATCH (r:Restaurant)
+WHERE r.name CONTAINS "Village"
+MATCH (o:Restaurant) 
+WHERE o.year > 2010 AND r = o
+RETURN r;
+----
+
+TODO explain
+
+== Geospatial Functions
+
+The `point` function creates a geo-point from a node, relationship or map with a `latitude` and a `longitude` property with floating point values.
+The `distance` function computes the sperical distances between two of these points in *meters*.
+
+So you can filter two locations on distance or order a group of locations by distance.
+Those locations can both be nodes or one node and one point generated from user-input, which would be passed in as `geo` parameter with the two properties.
+
+[source,cypher]
+----
+MATCH (r:Restaurant) 
+WHERE r.name CONTAINS "Sushi" 
+AND distance(point(r),point({latitude:52.0, longitude:11.0})) < 20*1000
+RETURN r;
+----
+
