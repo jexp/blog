@@ -10,9 +10,9 @@ You find the posts on http://jexp.github.io/blog
 == Latest (Winter 2015/2016)
 
 * link:{base}/html/neo4j_stored_procedures.html[Neo4j 3.0 Stored Procedures]
-* link:{base}/html/full-text-and-spatial-search-in-neo4j-3.html[Full Text & Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0]
-* link:{base}/html/java_security_vulnerability_graph.html[Finding Security Vulnerabilities with Cypher and Neo4j]
-* link:{base}/html/simple_csv_export_import.html[Quick Neo4j Export - Import Roundtrip via CSV]
+* link:{base}/html/full-text-and-spatial-search-in-neo4j-3.html[Full Text & Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)]
+* link:{base}/html/java_security_vulnerability_graph.html[Finding Security Vulnerabilities with Cypher and Neo4j (WIP)]
+* link:{base}/html/simple_csv_export_import.html[Quick Neo4j Export - Import Roundtrip via CSV (WIP)]
 
 == Previous (2015-05-31)
 
