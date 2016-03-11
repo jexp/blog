@@ -88,7 +88,7 @@ public class GraphStatistics {
         try (ResourceIterator it = db.findNodes(Label.label(label))) {
             while (it.hasNext()) {
                // submit degree to holder for consumption (i.e. max, min, count)
-               d.add(it.next().getDegree());
+               degree.add(it.next().getDegree());
             }
         }
         // we only return a "Stream" of a single element in this case.
@@ -146,7 +146,7 @@ Join our public http://neo4j.com/slack[Slack channel] and visit `#neo4j-procedur
 
 * Neo4j Manual: http://neo4j.com/docs/3.0.0-M04/query-call.html[Calling & Writing Procedures]
 * https://github.com/jexp/neo4j-procedures-demo[GitHub Repository for this example]
-* Jacon Hansons https://github.com/neo4j-examples/neo4j-procedure-template[Procedure Template] for manual index updates and queries
+* Jacob Hanssons https://github.com/neo4j-examples/neo4j-procedure-template[Procedure Template] for manual index updates and queries
 * Mark Needham wrote a http://www.markhneedham.com/blog/2016/02/28/neo4j-a-procedure-for-the-slm-clustering-algorithm[Graph Algorithm Procedure Blog Post]
 * https://github.com/jexp/neo4j-apoc-procedures[APOC Utility procedures], JSON, Loading, Collection Handling, Timestamps
 * Creating https://github.com/jexp/neo4j-javascript-procedures[JavaScript based Procedures]

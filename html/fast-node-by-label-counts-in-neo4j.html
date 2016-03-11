@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.4">
-<title>Neo4j Stored Procedures</title>
+<title>Quick Node by Label Counts in Neo4j 2.x and 3.x</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -419,205 +419,151 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
-<h1>Neo4j Stored Procedures</h1>
+<h1>Quick Node by Label Counts in Neo4j 2.x and 3.x</h1>
 </div>
 <div id="content">
-<div id="preamble">
-<div class="sectionbody">
 <div class="paragraph">
-<p>One of the many exciting features of Neo4j 3.0 are "Stored Procedures" that, unlike the existing Neo4j-Server extensions are directly callable from Cypher.</p>
+<p>Oftentimes you want to know how many nodes of a certain labe live in your Neo4j database.</p>
 </div>
 <div class="paragraph">
-<p>At the time of this writing it is only possible to call them in a stand-alone statement with <code>CALL package.procedure(params)</code>
-but the plan is to make them a fully integrated part of Cypher statements.
-Either by making <code>CALL</code> a clause or by turning procedures into function-expressions (which would be my personal favorite).</p>
-</div>
-<div class="paragraph">
-<p>Currently procedures can only be written in Java (or other JVM languages).
-You might say, "WTF &#8230;&#8203; Java", but it is less tedious than it sounds.</p>
-</div>
-<div class="paragraph">
-<p>First of all, the effort of setting up a procedure project, writing and building it is minimal.</p>
-</div>
-<div class="paragraph">
-<p>To get up and running you first need a recent copy of Neo4j 3.0,
-either the <a href="http://neo4j.com/download/other-releases">3.0.0-M04 milestone</a> or the latest build from the <a href="http://alpha.neohq.net">Alpha Site</a>.</p>
-</div>
-<div class="paragraph">
-<p>To get you started you also need a JDK and a build tool like Gradle or Maven.</p>
-</div>
-<div class="paragraph">
-<p>You can effectively copy the procedure template example that Jake Hansson <a href="https://github.com/neo4j-examples/neo4j-procedure-template">provided in neo4j-examples</a> as a starting point.</p>
-</div>
-<div class="paragraph">
-<p>But let me quickly walk you through an even simpler example (<a href="https://github.com/jexp/neo4j-procedures-demo">GitHub Repository</a>).</p>
-</div>
-<div class="paragraph">
-<p>You need to declare the <code>org.neo4j:neo4j:3.0.0[-M04]</code> dependency in the <code>provided</code> scope, to get the necessary annotations and the Neo4j API to talk to the database.</p>
-</div>
-<div class="listingblock">
-<div class="title">pom.xml</div>
-<div class="content">
-<pre class="highlight"><code class="language-xml" data-lang="xml">&lt;dependency&gt;
-  &lt;groupId&gt;org.neo4j&lt;/groupId&gt;
-  &lt;artifactId&gt;neo4j&lt;/artifactId&gt;
-  &lt;version&gt;${neo4j.version}&lt;/version&gt;
-  &lt;scope&gt;provided&lt;/scope&gt;
-&lt;/dependency&gt;</code></pre>
-</div>
-</div>
-<div class="listingblock">
-<div class="title">build.gradle</div>
-<div class="content">
-<pre class="highlight"><code class="language-groovy" data-lang="groovy">project.ext {
-    neo4j_version = ""
-}
-dependencies {
-	compile group: "org.neo4j", name:"neo4j", version:project.neo4j_version
-	testCompile group: "org.neo4j", name:"neo4j-kernel", version:project.neo4j_version, classifier:"tests"
-	testCompile group: "org.neo4j", name:"neo4j-io", version:project.neo4j_version, classifier:"tests"
-	testCompile group: "junit", name:"junit", version:4.12
-}</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>If you have a great idea on what kind of procedure you want to write, just open a file with a new class.</p>
-</div>
-<div class="paragraph">
-<p>Please note that the only package and method names become the procedure name (but <strong>not</strong> the class name).</p>
-</div>
-<div class="paragraph">
-<p>In our example we will create a very simple procedure that just computes the minimum and maximum degrees of a certain label.</p>
-</div>
-<div class="paragraph">
-<p>The reference to Neo4j&#8217;s <code>GraphDatabaseService</code> instance is injected into your class into the field annotated with <code>@Context</code>.
-As procedures are meant to be stateless, declaring non-injected non-static fields is not allowed.</p>
-</div>
-<div class="paragraph">
-<p>In our case the procedure will be named <code>stats.degree</code> and called like <code>CALL stats.degree('User')</code>.</p>
+<p>Usually you run a statement like this:</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-java" data-lang="java">package stats;
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (n:Person) RETURN count(n);
++----------+
+| count(n) |
++----------+
+| 1000131  |
++----------+
+1 row
+2336 ms</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Which after 2-3 seconds tells us that there are 1M <code>:Person</code> nodes in our database.</p>
+</div>
+<div class="paragraph">
+<p>Since version 2.x, Neo4j contains a transactional store for database statistics, which is used for estimation of our COST based planner.</p>
+</div>
+<div class="paragraph">
+<p>One thing this store keeps track of is the number of nodes per label.
+And it does so in a transactionally safe way.
+Other things that are kept track of are selectivity of properties and indexes / constrains as well as degree distribution per relationship-type and direction between two labels.</p>
+</div>
+<div class="paragraph">
+<p>This store is used in Neo4j 3.x where the above query returns as fast as <strong>1ms</strong>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>MATCH (n:Person) RETURN count(n);
++----------+
+| count(n) |
++----------+
+| 1000131  |
++----------+
+1 row
+1 ms</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>You poor souls on Neo4j 2.x don&#8217;t have to despair.
+As mentioned above this count-store is used for query planning by the COST planner.</p>
+</div>
+<div class="paragraph">
+<p>Fortunately we can access the query plan (that you&#8217;ve often seen so nicely rendered) information as JSON response of a query prefixed with <code>EXPLAIN</code>.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/plan_node_count.png" alt="plan node count">
+</div>
+</div>
+<div class="paragraph">
+<p>You see it when you execute this HTTP post in your browser.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>:POST /db/data/transaction/commit {"statements":[{"statement":"explain MATCH (n:Person) RETURN count(n)"}]}
 
-public class GraphStatistics {
+{
+  "results": [
+    {
+      "columns": [],
+      "data": [],
+      "plan": {
+        "root": {
+          "operatorType": "ProduceResults",
+          "runtime-impl": "INTERPRETED",
+          "planner-impl": "IDP",
+          "version": "CYPHER 2.3",
+          "KeyNames": "count(n)",
+          "EstimatedRows": 1000.0654978550155,
+          "planner": "COST",
+          "runtime": "INTERPRETED",
+          "identifiers": [
+            "count(n)"
+          ],
+          "children": [
+            {
+              "operatorType": "EagerAggregation",
+              "KeyNames": "",
+              "EstimatedRows": 1000.0654978550155,
+              "identifiers": [
+                "count(n)"
+              ],
+              "children": [
+                {
+                  "operatorType": "NodeByLabelScan",
+                  "LabelName": ":Person",
 
-    @Context private GraphDatabaseService db;
+                  "EstimatedRows": 1000131, <b class="conum">(1)</b>
 
-    // Result class
-    public static class Degree {
-        public String label;
-        // note, that "int" values are not supported
-        public long count, max, min = Long.MAX_VALUE;
-
-        // method to consume a degree and compute min, max, count
-        private void add(long degree) {
-          if (degree &lt; min) min = degree;
-          if (degree &gt; max) max = degree;
-          count ++;
-        }
-    }
-
-    @Procedure
-    public Stream&lt;Degree&gt; degree(String label) {
-        // create holder class for results
-        Degree degree = new Degree(label);
-        // iterate over all nodes with label
-        try (ResourceIterator it = db.findNodes(Label.label(label))) {
-            while (it.hasNext()) {
-               // submit degree to holder for consumption (i.e. max, min, count)
-               degree.add(it.next().getDegree());
+                  "identifiers": [
+                    "n"
+                  ],
+                  "children": []
+                }
+              ]
             }
+          ]
         }
-        // we only return a "Stream" of a single element in this case.
-        return Stream.of(degree);
+      }
     }
-}</code></pre>
+  ],
+  "errors": []
+}</pre>
 </div>
+</div>
+<div class="colist arabic">
+<ol>
+<li>
+<p>Then the "EstimatedRows" number of the <code>NodeByLabelScan</code> operation is the value that comes from the count-store.</p>
+</li>
+</ol>
 </div>
 <div class="paragraph">
-<p>If you want to test the procedures quickly without spinning up an in-process server and connecting to it remotely (e.g. via the new binary bolt protocol as shown in the <a href="https://github.com/neo4j-examples/neo4j-procedure-template">procedure-template</a>), then you can use the test-facilities of Neo4j&#8217;s Java API.</p>
+<p>So to extract the data we only have to access the JSON and for that we us our trusted friend and companion <code>jq</code> to reach into the JSON and extract the numeric value.</p>
 </div>
 <div class="paragraph">
-<p>Now we can test our new and shiny procedure by writing a small unit-test.</p>
+<p>Which we can do with: <code>jq .results[0].plan.root.children[0].children[0].EstimatedRows</code>.</p>
+</div>
+<div class="paragraph">
+<p>So we can run a simple curl command to get the JSON and return the number of nodes with that label even in Neo4j 2.x.</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-java" data-lang="java">package stats;
+<pre>time curl -s -u neo4j:test -H content-type:application/json \
+      http://localhost:7474/db/data/transaction/commit \
+     -d'{"statements":[{"statement":"explain MATCH (n:Person) RETURN count(n)"}]}' | \
+     jq .results[0].plan.root.children[0].children[0].EstimatedRows
 
-class GraphStatisticsTest {
-    @Test public void testDegree() {
-        // given Alice knowing Bob and Charlie and Dan knowing no-one
-        db.execute("CREATE (alice:User)-[:KNOWS]-&gt;(bob:User),(alice)-[:KNOWS]-&gt;(charlie:User),(dan:User)").close();
-
-        // when retrieving the degree of the User label
-        Result res = db.execute("CALL stats.degree('User')");
-
-        // then we expect one result-row with min-degree 0 and max-degree 2
-        assertTrue(res.hasNext());
-        Map&lt;String,Object&gt; row = res.next();
-        assertEquals("User", row.get("label"));
-        // Dan has no friends
-        assertEquals(0, row.get("min"));
-        // Alice knows 2 people
-        assertEquals(2, row.get("max"));
-        // We have 4 nodes in our graph
-        assertEquals(4, row.get("count"));
-        // only one result record was produced
-        assertFalse(res.hasNext());
-    }
-}</code></pre>
-</div>
-</div>
-<div class="paragraph">
-<p>Of course you can use procedures to create procedures, e.g. in other languages that are supported natively on the JVM like JavaScript via Nashorn, or Clojure, Groovy, Scala, Frege (Haskell), (J)Ruby or (J/P)ython.
-I wrote one for creating and running procedures implemented in JavaScript.</p>
-</div>
-<div class="paragraph">
-<p>There are many other cool things that you can do with procedures, see the resources below.</p>
-</div>
-<div class="paragraph">
-<p>If you have ideas for procedures or wrote some of your own, please <a href="mailto:michael@neo4j.com">let us know</a>.</p>
-</div>
-<div class="paragraph">
-<p>Join our public <a href="http://neo4j.com/slack">Slack channel</a> and visit <code>#neo4j-procedures</code>.</p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_resources">Resources</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p>Neo4j Manual: <a href="http://neo4j.com/docs/3.0.0-M04/query-call.html">Calling &amp; Writing Procedures</a></p>
-</li>
-<li>
-<p><a href="https://github.com/jexp/neo4j-procedures-demo">GitHub Repository for this example</a></p>
-</li>
-<li>
-<p>Jacob Hanssons <a href="https://github.com/neo4j-examples/neo4j-procedure-template">Procedure Template</a> for manual index updates and queries</p>
-</li>
-<li>
-<p>Mark Needham wrote a <a href="http://www.markhneedham.com/blog/2016/02/28/neo4j-a-procedure-for-the-slm-clustering-algorithm">Graph Algorithm Procedure Blog Post</a></p>
-</li>
-<li>
-<p><a href="https://github.com/jexp/neo4j-apoc-procedures">APOC Utility procedures</a>, JSON, Loading, Collection Handling, Timestamps</p>
-</li>
-<li>
-<p>Creating <a href="https://github.com/jexp/neo4j-javascript-procedures">JavaScript based Procedures</a></p>
-</li>
-<li>
-<p><a href="https://github.com/neo4j-contrib/graph-refactoring">Graph Refactorings</a></p>
-</li>
-</ul>
-</div>
+# 1000131</pre>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2016-03-06 09:47:21 CET
+Last updated 2016-03-11 01:48:16 CET
 </div>
 </div>
 </body>
