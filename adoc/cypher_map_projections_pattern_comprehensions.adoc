@@ -1,0 +1,221 @@
+= New, GraphQL inspired features in Cypher
+
+When https://learngraphql.com[GraphQL] was published as part of Facebooks React efforts, it made a big buzz as an straightforward means to declare what kind of projection of your domain data you need for a certain UI component.
+Using a JSON-like syntax you define which properties of your entity and related entities you want to be part of the data structure you get back from the server.
+
+Here is an example from a StackOverflow query using the model from our https://neo4j.com/?s=%22Stack+Overflow%22+JSON&x=0&y=0[previous blog posts on that topic].
+
+image::https://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/load-json-from-url-as-data.jpg[]
+
+----
+{
+  question {
+    title,
+    author {
+      name
+    },
+    tags {
+      name
+    },
+    answers {
+      text,
+      author {
+        name
+      }
+    }
+  }
+}
+----
+
+Cypher itself with its rich support for literal maps and collections and the very powerful `collect` aggregation function, already allows for returning complex JSON documents.
+
+[source,cypher]
+----
+MATCH (u:User)-[:ASKED]->(q:Question)-[:TAGGED]->(t:Tag), 
+      (q)<-[:ANSWERS]-(a:Answer)<-[:PROVIDED]-(u2:User)
+
+RETURN { title: q.title, author: u.name, tags: collect(t.name), 
+       answers: collect({text: a.text, author: u2.name})} as question
+----
+
+This results in a document like this, which is similar to the original StackOverflow query API result.
+
+[source,json]
+----
+{
+  "title": "neo4j cypher query to delete a middle node and connect all its parent node to child node",
+  "author": "Soumya George",
+  "tags": [
+    "neo4j",
+    "cypher"
+  ],
+  "answers": [
+    {
+      "text": "Some text",
+      "author": "InverseFalcon"
+    }
+  ]
+}
+----
+
+////
+WITH {json} as data
+UNWIND data.items as q
+MERGE (question:Question {id:q.question_id}) ON CREATE
+  SET question.title = q.title, question.share_link = q.share_link, question.favorite_count = q.favorite_count
+
+MERGE (owner:User {id:q.owner.user_id}) ON CREATE SET owner.name = q.owner.name
+MERGE (owner)-[:ASKED]->(question)
+
+FOREACH (tagName IN q.tags | MERGE (tag:Tag {name:tagName}) MERGE (question)-[:TAGGED]->(tag))
+FOREACH (a IN q.answers |
+   MERGE (question)<-[:ANSWERS]-(answer:Answer {id:a.answer_id})
+   MERGE (answerer:User {id:a.owner.user_id}) ON CREATE SET answerer.name = a.owner.name
+   MERGE (answer)<-[:PROVIDED]-(answerer)
+)
+////
+
+
+Some things are not as convenient as we saw in GraphQL, we thought it would be very helpful to add more syntactic sugar to the language.
+
+Luckily my friend Andrés found some spare time to add two really neat features to Cypher in Neo4j 3.1 which we want to look into today.
+
+== Map Projections
+
+Map Projections are very close to what you expect from a GraphQL query, you take an map or entity (node or relationship) and apply a map-like property-selector to it.
+
+The result of that projection is a (optionally nested) map of results.
+
+Here is the example above rewritten using a map-projection.
+
+[source,cypher]
+----
+MATCH (u:User)-[:ASKED]->(q:Question)-[:TAGGED]->(t:Tag), 
+      (q)<-[:ANSWERS]-(a:Answer)<-[:PROVIDED]-(u2:User)
+
+RETURN q{ .title, author : u.name, tags: collect(t.name), 
+       answers: collect( a {.text, author: u2.name})} as question
+----
+
+
+////
+////
+
+But there are some more things possible.
+
+Within a map projection you can also add literal values or aggregations to the data that you extract from the entity.
+
+[source,cypher]
+----
+entity { .property1, .property2, .*,  literal: value,  values: collect(numbers), variable}
+----
+
+Here is a full list of possible selectors:
+
+[options=header,cols="1m,2a,2m"]
+|===
+| syntax | description | example
+| `.property` | property lookup | p{.name} -> {name : "John"}
+|`.*` | all properties | p{.*} -> {name:"John", age:42}
+|`variable` | variable name as key, variable value as value | p{count} -> {count: 1}
+|`key : value` | literal entry | p{awesome:true} -> {awesome:true}
+|===
+
+To demonstrate those options we _could_ rewrite the statement to:
+
+[source,cypher]
+----
+MATCH (u:User)-[:ASKED]->(q:Question)-[:TAGGED]->(t:Tag), 
+      (q)<-[:ANSWERS]-(a:Answer)<-[:PROVIDED]-(u2:User)
+
+WITH q, u, collect(t.name) as tags, collect( a {.text, author: u2.name}) as answers
+RETURN q{ .title, author : u{.*}, tags,  answers } as question
+----
+
+
+To pull in information from related entities, the other new feature, _Pattern Comprehensions_ come into play.
+
+== Pattern Comprehensions
+
+You've all (hopefully) used the list comprehensions in Cypher, they borrow from Haskells syntax and look like this:
+
+[source,cypher]
+----
+[value IN list WHERE predicate(value) | expression(value)]
+----
+
+As a concrete example, this returns the squares of the first 5 even numbers:
+
+[source,cypher]
+----
+RETURN [x IN range(1,10) WHERE x % 2 = 0 | x * x] -> [4, 16, 36, 64, 100]
+----
+
+Now, you can use any kind of collection here, also collection of maps or nodes or *even paths*.
+
+NOTE: If you use a graph pattern as an expression, it actually yields a collection of paths.
+
+That's cool, because now you can use a list comprehension to do pattern matching and extract a related node without actually using `MATCH` and changing your cardinality.
+
+So instead of:
+
+[source,cypher]
+----
+MATCH (u:User)-[:POSTED]->(q:Question)
+WHERE q.title CONTAINS "Neo4j"
+RETURN u.name, collect(q.title) as questions
+----
+
+you could write:
+
+[source,cypher]
+----
+MATCH (u:User)
+RETURN u.name, [path IN (u)-[:ASKED]->(:Question) 
+                  WHERE (last(nodes(path))).title CONTAINS "Neo4j" 
+                      | (last(nodes(path))).title] as questions
+----
+
+NOTE: Btw. this statement always returns a result, potentially an empty collection, so it's the same as if you were `OPTIONAL MATCH` in the previous statement.
+
+Wow, that's ugly. Why? Because you can't introduce new variables, like `q` in such a pattern expression.
+Only clauses could introduce new variables.
+
+*Until now!*
+
+With _Pattern Comprehensions_ you actually can introduce *local* variables in such a pattern and use them in the `WHERE` filter or expression at the end.
+
+[source,cypher]
+----
+MATCH (u:User)
+RETURN u.name, 
+       [(u)-[:ASKED]->(q:Question) WHERE q.title CONTAINS "Neo4j" | q.title] as questions
+----
+
+Now let's take a stab at our "GraphQL" query again, and see how we can rewrite it just starting from the `Question` node and moving all projections of attributes and patterns into the `RETURN` clause.
+
+[source,cypher]
+----
+MATCH (q:Question) 
+
+RETURN q{.title, 
+         author : [(q)<-[:ASKED]-(u) | u.name][0], 
+         tags   : [(q)<-[:TAGGED]-(t) | t.name],
+         answers: [(q)<-[:ANSWERS]-(a)<-[:PROVIDED]-(u2) | a{ .text, author: u2.name } ] }
+----     
+//          answers: [(q)<-[:ANSWERS]-(a)<-[:PROVIDED]-(u2) | a{ .text } + u2{ .name} ]
+
+[NOTE]
+* As pattern comprehensions always return a collection we have to turn them into a single value as needed, e.g. with `[...][0]` or `head([...])`
+* To combine attributes of two entites into one map you have to spell out the 2nd entities attributes. +
+It would be nice to get support for combining maps in the future, then we could use +
+`+answers: [(q)<-[:ANSWERS]-(a)<-[:PROVIDED]-(u2) | a{ .text } + u2{ .name} ]+`
+
+
+If you want to test these cool new features, please grab the https://neo4j.com/download/other-releases/#milestone[recently released Neo4j 3.1.0-M07 Milestone] and give it a try.
+
+We'd love to get your feedback on these and https://neo4j.com/release-notes/neo4j-3-1-0-m07/[other new features] like the brand-new [*cypher-shell*].
+
+With a lot of thanks to Andrés for this and everyone in engineering for a really cool database,
+
+Cheers, Michael

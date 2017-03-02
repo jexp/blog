@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.0">
-<title>Latest</title>
+<title>Database Integration, Import and Export with APOC (Awesome Procedures On Cypher)</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -411,216 +411,563 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>Database Integration, Import and Export with APOC (Awesome Procedures On Cypher)</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>If you haven&#8217;t seen the first part of this series, make sure to <a href="https://neo4j.com/blog/intro-user-defined-procedures-apoc/">check out the first article</a> to get an introduction to Neo4j&#8217;s user defined procedures and our <a href="http://github.com/neo4j-contrib/neo4j-apoc-procedures">APOC procedure library</a>.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_new_apoc_release">New APOC Release</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>First of all I want to announce that we just released <strong>APOC version 3.0.4.1</strong>
+You might notice the new versioning scheme which became necessary with SPI changes in Neo4j 3.0.4 which caused earlier versions of APOC to break.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>That&#8217;s why we decided to release APOC versions that are tied to the Neo4j version <em>from which</em> they are meant to work.
+The last number is an ever increasing APOC build number, starting with 1.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>So if you are using Neo4j 3.0.4 please upgrade to the new version, which is available as usual from <a href="http://github.com/neo4j-contrib/neo4j-apoc-procedures/releases" class="bare">http://github.com/neo4j-contrib/neo4j-apoc-procedures/releases</a></p>
 </div>
-<div class="sect1">
-<h2 id="_latest">Latest</h2>
-<div class="sectionbody">
+<div class="paragraph">
+<p>Notable Changes since the last release, please find <a href="https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_overview_of_apoc_procedures">more details in the docs</a>.</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
+<p>Random Graph Generators (by Michal Bachman from GraphAware)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
+<p>Added Export (and Import) for GraphML <code>apoc.export.graphml.*</code></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
+<p>PageRank implementation that supports pulling the subgraph to run on with Cypher statements <code>apoc.algo.pageRankCypher</code> (by Atul Jangra from RightRelevance)</p>
+</li>
+<li>
+<p>Basic Weakly Connected Components Implementation (by Tom Michiels and Sascha Peukert)</p>
+</li>
+<li>
+<p>Better error messages for <code>load.json</code> and <code>periodic.iterate</code></p>
+</li>
+<li>
+<p>support for leading wildcards "*foo" in <code>apoc.index.search</code> (by Stefan Armbruster)</p>
+</li>
+<li>
+<p><code>apoc.schema.properties.distinct</code> provides distinct values of indexed properties using the index (by Max de Marzi)</p>
+</li>
+<li>
+<p>timeboxed execution of cypher statements (by Stefan Armbruster)</p>
+</li>
+<li>
+<p>Linking of a collection of nodes with <code>apoc.nodes.link</code> in a chain</p>
+</li>
+<li>
+<p><code>apoc.util.sleep</code> e.g. for testing  (by Stefan Armbruster)</p>
+</li>
+<li>
+<p>Build switched to gradle, including release  (by Stefan Armbruster)</p>
 </li>
 </ul>
 </div>
+<div class="paragraph">
+<p>We got also a number of documentation updates by active contributors like Dana, Chris, Kevin, Viksit.</p>
 </div>
+<div class="paragraph">
+<p>Thanks so much to everyone for contributing to APOC, we&#8217;re now at 227 procedures and counting :)</p>
 </div>
-<div class="sect1">
-<h2 id="_previous_2016">Previous (2016)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>If you missed it, you can also see what was included in the <a href="https://neo4j.com/blog/apoc-1-1-0-release-awesome-procedures-cypher/">previous release APOC 1.1.0</a>.</p>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>But now back to demonstrating the main topics for this blog post.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_database_integration_data_import">Database Integration &amp; Data Import</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>For me personally besides the flexibility of the graph datamodel, the ability to enrich your existing graph by relating data from other datasources is a key advantage of using this technology.</p>
+</div>
+<div class="paragraph">
+<p>And Neo4j data import has been a very enjoyable past time of mine, which you know if you followed <a href="https://github.com/jexp?tab=repositories">my activities</a> in the last 6 years.</p>
+</div>
+<div class="paragraph">
+<p>With APOC I got the ability to pull data import capabilities directly into Cypher so that a procedure can act as a data source providing a stream of values (e.g. rows).
+Those are then consumed by your regular Cypher statement to create, update and connect nodes and relationships in whichever way you want.</p>
+</div>
+<div class="sect2">
+<h3 id="_apoc_load_json">apoc.load.json</h3>
+<div class="paragraph">
+<p>Because it is so <a href="http://neo4j.com/blog/cypher-load-json-from-url/">close to my heart</a>, I first started with <code>apoc.load.json</code>.
+Then I couldn&#8217;t stop anymore and added support for XML, CSV, GraphML and a lot of databases (relational &amp; Cassandra via JDBC, ElasticSearch, MongoDB, CouchBase (upcoming)).</p>
+</div>
+<div class="paragraph">
+<p>All of these procedures are used in a similar manner.
+You provide some kind of <em>URL</em> or <em>connection information</em> and then optionally <em>queries / statements</em> to retrieve data in rows.
+Those rows are usually maps that map columns or fields to values, depending on the data source these maps can also be deeply nested documents.</p>
+</div>
+<div class="paragraph">
+<p>Those can be processed easily with Cypher.
+The map and collection lookups, functions, expressions and predicates help a lot with handling nested structures.</p>
+</div>
+<div class="paragraph">
+<p>Let&#8217;s look at <code>apoc.load.json</code>.
+It takes an URL and optionally some configuration and returns the resulting JSON as one single map value, or if the source is an array of objects then as stream of maps.</p>
+</div>
+<div class="paragraph">
+<p>The mentioned docs and previous blog posts show how to use it for loading data from [StackOverflow] or Twitter Search (you have to pass in your twitter bearer token or credentials).</p>
+</div>
+<div class="paragraph">
+<p>Here I want to demonstrate how you could use it to load a graph from <a href="http://onodo.org" class="bare">http://onodo.org</a>, a graph visualization platform for journalists and other researchers that want to use the power of the graph to draw insights from the connections in their data.</p>
+</div>
+<blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">Using Onodo to Learn Network Analysis and Visualisation <a href="https://t.co/8ZfEzsYLeA">https://t.co/8ZfEzsYLeA</a> <a href="https://t.co/fRjGeSAvQS">pic.twitter.com/fRjGeSAvQS</a></p>&mdash; Shawn Day (@iridium) <a href="https://twitter.com/iridium/status/765573897597038593">August 16, 2016</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+<div class="paragraph">
+<p>I came across that tweet this week, and while checking out their really neat graph editing and visualization UI, I saw that both nodes and relationships for each publicly shared visualization are available as JSON.</p>
+</div>
+<div class="paragraph">
+<p>To load the mentioned <a href="https://onodo.org/visualizations/21">Game of Thrones graph</a>, I just had to grab the URLs for nodes and relationships, have a quick look a the JSON structures and re-create the graph in Neo4j.
+Note that for creating dynamic relationship-types from the input data I use <code>apoc.create.relationship</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>call apoc.load.json("https://onodo.org/api/visualizations/21/nodes/") yield value
+create (n:Person) set n+=value
+with count(*) as nodes
+call apoc.load.json("https://onodo.org/api/visualizations/21/relations/") yield value
+match (a:Person {id:value.source_id})
+match (b:Person {id:value.target_id})
+call apoc.create.relationship(a,value.relation_type,{},b) yield rel
+return nodes, count(*) as relationships</pre>
+</div>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/load_onodo_graph.png" alt="load onodo graph">
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_apoc_load_xml">apoc.load.xml</h3>
+<div class="paragraph">
+<p>The procedure for loading XML works similarly, only that I had to convert the XML into a nested map structure to be returned.</p>
+</div>
+<div class="paragraph">
+<p>While <code>apoc.load.xml</code> maintains the order of the original XML, <code>apoc.load.xmlSimple</code> aggregates child elements into entries with the element name as a key and all the  children as value or collection value.</p>
+</div>
+<div class="paragraph">
+<p>book.xml from <a href="https://msdn.microsoft.com/en-us/library/ms762271%28v=vs.85%29.aspx">Microsoft</a></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-xml" data-lang="xml">&lt;?xml version="1.0"?&gt;
+&lt;catalog&gt;
+   &lt;book id="bk101"&gt;
+      &lt;author&gt;Gambardella, Matthew&lt;/author&gt;
+      &lt;author&gt;Arciniegas, Fabio&lt;/author&gt;
+      &lt;title&gt;XML Developer's Guide&lt;/title&gt;
+      &lt;genre&gt;Computer&lt;/genre&gt;
+      &lt;price&gt;44.95&lt;/price&gt;
+      &lt;publish_date&gt;2000-10-01&lt;/publish_date&gt;
+      &lt;description&gt;An in-depth look at creating applications
+      with XML.&lt;/description&gt;
+   &lt;/book&gt;
+   &lt;book id="bk102"&gt;
+      &lt;author&gt;Ralls, Kim&lt;/author&gt;
+      &lt;title&gt;Midnight Rain&lt;/title&gt;
+      &lt;genre&gt;Fantasy&lt;/genre&gt;
+      &lt;price&gt;5.95&lt;/price&gt;
+      &lt;publish_date&gt;2000-12-16&lt;/publish_date&gt;
+      &lt;description&gt;A former architect battles corporate zombies,
+...</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH "https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/src/test/resources/books.xml" as url
+call apoc.load.xmlSimple(url)</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">{_type: "catalog", _book: [
+  {_type: "book", id: "bk101",
+    _author: [{_type: "author", _text: "Gambardella, Matthew"},{_type: author, _text: "Arciniegas, Fabio"}],
+    _title: {_type: "title", _text: "XML Developer's Guide"},
+    _genre: {_type: "genre", _text: "Computer"},
+    _price: {_type: "price", _text: "44.95"},
+    _publish_date: {_type: "publish_date", _text: "2000-10-01"},
+    _description: {_type: description, _text: An in-depth look at creating applications ....</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>You will find more examples in the <a href="https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_load_xml">documentation</a>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_relational_databases_and_cassandra_via_jdbc">Relational Databases and Cassandra via JDBC</h3>
+<div class="paragraph">
+<p>In the [past articles] and <a href="https://neo4j-contrib.github.io/neo4j-apoc-procedures/#" class="bare">https://neo4j-contrib.github.io/neo4j-apoc-procedures/#</a><em>load_jdbc[documentation] we demonstrated how to use <code>apoc.load.jdbc</code> with JDBC drivers, the powerhorse of _Java Database Connectivity</em> to connect and retrieve data from relational databases.</p>
+</div>
+<div class="paragraph">
+<p>The usage of <code>apoc.load.jdbc</code> mostly reduces to dropping the database' vendor jdbc-jar file into the <code>$NEO4J_HOME/plugins</code> directory and providing a jdbc-url to the procedure.
+Then you can declare either a table name or full statement that determines which and how much data is pulled from the source.</p>
+</div>
+<div class="paragraph">
+<p>To protect the auth information it is also possible to configure the jdbc-url in <code>$NEO4J_HOME/conf/neo4j.conf</code> under the <code>apoc.jdbc.&lt;alias&gt;.url</code>.
+Then instead of the full jdbc-url you only provide the alias from the config.</p>
+</div>
+<div class="paragraph">
+<p>As JDBC in its core is mostly about sending parametrized query strings to a server and returning tabular results, many non-relational databases also provide JDBC drivers, for example <a href="https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_cassandra_example">Cassandra</a>.</p>
+</div>
+<div class="paragraph">
+<p>You can even use the <a href="http://github.com/neo4j-contrib/neo4j-jdbc">Neo4j JDBC driver</a> to connect to another Neo4j instance and retrieve data from there.</p>
+</div>
+<div class="paragraph">
+<p>It is always nice if the APIs you build have the right abstraction so that you can compose them to build achieve something better.</p>
+</div>
+<div class="paragraph">
+<p>Here is an example on how we can use <code>apoc.load.jdbc</code> with <code>apoc.peridic.iterate</code> to parallelize import from a JDBC data source:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CALL apoc.periodic.iterate('
+call apoc.load.jdbc("jdbc:mysql://localhost:3306/northwind?user=northwind","company")',
+'CREATE (c:Company) SET c += value', {batchSize:10000, parallel:true})
+RETURN batches, total</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>As we already covered loading from relational databases before, I won&#8217;t bore you with it again (unless you ask me to) and introduce two other integrations that we added.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_mongodb">MongoDB</h3>
+<div class="paragraph">
+<p>As many projects use MongoDB but have a hard time managing complex relationships between documents in an efficient manner, we thought it would be nice to support it out of the box.</p>
+</div>
+<div class="paragraph">
+<p>The only thing you have to provide separately is the MongoDB java driver jar in <code>$NEO4J_HOME/plugins</code>.
+Apoc will pick it up and you&#8217;ll be able to use the MongoDB procedures:</p>
+</div>
+<div class="paragraph">
+<p><a href="https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc" class="bare">https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc</a></p>
+</div>
+<div class="paragraph">
+<p>If we import the <a href="https://docs.mongodb.com/getting-started/shell/import-data/">example restaurants dataset</a> into MongoDB, we can then access the documents from Neo4j&#8217;s Cypher.</p>
+</div>
+<div class="listingblock">
+<div class="title">Retrieving one restaurant</div>
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CALL apoc.mongodb.get("localhost","test","restaurants",null) YIELD value
+RETURN value LIMIT 1</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">{ name: Riviera Caterer,
+ cuisine: American ,
+ grades: [{date: 1402358400000, grade: A, score: 5}, {date: 1370390400000, grade: A, score: 7}, .... ],
+ address: {building: 2780, coord: [-73.98241999999999, 40.579505], street: Stillwell Avenue, zipcode: 11224},
+ restaurant_id: 40356018, borough: Brooklyn,
+ _id: {timestamp: 1472211033, machineIdentifier: 16699148, processIdentifier: -10497, counter: 8897244, ....}
+}</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">Retrieving 25359 restaurants and counting them</div>
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CALL apoc.mongodb.get("localhost","test","restaurants",null) YIELD value
+RETURN count(*)</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CALL apoc.mongodb.get("localhost","test","restaurants",{borough:"Brooklyn"}) YIELD value AS restaurant
+RETURN restaurant.name, restaurant.cuisine LIMIT 3</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>╒══════════════════╤══════════════════╕
+│restaurant.name   │restaurant.cuisine│
+╞══════════════════╪══════════════════╡
+│Riviera Caterer   │American          │
+├──────────────────┼──────────────────┤
+│Wendy'S           │Hamburgers        │
+├──────────────────┼──────────────────┤
+│Wilken'S Fine Food│Delicatessen      │
+└──────────────────┴──────────────────┘</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>And then we can for instance extract Addresses, Cuisines and Boroughs as separate nodes and connect them to the restaurants:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CALL apoc.mongodb.get("localhost","test","restaurants",{`$where`:"$avg(grades.score) &gt; 5"}) YIELD value as doc
+CREATE (r:Restaurant {name:doc.name, id:doc.restaurant_id})
+CREATE (r)-[:LOCATED_AT]-&gt;(a:Address) SET a = doc.address
+MERGE (b:Borough {name:doc.borough})
+CREATE (a)-[:IN_BOROUGH]-&gt;(b)
+MERGE (c:Cuisine {name: doc.cuisine})
+CREATE (r)-[:CUISINE]-&gt;(c);</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p><code>Added 50809 labels, created 50809 nodes, set 152245 properties, created 76077 relationships, statement executed in 14785 ms.</code></p>
+</div>
+<div class="paragraph">
+<p>Here is a small part of the data showing a bunch of restaurants in NYC.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/apoc.mongodb.get.create.jpg" alt="apoc.mongodb.get.create">
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_elasticsearch">ElasticSearch</h3>
+<div class="paragraph">
+<p>ElasticSearch support is provided calling their REST API, the general operations are similar to MongoDB.</p>
+</div>
+<div class="paragraph">
+<p><a href="https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc" class="bare">https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc</a></p>
+</div>
+<div class="paragraph">
+<p>After importing the example <a href="https://www.elastic.co/guide/en/kibana/3.0/import-some-data.html">Shakespeare dataset</a>, we can have a look at the ElasticSearch statistics.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">call apoc.es.stats("localhost")</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">{ _shards:{
+  total:10, successful:5, failed:0},
+ _all:{
+  primaries:{
+   docs:{
+    count:111396, deleted:13193
+   },
+   store:{
+    size_in_bytes:42076701, throttle_time_in_millis:0
+   },
+   indexing:{
+    index_total:111396, index_time_in_millis:54485, ...</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Couchbase support is upcoming with a contribution by <a href="http://twitter.com/inserpio">Lorenzo Speranzoni</a> from our Italian Partner Larus IT.</p>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
+<h2 id="_data_export">Data Export</h2>
 <div class="sectionbody">
+<div class="paragraph">
+<p>Exporting your Neo4j database to a shareable format has always been a bit of a challenge, which is why I created the neo4j-import-tools for neo4j-shell a few years ago.
+Those support exporting your whole database or the results of a Cypher statement to:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
+<p>Cypher Scripts</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
+<p>CSV</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
+<p>GraphML</p>
+</li>
+<li>
+<p>Binary (Kryo)</p>
+</li>
+<li>
+<p>Geoff</p>
 </li>
 </ul>
+</div>
+<div class="paragraph">
+<p>I&#8217;m now moving that functionality to APOC, one format at a time.</p>
+</div>
+<div class="sect2">
+<h3 id="_cypher_script">Cypher Script</h3>
+<div class="paragraph">
+<p>Starting with export to Cypher, the <code>apoc.export.cypher.*</code> procedures export</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>the whole database,</p>
+</li>
+<li>
+<p>results of a cypher query,</p>
+</li>
+<li>
+<p>a set of paths or</p>
+</li>
+<li>
+<p>a subgraph</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>and create a Cypher script file containing the statements to recreate your graph structure.</p>
+</div>
+<div class="paragraph">
+<p><a href="https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc" class="bare">https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc</a></p>
+</div>
+<div class="paragraph">
+<p>It also creates indexes and constraints.
+Currently only MERGE is used for nodes and relationships.
+It also makes sure that nodes which do not have a uniquely constrained property get an additional artificial label and property (containing their node-id) for that purpose.
+Both are pruned at the end of the import.</p>
+</div>
+<div class="paragraph">
+<p>Relationships are created by matching the two nodes and creating the relationship between them, optionally setting parameters.</p>
+</div>
+<div class="paragraph">
+<p>The node and relationship creation happens in batches wrapped with <code>begin</code> and <code>commit</code> commands.
+Currently the generated code doesn&#8217;t use parameters, that would be a future optimization.
+The current syntax only works for <code>neo4j-shell</code> and <code>cycli</code>, support for <code>cypher-shell</code> will be added as well.</p>
+</div>
+<div class="paragraph">
+<p>Here  is a simple example from our movies graph:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">:play movies
+create index on :Movie(title);
+create constraint on (p:Person) assert p.name is unique;
+
+call apoc.export.cypher.query("MATCH (m:Movie)&lt;-[r:DIRECTED]-(p:Person) RETURN m,r,p", "/tmp/directors.cypher", {batchSize:10});
+
+╒═════════════════════╤══════════════════════════════╤══════╤═════╤═════════════╤══════════╤════╕
+│file                 │source                        │format│nodes│relationships│properties│time│
+╞═════════════════════╪══════════════════════════════╪══════╪═════╪═════════════╪══════════╪════╡
+│/tmp/directors.cypher│statement: nodes(66), rels(44)│cypher│66   │44           │169       │104 │
+└─────────────────────┴──────────────────────────────┴──────┴─────┴─────────────┴──────────┴────┘</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">Contents of exported file</div>
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">begin
+CREATE (:`Movie`:`UNIQUE IMPORT LABEL` {`title`:"The Matrix", `released`:1999, `tagline`:"Welcome to the Real World", `UNIQUE IMPORT ID`:1106});
+CREATE (:`Person` {`name`:"Andy Wachowski", `born`:1967});
+CREATE (:`Person` {`name`:"Lana Wachowski", `born`:1965});
+....
+CREATE (:`Person` {`name`:"Rob Reiner", `born`:1947});
+commit
+....
+begin
+CREATE INDEX ON :`Movie`(`title`);
+CREATE CONSTRAINT ON (node:`Person`) ASSERT node.`name` IS UNIQUE;
+CREATE CONSTRAINT ON (node:`UNIQUE IMPORT LABEL`) ASSERT node.`UNIQUE IMPORT ID` IS UNIQUE;
+commit
+schema await
+begin
+MATCH (n1:`Person`{`name`:"Andy Wachowski"}), (n2:`UNIQUE IMPORT LABEL`{`UNIQUE IMPORT ID`:1106}) CREATE (n1)-[:`DIRECTED`]-&gt;(n2);
+....
+MATCH (n1:`Person`{`name`:"Tony Scott"}), (n2:`UNIQUE IMPORT LABEL`{`UNIQUE IMPORT ID`:1135}) CREATE (n1)-[:`DIRECTED`]-&gt;(n2);
+MATCH (n1:`Person`{`name`:"Cameron Crowe"}), (n2:`UNIQUE IMPORT LABEL`{`UNIQUE IMPORT ID`:1143}) CREATE (n1)-[:`DIRECTED`]-&gt;(n2);
+commit
+...
+begin
+MATCH (n:`UNIQUE IMPORT LABEL`)  WITH n LIMIT 10 REMOVE n:`UNIQUE IMPORT LABEL` REMOVE n.`UNIQUE IMPORT ID`;
+commit
+...
+begin
+DROP CONSTRAINT ON (node:`UNIQUE IMPORT LABEL`) ASSERT node.`UNIQUE IMPORT ID` IS UNIQUE;
+commit</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">load again with neo4j-shell</div>
+<div class="content">
+<pre class="highlight"><code class="language-shell" data-lang="shell">./bin/neo4j-shell -file /tmp/directors.cypher</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_graphml">GraphML</h3>
+<div class="paragraph">
+<p>The second export format I migrated is <a href="http://graphml.graphdrawing.org/">GraphML</a>, which can then be used by other tools like yEd, Gephi, Cytoscape etc. as import format.</p>
+</div>
+<div class="paragraph">
+<p>The procedures API is similar to the Cypher Script ones:</p>
+</div>
+<div class="paragraph">
+<p><a href="https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc" class="bare">https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/overview.adoc</a></p>
+</div>
+<div class="paragraph">
+<p>Here is an example of exporting the <a href="https://offshoreleaks.icij.org/pages/database">Panama Papers Data</a>, to GraphML (after replacing the bundled with the latest version of APOC) and loading it into Gephi.</p>
+</div>
+<div class="paragraph">
+<p>The export of the full database results in a 612MB large graphml file.
+Unfortunately Gephi struggles with rendering the full file, that&#8217;s why try again with the neigborhood of <em>officers</em> with a country code of "ESP" for Spain, which is much less data.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">call apoc.export.graphml.query("match p=(n:Officer)--&gt;()&lt;--() where n.country_codes = 'ESP' return p","/tmp/es.graphml",{})
+
+╒═══════════════╤══════════════════════════════════╤═══════╤═════╤═════════════╤══════════╤════╕
+│file           │source                            │format │nodes│relationships│properties│time│
+╞═══════════════╪══════════════════════════════════╪═══════╪═════╪═════════════╪══════════╪════╡
+│/tmp/es.graphml│statement: nodes(2876), rels(3194)│graphml│2876 │3194         │24534     │2284│
+└───────────────┴──────────────────────────────────┴───────┴─────┴─────────────┴──────────┴────┘</code></pre>
+</div>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/gephi_panama_es.png" alt="gephi panama es">
+</div>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_cypher">Cypher</h2>
+<h2 id="_conclusion">Conclusion</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>I hope this article and series helps you to see how awesome user defined procedures and APOC are.</p>
 </div>
+<div class="paragraph">
+<p>If you have any <strong>comments, feedback, bugs or ideas</strong> to report, don&#8217;t hesitate to tell us.
+Please either raise <a href="https://github.com/neo4j-contrib/neo4j-apoc-procedures/issues">GitHub issues</a> or ask in the apoc channel on our <a href="http://neo4j.com/slack">neo4j-users Slack</a>.
+Of course you can join the <a href="https://github.com/neo4j-contrib/neo4j-apoc-procedures/graphs/contributors">growing list of contributors</a> and submit a pull request with your suggested changes.</p>
 </div>
+<div class="paragraph">
+<p>Looking ahead to the next articles which I hope to provide all by <a href="http://graphconnect.com">GraphConnect on October 13th in San Francisco</a>.
+If you join me there, we can chat about procedures in person, we&#8217;ll try to set up a Neo4j Developer Relations booth with Q&amp;A sessions, live demos and more.</p>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>In the next article I&#8217;ll demonstrate the date and number formatting capabilities, utility functions and means to run Cypher statements in more controlled fashion.
+Following will be the metadata procedures and the wide area of (manual and schema) index operations.
+After that I&#8217;ll cover graph algorithms and custom expand, and search functions.</p>
 </div>
+<div class="paragraph">
+<p>Oh and if you like the project please make sure to <a href="https://github.com/neo4j-contrib/neo4j-apoc-procedures">star it on GitHub</a> and tell your friends, family and grandma to do the same :)</p>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Cheers, Michael</p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-03-02 02:34:42 CET
+Last updated 2016-08-29 14:23:36 CEST
 </div>
 </div>
 </body>

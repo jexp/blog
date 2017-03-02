@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.0">
-<title>Latest</title>
+<title>Property Lookup Performance, and what we can do about it</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -413,214 +413,364 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <div id="header">
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_property_lookup_performance_and_what_we_can_do_about_it">Property Lookup Performance, and what we can do about it</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>We often get questions like, "My query is too slow, what can I do."</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>If the query looks like this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>load csv from "salaries.csv" as row
+match (p:Person) where p.id = row.id
+set p.salary = toFloat(row.salary)</pre>
+</div>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>the best guess is:</p>
 </div>
-<div class="sect1">
-<h2 id="_latest">Latest</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-</ul>
+<div class="quoteblock">
+<blockquote>
+<div class="paragraph">
+<p>You forgot to create an constraint or index on that label and property combination!</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>create constraint on (p:Person) assert p.id is unique;
+// or
+create index on :Person(id);</pre>
 </div>
 </div>
+</blockquote>
 </div>
-<div class="sect1">
-<h2 id="_previous_2016">Previous (2016)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Currently, Neo4j, when asked to do a property lookup on a non-indexed property, has to do a full scan over all nodes with that label and compare the property with the provided value in a filter operation.
+And it does that for every check, so if you have a CSV with 1M lines, then that&#8217;s 1M x full scan + filter.</p>
 </div>
+<div class="paragraph">
+<p>Let&#8217;s look at some numbers and create an artificial dataset for that,
+in our case we&#8217;re only doing a read (i.e. the lookup) to not have the write + tx operation skew the times.</p>
 </div>
+<div class="paragraph">
+<p>We create 1M People with an <code>id</code> property.</p>
 </div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre>UNWIND range(1,1000000) AS id
+CREATE (:Person{id:id, age: id % 100});
+
++-------------------+
+| No data returned. |
++-------------------+
+Nodes created: 1000000
+Properties set: 1000000
+Labels added: 1000000
+10723 ms</pre>
 </div>
 </div>
+<div class="paragraph">
+<p>===
+Then we try to look up 500k of those id&#8217;s &#8230;&#8203;</p>
 </div>
-<div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>unwind range(1,1000000,2) as id
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+68 ms</p>
 </div>
+<div class="olist lowerroman">
+<ol class="lowerroman" type="i">
+<li>
+<p>from the existing people:</p>
+</li>
+</ol>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre>UNWIND range(1,1000000,2) AS id
+MATCH (:Person{id:id})
+RETURN count(*);
+
+... didn't finish after several minutes ...</pre>
 </div>
 </div>
+<div class="paragraph">
+<p>But we have no luck, re-running this with a smaller number (100), shows us the query plan and the associated costs.</p>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
-</div>
+<div class="listingblock">
+<div class="content">
+<pre>UNWIND range(1,1000000,10000) AS id
+MATCH (:Person{id:id})
+RETURN count(*);
+
++----------+
+| count(*) |
++----------+
+| 100      |
++----------+
+1 row
+72957 ms
+
+Compiler CYPHER 3.0
+
+Planner COST
+
+Runtime INTERPRETED
+
++--------------------+----------------+-----------+-----------+----------------+-------------------+
+| Operator           | Estimated Rows | Rows      | DB Hits   | Variables      | Other             |
++--------------------+----------------+-----------+-----------+----------------+-------------------+
+| +ProduceResults    |           1000 |         1 |         0 | count(*)       | count(*)          |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +EagerAggregation  |           1000 |         1 |         0 | count(*)       |                   |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +Filter            |        1000000 |       100 | 100000000 | anon[44], id   | anon[44].id == id |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +Apply             |        1000000 | 100000000 |         0 | id -- anon[44] |                   |
+| |\                 +----------------+-----------+-----------+----------------+-------------------+
+| | +NodeByLabelScan |       10000000 | 100000000 | 100000100 | anon[44]       | :Person           |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +Unwind            |             10 |       100 |         0 | id             |                   |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +EmptyRow          |              1 |         1 |         0 |                |                   |
++--------------------+----------------+-----------+-----------+----------------+-------------------+
+
+Total database accesses: 200000100</pre>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>create constraint on (p:Person) assert p.id is unique;</p>
 </div>
+<div class="paragraph">
+<p>schema await
+schema sample -a
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(<strong>);
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(</strong>);
+/*
+----------
+| count(*) |
+----------
+| 500000   |
+----------
+1 row
+7450 ms
+*/</p>
 </div>
+<div class="paragraph">
+<p>drop constraint on (p:Person) assert p.id is unique;</p>
 </div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>create index on :Person(id);
+schema await
+schema sample -a
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(<strong>);
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(</strong>);
+/*
+----------
+| count(*) |
+----------
+| 500000   |
+----------
+1 row
+7132 ms
+*/</p>
 </div>
+<div class="paragraph">
+<p>drop index on :Person(id);</p>
 </div>
+<div class="paragraph">
+<p>match (p:Person)
+with collect([toString(p.id),p]) as pairs
+call apoc.map.fromPairs(pairs) yield value as index
+unwind range(1,1000000,2) as id
+with index[toString(id)] as n
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+4687 ms</p>
 </div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>match (p:Person)
+with collect(p) as people
+call apoc.map.groupBy(people,'id') yield value as index
+unwind range(1,1000000,2) as id
+with index[toString(id)] as n
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+3115 ms</p>
+</div>
+<div class="paragraph">
+<p>with range(1,1000000,2) as ids
+match (p:Person) where p.id IN ids
+with collect(p) as people
+call apoc.map.groupBy(people,'id') yield value as index
+unwind range(1,1000000,2) as id
+with index[toString(id)] as n
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+2344 ms</p>
+</div>
+<div class="paragraph">
+<p>with [id IN range(1,1000000,2) | {id:id}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+with rowById,[id IN keys(rowById) | toInt(id)] as ids
+match (p:Person) where p.id IN ids
+with rowById[toString(p.id)] as row
+return count(*);</p>
+</div>
+<div class="paragraph">
+<p>with [id IN range(1,1000000,2) | {id:toString(id)}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+with rowById,keys(rowById) as ids
+match (p:Person) where p.id IN ids
+with rowById[p.id] as row
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+4746 ms</p>
+</div>
+<div class="paragraph">
+<p>with [id IN range(1,1000000,2) | {id:toString(id)}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+match (p:Person) where p.id IN keys(rowById)
+with rowById[p.id] as row
+return count(*);</p>
+</div>
+<div class="paragraph">
+<p>profile
+with range(1,1000) as ids
+match (p:Person)
+where p.id2 IN ids
+return count(*);</p>
+</div>
+<div class="paragraph">
+<p>profile
+match (p:Person)
+where p.id2 IN range(1,1000)
+return count(*);</p>
+</div>
+<div class="paragraph">
+<p>with [id IN range(1,1000000,2) | {id:toString(id)}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+return count(*);</p>
+</div>
+<div class="paragraph">
+<p>unwind range(1,1000000,2) as id
+with collect(id) as ids
+match (p:Person)
+where p.id IN ids
+return count(*);</p>
+</div>
+<div class="paragraph">
+<p>with range(1,1000000,2) as ids
+match (p:Person)
+where p.id IN ids
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+1631 ms</p>
+</div>
+<div class="paragraph">
+<p>with range(1,1000000,2) as ids
+match (p:Person)
+where p.id IN ids
+with collect([toString(p.id),p]) as pairs
+call apoc.map.fromPairs(pairs) yield value as index
+unwind range(1,1000000,2) as id
+with index[toString(id)] as n
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+3563 ms</p>
+</div>
+<div class="paragraph">
+<p>with collect([toString(p.id),p]) as pairs
+call apoc.map.fromPairs(pairs) yield value as index
+unwind range(1,1000000,2) as id
+with index[toString(id)] as n
+return count(*);</p>
+</div>
+<div class="paragraph">
+<p>unwind range(1,1000000,2) as id
+with collect(id) as ids
+match (p:Person)
+where p.id IN ids
+return count(<strong>);
+----------
+| count(</strong>) |
+----------
+| 500000   |
+----------
+1 row
+1660 ms</p>
+</div>
+<div class="paragraph">
+<p>load csv from "salaries.csv" as row
+match (p:Person) where p.id = row.id
+set p.salary = toFloat(row.salary)</p>
+</div>
+<div class="paragraph">
+<p>rewrite to</p>
+</div>
+<div class="paragraph">
+<p>load csv from "salaries.csv" as row
+with collect(distinct row.id) as ids, collect(row) as rows
+match (p:Person) where p.id IN ids
+WITH collect(p) as people, rows // this aggreation is probably the only issue
+UNWIND rows as row
+WITH head([p in people where p.id = row.id])  as p // and perhaps this "lookup"
+SET p.salary = row.salary;</p>
+</div>
+<div class="paragraph">
+<p>set p.salary = toFloat(row.salary)</p>
+</div>
+<div class="paragraph">
+<p>load csv from "salaries.csv" as row
+with collect(row) as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+match (p:Person) where p.id IN keys(rowById)
+set p.salary = rowById[toString(p.id)].salary</p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-03-02 02:34:42 CET
+Last updated 2016-11-30 11:39:00 CET
 </div>
 </div>
 </body>

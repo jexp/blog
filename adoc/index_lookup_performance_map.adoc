@@ -1,0 +1,318 @@
+== Property Lookup Performance, and what we can do about it
+
+We often get questions like, "My query is too slow, what can I do."
+
+If the query looks like this:
+
+----
+load csv from "salaries.csv" as row
+match (p:Person) where p.id = row.id
+set p.salary = toFloat(row.salary)
+----
+
+the best guess is:
+
+____
+You forgot to create an constraint or index on that label and property combination!
+----
+create constraint on (p:Person) assert p.id is unique;
+// or
+create index on :Person(id);
+----
+____
+
+Currently, Neo4j, when asked to do a property lookup on a non-indexed property, has to do a full scan over all nodes with that label and compare the property with the provided value in a filter operation.
+And it does that for every check, so if you have a CSV with 1M lines, then that's 1M x full scan + filter.
+
+Let's look at some numbers and create an artificial dataset for that,
+in our case we're only doing a read (i.e. the lookup) to not have the write + tx operation skew the times.
+
+We create 1M People with an `id` property.
+
+----
+UNWIND range(1,1000000) AS id 
+CREATE (:Person{id:id, age: id % 100});
+
++-------------------+
+| No data returned. |
++-------------------+
+Nodes created: 1000000
+Properties set: 1000000
+Labels added: 1000000
+10723 ms
+----
+
+=== 
+Then we try to look up 500k of those id's ...
+
+unwind range(1,1000000,2) as id
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+68 ms
+
+
+... from the existing people:
+
+----
+UNWIND range(1,1000000,2) AS id 
+MATCH (:Person{id:id}) 
+RETURN count(*);
+
+... didn't finish after several minutes ...
+----
+
+But we have no luck, re-running this with a smaller number (100), shows us the query plan and the associated costs.
+
+----
+UNWIND range(1,1000000,10000) AS id 
+MATCH (:Person{id:id}) 
+RETURN count(*);
+
++----------+
+| count(*) |
++----------+
+| 100      |
++----------+
+1 row
+72957 ms
+
+Compiler CYPHER 3.0
+
+Planner COST
+
+Runtime INTERPRETED
+
++--------------------+----------------+-----------+-----------+----------------+-------------------+
+| Operator           | Estimated Rows | Rows      | DB Hits   | Variables      | Other             |
++--------------------+----------------+-----------+-----------+----------------+-------------------+
+| +ProduceResults    |           1000 |         1 |         0 | count(*)       | count(*)          |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +EagerAggregation  |           1000 |         1 |         0 | count(*)       |                   |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +Filter            |        1000000 |       100 | 100000000 | anon[44], id   | anon[44].id == id |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +Apply             |        1000000 | 100000000 |         0 | id -- anon[44] |                   |
+| |\                 +----------------+-----------+-----------+----------------+-------------------+
+| | +NodeByLabelScan |       10000000 | 100000000 | 100000100 | anon[44]       | :Person           |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +Unwind            |             10 |       100 |         0 | id             |                   |
+| |                  +----------------+-----------+-----------+----------------+-------------------+
+| +EmptyRow          |              1 |         1 |         0 |                |                   |
++--------------------+----------------+-----------+-----------+----------------+-------------------+
+
+Total database accesses: 200000100
+----
+
+create constraint on (p:Person) assert p.id is unique;
+// Unique constraints added: 1 -> 8617 ms
+
+schema await
+schema sample -a
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(*);
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(*);
+/*
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+7450 ms
+*/
+
+drop constraint on (p:Person) assert p.id is unique;
+
+create index on :Person(id);
+schema await
+schema sample -a
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(*);
+unwind range(1,1000000,2) as id match (:Person{id:id}) return count(*);
+/*
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+7132 ms
+*/
+
+drop index on :Person(id);
+
+match (p:Person)
+with collect([toString(p.id),p]) as pairs
+call apoc.map.fromPairs(pairs) yield value as index
+unwind range(1,1000000,2) as id 
+with index[toString(id)] as n
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+4687 ms
+
+match (p:Person)
+with collect(p) as people
+call apoc.map.groupBy(people,'id') yield value as index
+unwind range(1,1000000,2) as id 
+with index[toString(id)] as n
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+3115 ms
+
+with range(1,1000000,2) as ids
+match (p:Person) where p.id IN ids
+with collect(p) as people
+call apoc.map.groupBy(people,'id') yield value as index
+unwind range(1,1000000,2) as id 
+with index[toString(id)] as n
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+2344 ms
+
+with [id IN range(1,1000000,2) | {id:id}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+with rowById,[id IN keys(rowById) | toInt(id)] as ids
+match (p:Person) where p.id IN ids 
+with rowById[toString(p.id)] as row
+// do something with p and row
+return count(*);
+
+with [id IN range(1,1000000,2) | {id:toString(id)}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+with rowById,keys(rowById) as ids
+match (p:Person) where p.id IN ids 
+with rowById[p.id] as row
+// do something with p and row
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+4746 ms
+
+
+with [id IN range(1,1000000,2) | {id:toString(id)}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+match (p:Person) where p.id IN keys(rowById) 
+with rowById[p.id] as row
+// do something with p and row
+return count(*);
+
+profile 
+with range(1,1000) as ids
+match (p:Person) 
+where p.id2 IN ids
+return count(*);
+
+
+profile 
+match (p:Person) 
+where p.id2 IN range(1,1000) 
+return count(*);
+
+
+
+with [id IN range(1,1000000,2) | {id:toString(id)}] as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+return count(*);
+// 1300ms
+
+unwind range(1,1000000,2) as id
+with collect(id) as ids
+match (p:Person)
+where p.id IN ids
+return count(*);
+
+
+with range(1,1000000,2) as ids
+match (p:Person)
+where p.id IN ids
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+1631 ms
+
+with range(1,1000000,2) as ids
+match (p:Person)
+where p.id IN ids
+with collect([toString(p.id),p]) as pairs
+call apoc.map.fromPairs(pairs) yield value as index
+unwind range(1,1000000,2) as id 
+with index[toString(id)] as n
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+3563 ms
+
+
+with collect([toString(p.id),p]) as pairs
+call apoc.map.fromPairs(pairs) yield value as index
+unwind range(1,1000000,2) as id 
+with index[toString(id)] as n
+return count(*);
+
+
+unwind range(1,1000000,2) as id
+with collect(id) as ids
+match (p:Person)
+where p.id IN ids
+return count(*);
++----------+
+| count(*) |
++----------+
+| 500000   |
++----------+
+1 row
+1660 ms
+
+
+load csv from "salaries.csv" as row
+match (p:Person) where p.id = row.id
+set p.salary = toFloat(row.salary)
+
+rewrite to
+
+load csv from "salaries.csv" as row
+with collect(distinct row.id) as ids, collect(row) as rows
+match (p:Person) where p.id IN ids
+WITH collect(p) as people, rows // this aggreation is probably the only issue
+UNWIND rows as row
+WITH head([p in people where p.id = row.id])  as p // and perhaps this "lookup"
+SET p.salary = row.salary;
+
+set p.salary = toFloat(row.salary)
+
+
+load csv from "salaries.csv" as row
+with collect(row) as rows
+call apoc.map.groupBy(rows,'id') yield value as rowById
+match (p:Person) where p.id IN keys(rowById)
+set p.salary = rowById[toString(p.id)].salary

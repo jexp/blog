@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.0">
-<title>Latest</title>
+<title>5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -411,216 +411,456 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>Michael Hunger, <a href="http://twitter.com/mesirii">@mesirii</a></p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>When you&#8217;re writing a lot of data to the graph from your application or library, you want to be efficent.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_inefficient_solutions">Inefficient Solutions</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>These approaches are not very efficient:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>hard coding values instead of using parameters</p>
+</li>
+<li>
+<p>sending a single query / tx per individual update</p>
+</li>
+<li>
+<p>sending many single queries within a single tx with individual updates</p>
+</li>
+<li>
+<p>generating large, complex statements (hundreds of lines) and sending one of them per tx and update</p>
+</li>
+<li>
+<p>sending in HUGE (millions) of updates in a single tx, will cause out-of-memory issues</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_better_approach">Better Approach</h2>
+<div class="sectionbody">
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+You want small enough queries, that are constant in their shape (for caching) and are using parameters.
+</td>
+</tr>
+</table>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>Each query can update from a single property to a whole subgraph (100 nodes) but has to be the <strong>same</strong> in overall structure for caching.</p>
 </div>
-<div class="sect1">
-<h2 id="_latest">Latest</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_unwind_to_the_rescue">UNWIND to the Rescue</h3>
+<div class="paragraph">
+<p>To achieve that you just prefix your regular "single-update-query" with an UNWIND that turns a batch of data (up to 10k or 50k entries)
+into individual rows, which contain the information for each of the (more or less complex) updates.</p>
+</div>
+<div class="paragraph">
+<p>You send in a {batch} parameter (up to 10k-50k) of data (hopefully a delta) as a list of maps, which are then applied in a compact query, which is also properly compiled and cached, as it has a fixed structure.</p>
 </div>
 </div>
+<div class="sect2">
+<h3 id="_overall_syntax_structure">Overall Syntax Structure</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{batch: [{row1},{row2},{row3},...10k]}</code></pre>
 </div>
-<div class="sect1">
-<h2 id="_previous_2016">Previous (2016)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">UNWIND {batch} as row
+
+// now perform updates with the data in each "row" map</code></pre>
+</div>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
+<h2 id="_examples">Examples</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Here are some examples:</p>
+</div>
+<div class="sect2">
+<h3 id="_create_node_with_properties">Create node with properties</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{batch: [{name:"Alice",age:32},{name:"Bob",age:42}]}</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">UNWIND {batch} as row
+CREATE (n:Label)
+SET n += row</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_merge_node_with_properties">MERGE node with properties</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{batch: [{id:"alice@example.com",properties:{name:"Alice",age:32}},{id:"bob@example.com",properties:{name:"Bob",age:42}}]}</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">UNWIND {batch} as row
+MERGE (n:Label {row.id})
+(ON CREATE) SET n += row.properties</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_node_lookup_and_merge_create_relationship_between_with_properties">Node lookup and MERGE/CREATE relationship between with properties</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{batch: [{from:"alice@example.com",to:"bob@example.com",properties:{since:2012}},{from:"alice@example.com",to:"charlie@example.com",properties:{since:2016}}]}</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">UNWIND {batch} as row
+MATCH (from:Label {row.from})
+MATCH (to:Label {row.to})
+CREATE/MERGE (from)-[rel:KNOWS]-&gt;(to)
+(ON CREATE) SET rel += row.properties</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_lookup_by_id_or_even_list_of_ids">Lookup by id, or even list of ids</h3>
+<div class="paragraph">
+<p>good for parent-child trees</p>
+</div>
+<div class="paragraph">
+<p>Here we&#8217;re passing a single property <code>created</code>.
+Alternatively you could pass in no properties or a map of properties to be set/updated.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{batch: [{from:123,to:[44,12,128],created:"2016-01-13"}, {from:34,to:[23,35,2983],created:"2016-01-15"},...]</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">UNWIND {batch} as row
+MATCH (from) WHERE id(from) = row.from
+MATCH (to) WHERE id(from) IN row.to // list of ids
+CREATE/MERGE (from)-[rel:FOO]-&gt;(to)
+SET rel.created = row.created</code></pre>
+</div>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
+<h2 id="_faster_better_further_all_the_tricks">Faster, Better, Further: All the tricks</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>There are some more tricks.</p>
+</div>
+<div class="paragraph">
+<p>You can also send in a map where the <strong>keys</strong> are <strong>node- or relationship-ids</strong> (converted to as strings) that&#8217;s more compact and faster too for the id lookup.</p>
+</div>
+<div class="sect2">
+<h3 id="_update_of_existing_nodes_by_id">Update of existing nodes by id</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{ batch : [{"1":334,"2":222,3:3840, ... 100k}]}</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH {batch} as data, [k in keys({batch}) | toInt(k)] as ids
+MATCH (n) WHERE id(n) IN ids
+
+// single property value
+SET n.count = data[toString(id(n))]
+
+// or override all properties
+SET n = data[toString(id(n))]
+
+// or add all properties
+SET n += data[toString(id(n))]</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_update_of_existing_relationships_by_id">Update of existing relationships by id</h3>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{ batch : [{"1":334,"2":222,3:3840, ... 100k}]}</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">WITH {batch} as data, [k in keys({batch}) | toInt(k)] as ids
+MATCH ()-[rel]-&gt;() WHERE id(rel) IN ids
+SET rel.foo = data[toString(id(rel))] // single property
+SET rel= data[toString(id(rel))] // all properties</code></pre>
+</div>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_conditional_data_creation">Conditional Data Creation</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Sometimes you want to create data dynamically based on inputs, e.g. a node with a certain label.</p>
+</div>
+<div class="paragraph">
+<p>As cypher currently has no conditional <code>WHEN</code> or <code>IF</code> clause, and <code>case when</code> is just an expression, you have to use a trick I came up with many years ago.</p>
+</div>
+<div class="paragraph">
+<p>Fortunately there is <code>FOREACH</code> which is meant to iterate over a list of items and execute <strong>update</strong> operations for each of them.</p>
+</div>
+<div class="paragraph">
+<p>Fortunately a list of 0 or 1 elements can serve as a conditional of false and true, i.e. no iteration or one iteration.</p>
+</div>
+<div class="paragraph">
+<p>General idea:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">...
+FOREACH (_ IN CASE WHEN predicate THEN [true] ELSE [] END |
+... update operations ....
+)</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Note that the <code>true</code> value in that list could be anything, <code>42, "", null</code> etc. as long as it is any single value so that we have a non-empty list.</p>
+</div>
+<div class="paragraph">
+<p>You can achieve something similar with a <code>RANGE(1, CASE WHEN predicate THEN 1 ELSE 0 END)</code> which will yield an empty list when the predicate is false.
+Or if you fancy <code>filter</code> then you can use: <code>filter(_ IN [1] WHERE predicate)</code>.</p>
+</div>
+<div class="paragraph">
+<p>Here is a concrete example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">LOAD CSV FROM {url} AS row
+MATCH (o:Organization {name:row.org})
+FOREACH (_ IN case when row.type = 'Person' then [1] else [] end|
+   MERGE (p:Person {name:row.name})
+   CREATE (p)-[:WORKS_FOR]-&gt;(o)
+)
+FOREACH (_ IN case when row.type = 'Agency' then [1] else [] end|
+   MERGE (a:Agency {name:row.name})
+   CREATE (a)-[:WORKS_FOR]-&gt;(o)
+)</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Note that identifiers created within <code>FOREACH</code> are not accessible from the outside, you would have to re-match the value later on, or you have to move all your update operations into the foreach.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
+<h2 id="_utilizing_apoc_procedures">Utilizing APOC Procedures</h2>
 <div class="sectionbody">
+<div class="paragraph">
+<p>The APOC procedure library comes with a lot of useful procedures that can help you here, I want to highlight 3 of them:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
+<p>create nodes / relationships with dynamic labels and propeties</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
+<p>batched transactions / iteration of updates</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
+<p>functions for creating and manipulating maps to be set as properties</p>
 </li>
 </ul>
+</div>
+<div class="sect2">
+<h3 id="_creating_nodes_and_relationships_dynamically">Creating Nodes and Relationships dynamically</h3>
+<div class="paragraph">
+<p>With <code>apoc.create.node</code> and <code>apoc.create.relationship</code> you can have dynamically computed node-labels and relationship-types as well as any map of properties.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>labels is a string array</p>
+</li>
+<li>
+<p>properties is just a map</p>
+</li>
+</ul>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">UWNIND {batch} as row
+CALL apoc.create.node(row.labels, row.properties) yield node
+RETURN count(*)</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>There are also procedures in <a href="https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_creating_data">apoc.create.*</a> for setting/updating/removing properties and labels with dynamic string keys.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">UWNIND {batch} as row
+MATCH (from) WHERE id(n) = row.from
+MATCH (to:Label) where to.key = row.to
+CALL apoc.create.relationship(from, row.type, row.properties, to) yield rel
+RETURN count(*)</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_batched_transactions">Batched Transactions</h3>
+<div class="paragraph">
+<p>As mentioned at the beginning huge transactions are a problem, you can update a million records with around 2G - 4G of heap but it gets difficult with larger volumes.
+My biggest volume per single transaction was about 10M nodes / relationships with 32G heap.</p>
+</div>
+<div class="paragraph">
+<p>That&#8217;s where <code>apoc.periodic.iterate</code> comes in.</p>
+</div>
+<div class="paragraph">
+<p>The idea is simple, you have two Cypher statements, <strong>the first statement</strong> provides the data to operate on and can produce a huge (many millions) stream of data (nodes, rels, scalar values).</p>
+</div>
+<div class="paragraph">
+<p><strong>The second statement</strong> does the actual update work, it is called for each item, but a new transaction is created only for each batch of items.</p>
+</div>
+<div class="paragraph">
+<p><em>(There is a new variant of this which will go into the next version of APOC that actually does an UNWIND variant of the second statement, so it executes only one inner statement per tx).</em></p>
+</div>
+<div class="paragraph">
+<p>So for example your first statement returns 5 million nodes to update, with a computed value.
+The inner statement is executed <strong>once for each of those 5 M nodes</strong>.
+If your batch size is 10k then that happens in batches of 10k statements per transaction.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+If your updates are independent of each other (think creation of nodes or updates of properties, or updates of independent subgraphs), then you can run this procedure with a <code>parallel:true</code> option which will use all your CPUs.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>For example if you want to compute a score of many rated items and update this property in a batched fashion, this is what you would do:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">call apoc.periodic.iterate('
+MATCH (n:User)-[r1:LIKES]-&gt;(thing)&lt;-[r2:RATED]-(m:User) WHERE id(n)&lt;id(m) RETURN thing, avg( r1.rating + r2.rating ) as score
+','
+WITH {thing} as t SET t.score = {score}
+', {batchSize:10000, parallel:true})</code></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_creating_updating_maps_dynamically">Creating / Updating Maps dynamically</h3>
+<div class="paragraph">
+<p>While lists can be created and processed quite easily in Cypher with <code>range, collect, unwind, reduce, extract, filter, size</code> etc, maps have more limited means esp. for creation and modification.</p>
+</div>
+<div class="paragraph">
+<p>The <a href="https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_map_functions">apoc.map.*</a> package comes with a number of functions that make your life easier:</p>
+</div>
+<div class="paragraph">
+<p>Creating Maps from other data:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">RETURN apoc.map.fromPairs([["alice",38],["bob",42],...​])
+// {alice:38, bob: 42, ...}
+
+RETURN apoc.map.fromLists(["alice","bob",...],[38,42])
+// {alice:38, bob: 42, ...}
+
+// groups nodes, relationships, maps by key, good for quick lookups by that key
+RETURN apoc.map.groupBy([{name:"alice",gender:"female"},{name:"bob",gender:"male"}],"gender")
+// {female:{name:"alice",gender:"female"}, male:{name:"bob",gender:"male"}}
+
+RETURN apoc.map.groupByMulti([{name:"alice",gender:"female"},{name:"bob",gender:"male"},{name:"Jane",gender:"female"}],"gender")
+// {female:[{name:"alice",gender:"female"},{name:"jane",gender:"female"}], male:[{name:"bob",gender:"male"}]}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Updating Maps</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">RETURN apoc.map.merge({alice: 38},{bob:42})
+// {alice:38, bob: 42}
+
+RETURN apoc.map.setKey({alice:38},"bob",42)
+// {alice:38, bob: 42}
+
+RETURN apoc.map.removeKey({alice:38, bob: 42},"alice")
+// {bob: 42}
+
+RETURN apoc.map.removeKey({alice:38, bob: 42},["alice","bob","charlie"])
+// {}
+
+// remove the given keys and values, good for data from load-csv/json/jdbc/xml
+RETURN apoc.map.clean({name: "Alice", ssn:2324434, age:"n/a", location:""},["ssn"],["n/a",""])
+// {name:"Alice"}</code></pre>
+</div>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_cypher">Cypher</h2>
+<h2 id="_conclusion">Conclusion</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>I used these approaches successfully for high volume update operations, and also in implementation of object graph mappers for bulk updates.</p>
 </div>
+<div class="paragraph">
+<p>Of course you can combine these variants for more complex operations.</p>
 </div>
+<div class="paragraph">
+<p>If you try them out and are successful, please let me know.</p>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>If you have any other tricks that helped you to achieve more write throughput with Cypher, please let me know too and I&#8217;ll update this post.</p>
 </div>
+<div class="paragraph">
+<p><a href="mailto:michael@neo4j.com">michael@neo4j.com</a> / <a href="http://twitter.com/mesirii" class="bare">http://twitter.com/mesirii</a></p>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Follow me on Twitter for more tips like this.</p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-03-02 02:34:42 CET
+Last updated 2017-03-02 02:25:42 CET
 </div>
 </div>
 </body>

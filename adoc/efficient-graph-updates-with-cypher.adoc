@@ -1,0 +1,327 @@
+= 5 Tips & Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher
+
+Michael Hunger, http://twitter.com/mesirii[@mesirii]
+
+When you're writing a lot of data to the graph from your application or library, you want to be efficent.
+
+== Inefficient Solutions
+
+These approaches are not very efficient:
+
+* hard coding values instead of using parameters
+* sending a single query / tx per individual update
+* sending many single queries within a single tx with individual updates
+* generating large, complex statements (hundreds of lines) and sending one of them per tx and update
+* sending in HUGE (millions) of updates in a single tx, will cause out-of-memory issues
+
+== Better Approach
+
+[NOTE]
+You want small enough queries, that are constant in their shape (for caching) and are using parameters.
+
+Each query can update from a single property to a whole subgraph (100 nodes) but has to be the *same* in overall structure for caching.
+
+=== UNWIND to the Rescue
+
+To achieve that you just prefix your regular "single-update-query" with an UNWIND that turns a batch of data (up to 10k or 50k entries)
+into individual rows, which contain the information for each of the (more or less complex) updates.
+
+
+You send in a {batch} parameter (up to 10k-50k) of data (hopefully a delta) as a list of maps, which are then applied in a compact query, which is also properly compiled and cached, as it has a fixed structure.
+
+=== Overall Syntax Structure
+
+[source,json]
+----
+{batch: [{row1},{row2},{row3},...10k]}
+----
+
+[source,cypher]
+----
+UNWIND {batch} as row
+
+// now perform updates with the data in each "row" map
+----
+
+== Examples
+
+Here are some examples:
+
+=== Create node with properties
+
+[source,json]
+----
+{batch: [{name:"Alice",age:32},{name:"Bob",age:42}]}
+----
+
+[source,cypher]
+----
+UNWIND {batch} as row
+CREATE (n:Label) 
+SET n += row
+----
+
+=== MERGE node with properties
+
+[source,json]
+----
+{batch: [{id:"alice@example.com",properties:{name:"Alice",age:32}},{id:"bob@example.com",properties:{name:"Bob",age:42}}]}
+----
+
+[source,cypher]
+----
+UNWIND {batch} as row
+MERGE (n:Label {row.id}) 
+(ON CREATE) SET n += row.properties
+----
+
+=== Node lookup and MERGE/CREATE relationship between with properties
+
+[source,json]
+----
+{batch: [{from:"alice@example.com",to:"bob@example.com",properties:{since:2012}},{from:"alice@example.com",to:"charlie@example.com",properties:{since:2016}}]}
+----
+
+[source,cypher]
+----
+UNWIND {batch} as row
+MATCH (from:Label {row.from})
+MATCH (to:Label {row.to})
+CREATE/MERGE (from)-[rel:KNOWS]->(to) 
+(ON CREATE) SET rel += row.properties
+----
+
+=== Lookup by id, or even list of ids 
+
+good for parent-child trees
+
+Here we're passing a single property `created`. 
+Alternatively you could pass in no properties or a map of properties to be set/updated.
+
+[source,json]
+----
+{batch: [{from:123,to:[44,12,128],created:"2016-01-13"}, {from:34,to:[23,35,2983],created:"2016-01-15"},...]
+----
+
+[source,cypher]
+----
+UNWIND {batch} as row
+MATCH (from) WHERE id(from) = row.from
+MATCH (to) WHERE id(from) IN row.to // list of ids
+CREATE/MERGE (from)-[rel:FOO]->(to) 
+SET rel.created = row.created
+----
+
+== Faster, Better, Further: All the tricks
+
+There are some more tricks.
+
+You can also send in a map where the *keys* are *node- or relationship-ids* (converted to as strings) that's more compact and faster too for the id lookup.
+
+=== Update of existing nodes by id
+
+[source,json]
+----
+{ batch : [{"1":334,"2":222,3:3840, ... 100k}]}
+----
+
+[source,cypher]
+----
+WITH {batch} as data, [k in keys({batch}) | toInt(k)] as ids
+MATCH (n) WHERE id(n) IN ids
+
+// single property value
+SET n.count = data[toString(id(n))]
+
+// or override all properties
+SET n = data[toString(id(n))]
+
+// or add all properties
+SET n += data[toString(id(n))]
+----
+
+=== Update of existing relationships by id
+
+[source,json]
+----
+{ batch : [{"1":334,"2":222,3:3840, ... 100k}]}
+----
+
+[source,cypher]
+----
+WITH {batch} as data, [k in keys({batch}) | toInt(k)] as ids
+MATCH ()-[rel]->() WHERE id(rel) IN ids
+SET rel.foo = data[toString(id(rel))] // single property
+SET rel= data[toString(id(rel))] // all properties
+----
+
+// todo more complex update of a whole subgraph
+
+== Conditional Data Creation
+
+Sometimes you want to create data dynamically based on inputs, e.g. a node with a certain label.
+
+As cypher currently has no conditional `WHEN` or `IF` clause, and `case when` is just an expression, you have to use a trick I came up with many years ago.
+
+Fortunately there is `FOREACH` which is meant to iterate over a list of items and execute *update* operations for each of them.
+
+Fortunately a list of 0 or 1 elements can serve as a conditional of false and true, i.e. no iteration or one iteration.
+
+General idea:
+
+[source,cypher]
+----
+...
+FOREACH (_ IN CASE WHEN predicate THEN [true] ELSE [] END | 
+... update operations ....
+)
+----
+
+Note that the `true` value in that list could be anything, `42, "", null` etc. as long as it is any single value so that we have a non-empty list.
+
+You can achieve something similar with a `RANGE(1, CASE WHEN predicate THEN 1 ELSE 0 END)` which will yield an empty list when the predicate is false.
+Or if you fancy `filter` then you can use: `filter(_ IN [1] WHERE predicate)`.
+
+Here is a concrete example:
+
+[source,cypher]
+----
+LOAD CSV FROM {url} AS row
+MATCH (o:Organization {name:row.org})
+FOREACH (_ IN case when row.type = 'Person' then [1] else [] end|
+   MERGE (p:Person {name:row.name})
+   CREATE (p)-[:WORKS_FOR]->(o)
+)
+FOREACH (_ IN case when row.type = 'Agency' then [1] else [] end|
+   MERGE (a:Agency {name:row.name})
+   CREATE (a)-[:WORKS_FOR]->(o)
+)
+----
+
+Note that identifiers created within `FOREACH` are not accessible from the outside, you would have to re-match the value later on, or you have to move all your update operations into the foreach.
+
+== Utilizing APOC Procedures
+
+The APOC procedure library comes with a lot of useful procedures that can help you here, I want to highlight 3 of them:
+
+* create nodes / relationships with dynamic labels and propeties
+* batched transactions / iteration of updates
+* functions for creating and manipulating maps to be set as properties
+
+=== Creating Nodes and Relationships dynamically
+
+With `apoc.create.node` and `apoc.create.relationship` you can have dynamically computed node-labels and relationship-types as well as any map of properties.
+
+* labels is a string array
+* properties is just a map
+
+[source,cypher]
+----
+UWNIND {batch} as row
+CALL apoc.create.node(row.labels, row.properties) yield node
+RETURN count(*)
+----
+
+There are also procedures in https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_creating_data[apoc.create.*] for setting/updating/removing properties and labels with dynamic string keys.
+
+// Your from- and to-nodes parameters can be any expression (id's, single nodes, nodes from a complex expression, a list of nodes).
+
+[source,cypher]
+----
+UWNIND {batch} as row
+MATCH (from) WHERE id(n) = row.from
+MATCH (to:Label) where to.key = row.to
+CALL apoc.create.relationship(from, row.type, row.properties, to) yield rel
+RETURN count(*)
+----
+
+=== Batched Transactions
+
+As mentioned at the beginning huge transactions are a problem, you can update a million records with around 2G - 4G of heap but it gets difficult with larger volumes.
+My biggest volume per single transaction was about 10M nodes / relationships with 32G heap.
+
+That's where `apoc.periodic.iterate` comes in.
+
+The idea is simple, you have two Cypher statements, *the first statement* provides the data to operate on and can produce a huge (many millions) stream of data (nodes, rels, scalar values).
+
+*The second statement* does the actual update work, it is called for each item, but a new transaction is created only for each batch of items.
+
+_(There is a new variant of this which will go into the next version of APOC that actually does an UNWIND variant of the second statement, so it executes only one inner statement per tx)._
+
+
+So for example your first statement returns 5 million nodes to update, with a computed value.
+The inner statement is executed *once for each of those 5 M nodes*.
+If your batch size is 10k then that happens in batches of 10k statements per transaction.
+
+NOTE: If your updates are independent of each other (think creation of nodes or updates of properties, or updates of independent subgraphs), then you can run this procedure with a `parallel:true` option which will use all your CPUs.
+
+For example if you want to compute a score of many rated items and update this property in a batched fashion, this is what you would do:
+
+[source,cypher]
+----
+call apoc.periodic.iterate('
+MATCH (n:User)-[r1:LIKES]->(thing)<-[r2:RATED]-(m:User) WHERE id(n)<id(m) RETURN thing, avg( r1.rating + r2.rating ) as score
+','
+WITH {thing} as t SET t.score = {score}
+', {batchSize:10000, parallel:true})
+----
+
+=== Creating / Updating Maps dynamically
+
+While lists can be created and processed quite easily in Cypher with `range, collect, unwind, reduce, extract, filter, size` etc, maps have more limited means esp. for creation and modification.
+
+The https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_map_functions[apoc.map.*] package comes with a number of functions that make your life easier:
+
+
+Creating Maps from other data:
+
+[source,cypher]
+----
+RETURN apoc.map.fromPairs([["alice",38],["bob",42],...​])
+// {alice:38, bob: 42, ...}
+
+RETURN apoc.map.fromLists(["alice","bob",...],[38,42])
+// {alice:38, bob: 42, ...}
+
+// groups nodes, relationships, maps by key, good for quick lookups by that key
+RETURN apoc.map.groupBy([{name:"alice",gender:"female"},{name:"bob",gender:"male"}],"gender")
+// {female:{name:"alice",gender:"female"}, male:{name:"bob",gender:"male"}}
+
+RETURN apoc.map.groupByMulti([{name:"alice",gender:"female"},{name:"bob",gender:"male"},{name:"Jane",gender:"female"}],"gender")
+// {female:[{name:"alice",gender:"female"},{name:"jane",gender:"female"}], male:[{name:"bob",gender:"male"}]}
+----
+
+Updating Maps
+
+[source,cypher]
+----
+RETURN apoc.map.merge({alice: 38},{bob:42})
+// {alice:38, bob: 42}
+
+RETURN apoc.map.setKey({alice:38},"bob",42)
+// {alice:38, bob: 42}
+
+RETURN apoc.map.removeKey({alice:38, bob: 42},"alice")
+// {bob: 42}
+
+RETURN apoc.map.removeKey({alice:38, bob: 42},["alice","bob","charlie"])
+// {}
+
+// remove the given keys and values, good for data from load-csv/json/jdbc/xml
+RETURN apoc.map.clean({name: "Alice", ssn:2324434, age:"n/a", location:""},["ssn"],["n/a",""])
+// {name:"Alice"}
+----
+
+== Conclusion
+
+I used these approaches successfully for high volume update operations, and also in implementation of object graph mappers for bulk updates.
+
+Of course you can combine these variants for more complex operations.
+
+If you try them out and are successful, please let me know.
+
+If you have any other tricks that helped you to achieve more write throughput with Cypher, please let me know too and I'll update this post.
+
+michael@neo4j.com / http://twitter.com/mesirii
+
+Follow me on Twitter for more tips like this.

@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.0">
-<title>Latest</title>
+<title>New, GraphQL inspired features in Cypher</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic|Noto+Serif:400,400italic,700,700italic|Droid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -411,216 +411,311 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>New, GraphQL inspired features in Cypher</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>When <a href="https://learngraphql.com">GraphQL</a> was published as part of Facebooks React efforts, it made a big buzz as an straightforward means to declare what kind of projection of your domain data you need for a certain UI component.
+Using a JSON-like syntax you define which properties of your entity and related entities you want to be part of the data structure you get back from the server.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>Here is an example from a StackOverflow query using the model from our <a href="https://neo4j.com/?s=%22Stack+Overflow%22+JSON&amp;x=0&amp;y=0">previous blog posts on that topic</a>.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="https://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/load-json-from-url-as-data.jpg" alt="load json from url as data">
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>{
+  question {
+    title,
+    author {
+      name
+    },
+    tags {
+      name
+    },
+    answers {
+      text,
+      author {
+        name
+      }
+    }
+  }
+}</pre>
+</div>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>Cypher itself with its rich support for literal maps and collections and the very powerful <code>collect</code> aggregation function, already allows for returning complex JSON documents.</p>
 </div>
-<div class="sect1">
-<h2 id="_latest">Latest</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (u:User)-[:ASKED]-&gt;(q:Question)-[:TAGGED]-&gt;(t:Tag),
+      (q)&lt;-[:ANSWERS]-(a:Answer)&lt;-[:PROVIDED]-(u2:User)
+
+RETURN { title: q.title, author: u.name, tags: collect(t.name),
+       answers: collect({text: a.text, author: u2.name})} as question</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>This results in a document like this, which is similar to the original StackOverflow query API result.</p>
 </div>
-<div class="sect1">
-<h2 id="_previous_2016">Previous (2016)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-json" data-lang="json">{
+  "title": "neo4j cypher query to delete a middle node and connect all its parent node to child node",
+  "author": "Soumya George",
+  "tags": [
+    "neo4j",
+    "cypher"
+  ],
+  "answers": [
+    {
+      "text": "Some text",
+      "author": "InverseFalcon"
+    }
+  ]
+}</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>Some things are not as convenient as we saw in GraphQL, we thought it would be very helpful to add more syntactic sugar to the language.</p>
 </div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Luckily my friend Andrés found some spare time to add two really neat features to Cypher in Neo4j 3.1 which we want to look into today.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
+<h2 id="_map_projections">Map Projections</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Map Projections are very close to what you expect from a GraphQL query, you take an map or entity (node or relationship) and apply a map-like property-selector to it.</p>
+</div>
+<div class="paragraph">
+<p>The result of that projection is a (optionally nested) map of results.</p>
+</div>
+<div class="paragraph">
+<p>Here is the example above rewritten using a map-projection.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (u:User)-[:ASKED]-&gt;(q:Question)-[:TAGGED]-&gt;(t:Tag),
+      (q)&lt;-[:ANSWERS]-(a:Answer)&lt;-[:PROVIDED]-(u2:User)
+
+RETURN q{ .title, author : u.name, tags: collect(t.name),
+       answers: collect( a {.text, author: u2.name})} as question</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>But there are some more things possible.</p>
+</div>
+<div class="paragraph">
+<p>Within a map projection you can also add literal values or aggregations to the data that you extract from the entity.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">entity { .property1, .property2, .*,  literal: value,  values: collect(numbers), variable}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Here is a full list of possible selectors:</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 20%;">
+<col style="width: 40%;">
+<col style="width: 40%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">syntax</th>
+<th class="tableblock halign-left valign-top">description</th>
+<th class="tableblock halign-left valign-top">example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code><code>.property</code></code></p></td>
+<td class="tableblock halign-left valign-top"><div><div class="paragraph">
+<p>property lookup</p>
+</div></div></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>p{.name} &#8594; {name : "John"}</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code><code>.*</code></code></p></td>
+<td class="tableblock halign-left valign-top"><div><div class="paragraph">
+<p>all properties</p>
+</div></div></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>p{.*} &#8594; {name:"John", age:42}</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code><code>variable</code></code></p></td>
+<td class="tableblock halign-left valign-top"><div><div class="paragraph">
+<p>variable name as key, variable value as value</p>
+</div></div></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>p{count} &#8594; {count: 1}</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code><code>key : value</code></code></p></td>
+<td class="tableblock halign-left valign-top"><div><div class="paragraph">
+<p>literal entry</p>
+</div></div></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>p{awesome:true} &#8594; {awesome:true}</code></p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>To demonstrate those options we <em>could</em> rewrite the statement to:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (u:User)-[:ASKED]-&gt;(q:Question)-[:TAGGED]-&gt;(t:Tag),
+      (q)&lt;-[:ANSWERS]-(a:Answer)&lt;-[:PROVIDED]-(u2:User)
+
+WITH q, u, collect(t.name) as tags, collect( a {.text, author: u2.name}) as answers
+RETURN q{ .title, author : u{.*}, tags,  answers } as question</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>To pull in information from related entities, the other new feature, <em>Pattern Comprehensions</em> come into play.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_pattern_comprehensions">Pattern Comprehensions</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
+<div class="paragraph">
+<p>You&#8217;ve all (hopefully) used the list comprehensions in Cypher, they borrow from Haskells syntax and look like this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">[value IN list WHERE predicate(value) | expression(value)]</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>As a concrete example, this returns the squares of the first 5 even numbers:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">RETURN [x IN range(1,10) WHERE x % 2 = 0 | x * x] -&gt; [4, 16, 36, 64, 100]</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Now, you can use any kind of collection here, also collection of maps or nodes or <strong>even paths</strong>.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+If you use a graph pattern as an expression, it actually yields a collection of paths.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>That&#8217;s cool, because now you can use a list comprehension to do pattern matching and extract a related node without actually using <code>MATCH</code> and changing your cardinality.</p>
+</div>
+<div class="paragraph">
+<p>So instead of:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (u:User)-[:POSTED]-&gt;(q:Question)
+WHERE q.title CONTAINS "Neo4j"
+RETURN u.name, collect(q.title) as questions</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>you could write:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (u:User)
+RETURN u.name, [path IN (u)-[:ASKED]-&gt;(:Question)
+                  WHERE (last(nodes(path))).title CONTAINS "Neo4j"
+                      | (last(nodes(path))).title] as questions</code></pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+Btw. this statement always returns a result, potentially an empty collection, so it&#8217;s the same as if you were <code>OPTIONAL MATCH</code> in the previous statement.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>Wow, that&#8217;s ugly. Why? Because you can&#8217;t introduce new variables, like <code>q</code> in such a pattern expression.
+Only clauses could introduce new variables.</p>
+</div>
+<div class="paragraph">
+<p><strong>Until now!</strong></p>
+</div>
+<div class="paragraph">
+<p>With <em>Pattern Comprehensions</em> you actually can introduce <strong>local</strong> variables in such a pattern and use them in the <code>WHERE</code> filter or expression at the end.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (u:User)
+RETURN u.name,
+       [(u)-[:ASKED]-&gt;(q:Question) WHERE q.title CONTAINS "Neo4j" | q.title] as questions</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Now let&#8217;s take a stab at our "GraphQL" query again, and see how we can rewrite it just starting from the <code>Question</code> node and moving all projections of attributes and patterns into the <code>RETURN</code> clause.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH (q:Question)
+
+RETURN q{.title,
+         author : [(q)&lt;-[:ASKED]-(u) | u.name][0],
+         tags   : [(q)&lt;-[:TAGGED]-(t) | t.name],
+         answers: [(q)&lt;-[:ANSWERS]-(a)&lt;-[:PROVIDED]-(u2) | a{ .text, author: u2.name } ] }</code></pre>
+</div>
+</div>
+<div class="ulist NOTE">
+<ul class="NOTE">
 <li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
+<p>As pattern comprehensions always return a collection we have to turn them into a single value as needed, e.g. with <code>[&#8230;&#8203;][0]</code> or <code>head([&#8230;&#8203;])</code></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
+<p>To combine attributes of two entites into one map you have to spell out the 2nd entities attributes.<br>
+It would be nice to get support for combining maps in the future, then we could use<br>
+<code>answers: [(q)&lt;-[:ANSWERS]-(a)&lt;-[:PROVIDED]-(u2) | a{ .text } + u2{ .name} ]</code></p>
 </li>
 </ul>
 </div>
+<div class="paragraph">
+<p>If you want to test these cool new features, please grab the <a href="https://neo4j.com/download/other-releases/#milestone">recently released Neo4j 3.1.0-M07 Milestone</a> and give it a try.</p>
 </div>
+<div class="paragraph">
+<p>We&#8217;d love to get your feedback on these and <a href="https://neo4j.com/release-notes/neo4j-3-1-0-m07/">other new features</a> like the brand-new [<strong>cypher-shell</strong>].</p>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>With a lot of thanks to Andrés for this and everyone in engineering for a really cool database,</p>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Cheers, Michael</p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-03-02 02:34:42 CET
+Last updated 2016-08-20 11:59:28 CEST
 </div>
 </div>
 </body>
