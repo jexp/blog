@@ -119,19 +119,26 @@ CREATE INDEX ON :Person(name);
 CREATE CONSTRAINT ON (g:Genre) ASSERT g.name IS UNIQUE;
 ----
 
+Indexes and constraints are used for these predicates on label and property:
+
+* equality
+* (non-existence) (`exists(m.tagline)`)
+* ranges (`1970 < p.born < 2000`)
+* 
+
 Even for range queries (pre 2.3) it might be better to turn them into an `IN` query to leverage an index.
 
 [source,cypher]
 ----
-// if :Movie(released) is indexed, this query for the nineties will *not use* an index:
+// if :Movie(released) is indexed, this query for the nineties *will use* an index:
 MATCH (m:Movie) WHERE m.released >= 1990 and m.released < 2000 RETURN count(*);
 
 CREATE INDEX ON :Movie(released);
 
-// but this will
+// pre-Neo4j 2.3 you would have to do this:
 MATCH (m:Movie) WHERE m.released IN range(1990,1999)  RETURN count(*);
 
-// same for OR queries
+// or this with OR queries
 MATCH (m:Movie) WHERE m.released = 1990 OR m.released = 1991 OR ...
 ----
 
@@ -182,7 +189,6 @@ Total database accesses: 765
 |    NodeIndexSeek |             1 |    1 |      2 |                                  b |                                                            :Person(name)
 6+h|Total database accesses: 765
 |===
-
 
 *If we add the second index-hint, we get 10x fewer database hits.*
 

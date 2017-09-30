@@ -1,0 +1,71 @@
+= Creating a Neo4j Example Graph with the Arrows Tool
+:img: https://dl.dropboxusercontent.com/u/14493611/blog/img
+
+Some years ago my colleague http://twitter.com/acpj[Alistair Jones] created a neat little tool in JavaScript to edit and render example graphs in a consistent way.
+
+It is aptly named *Arrows* and you can find it here: http://www.apcjones.com/arrows
+
+We mostly use it for presentations, but also to show data models for http://neo4j.com/graphgists[Neo4j GraphGists] and Neo4j Browser Guides.
+Because it also stores the positions of nodes, it's always true to the same layout and doesn't wiggle around.
+
+image::{img}/arrows.jpg[]
+
+The User Interface is minimal:
+
+* create new nodes with (+ Node)
+* drag relationships out of the halo of a node
+* either to an empty space for a new node or centered over an existing one to connect them
+* double click nodes and relationships to edit them, set names and properties (in a `key: "value" syntax)
+* there are two styles, the chunky largish one and a more polished Bootstrap style
+* you can show the Markdown and also replace it with a previously saved 
+* you can export to SVG or take a screenshot
+* you can also export to Cypher and open the graph in a Neo4j Console (console.neo4j.org)
+
+image:{img}/arrows-cypher.jpg[width=300]
+image:{img}/arrows-sandbox.jpg[width=500]
+
+
+Arrows has its internal graph model and API that you can also control programmatically.
+The tool is open source and you find the renderer and editor and a self-hosted variant in this http://github.com/apcj/arrows[GitHub project].
+
+It uses HTML-Markdown with a bunch of attributes as data storage for your graph data.
+
+
+[source,html]
+----
+<ul class="graph-diagram-markup" data-internal-scale="1.01" data-external-scale="1">
+
+<!-- nodes -->
+  <li class="node" data-node-id="0" data-x="-37" data-y="-18">
+    <span class="caption">User</span><dl class="properties"><dt>name</dt><dd>"Mark"</dd></dl></li>
+  <li class="node" data-node-id="1" data-x="67.58551025390625" data-y="-129.11111450195312">
+    <span class="caption">Tweet</span><dl class="properties"><dt>id</dt><dd>42342</dd><dt>text</dt><dd>"Hello World"</dd></dl></li>
+  <li class="node" data-node-id="2" data-x="96.57560926380722" data-y="75.154541015625">
+    <span class="caption">User</span><dl class="properties"><dt>name</dt><dd>"Andreas"</dd></dl></li>
+  <li class="node" data-node-id="3" data-x="189.08416748046875" data-y="-39">
+    <span class="caption">Tweet</span><dl class="properties"><dt>id</dt><dd>2342</dd><dt>text</dt><dd>"Welcome"</dd></dl></li>
+  <li class="node" data-node-id="4" data-x="264.2060852050781" data-y="75.154541015625">
+    <span class="caption">Tag</span><dl class="properties"><dt>name</dt><dd>"fun"</dd></dl></li>
+
+<!-- relationships -->
+  <li class="relationship" data-from="0" data-to="1">
+    <span class="type">POSTED</span>
+  </li>
+  <li class="relationship" data-from="0" data-to="2">
+    <span class="type">FOLLOWED</span>
+  </li>
+  <li class="relationship" data-from="2" data-to="3">
+    <span class="type">POSTED</span>
+  </li>
+  <li class="relationship" data-from="3" data-to="1">
+    <span class="type">REPLIED</span>
+  </li>
+  <li class="relationship" data-from="3" data-to="4"></li>
+</ul>
+----
+
+I recorded a quick video of Arrows in Action. Enjoy!
+
+++++
+<iframe width="560" height="315" src="https://www.youtube.com/embed/fkD1agLtQ4I" frameborder="0" allowfullscreen></iframe>
+++++

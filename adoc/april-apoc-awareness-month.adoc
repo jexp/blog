@@ -1,0 +1,78 @@
+= April is the APOC Awareness Month - publish and be rewarded
+
+image::https://dl.dropboxusercontent.com/u/14493611/apoc-tshirt-sample.jpg[float=right,width=300]
+
+April shares the first two letters with https://github.com/neo4j-contrib/neo4j-apoc-procedures[APOC, our community driven procedure and function library for Neo4j's Cypher].
+
+That's why I thought it would be a good idea to use the http://neo4j.com/blog/apoc-spring-release[APOC spring release] to kick off a of blossom of articles and demos on how to use APOC in really cool ways.
+
+In this *APOC Awareness Month* we will honor blog posts published in April that demonstrate cool applications of APOC with an Amazon Gift Certificate of $100.
+
+We will award at *least 10 prizes*, with the goal of handing out 5 per week.
+So be early if you want to catch one.
+
+NOTE: If you are an Neo Technology employee you are unfortuntately not eligible but we encourage you to publish anyway.
+
+Everyone who publishes an interesting article, even if you don't win a prize, you'll get a one-and-only APOC t-shirt from us
+
+////
+To help you fight procrastination and not have everyone publish on the last day of the month, I thought it would be good to add a bonus for early publishers.
+You get an *extra $50* if you publish *before* the majority of the articles comes out, i.e. if you're in the first half of publications.
+////
+
+Of course your articles will be promoted on Twitter, the weekly Neo4j compilation and a summary blog post at the end of the month.
+
+== How to Submit
+
+Just, follow http://twitter.com[@neo4j] and tweet out your article link and picture with the hashtags *#neo4j #apoc*
+
+We will find it, have a look at your article, and DM you for your email address to send the Amazon Gift Certificate or an equivalent if the certificates don't work for you.
+
+== Here are the content rules
+
+1. You demonstrate how to use APOC procedures and functions 
+2. You use a realistic graph model
+3. You show how to import/migrate/export some data using that graph model and APOC
+4. You query the graph with at least 3 different, interesting Cypher queries
+5. Your article teaches in a nice way, using graphics (e.g. model, screenshots), Cypher-code and well written prose
+
+== Interesting data-sources and -sinks to integrate with
+
+* Data sources like MySQL, Postgres, Oracle, MongoDB, CouchBase, Cassandra, ElasticSearch, Kafka, Spark, Flink etc.
+* APIs like GitHub, StackOverflow, Twitter, Trello, other Atlassian Tools, LinkedIn, Pinterest, Facebook, etc.
+* Datasets from public sources (governments, non-profits), competitions, public sources or scraped results (e.g. with import.io)
+* ML tools and libraries like iPython Notebooks, Zeppelin, Tensorflow, Keras, Open.AI, Apache Beam, scikit-learn etc.
+* Visualization libraries like Gephi, D3, Cytoscape, OGMA, viz.js etc.
+* Any many others that you might come up with
+
+
+== Some examples that would qualify
+
+* https://jesusbarrasa.wordpress.com/2016/09/30/quickgraph4-explore-your-browser-history-in-neo4j/[Exploring your browser history from SQLite] by Jesus Barrasa
+* Loading the https://tbgraph.wordpress.com/2017/04/01/neo4j-location-trees/[Hospital General Information] by Tomasz Bratanic
+* https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_load_json_stackoverflow_example[Loading StackOverflow into Neo4j]
+* http://github.com/community-graph[The Neo4j Community Graph]
+* Importing the http://www.lyonwj.com/2017/01/30/trumpworld-us-contracting-data-neo4j/[US Contract Data into Trumpworld] by Will Lyon
+
+== Questions
+
+Feel free to reach out to me with questions, best on the neo4j-users Slack (http://neo4j.com/slack) in the https://neo4j-users.slack.com/messages/C1APWRTRU[#neo4j-apoc channel], feel also free to raise issues with APOC on the GitHub repository.
+
+Also if you're unsure if your idea qualifies, just *DM me on Slack or http://twitter.com/mesirii[Twitter]*.
+
+If you don't have an own blog or place to post, you can alway publish on http://medium.com[Medium] (who are also using Neo4j for recommendations).
+
+== Resources
+
+If you haven't used APOC before, here are some good resources:
+
+* https://neo4j.com/developer/procedures-gallery/[procedures-gallery on neo4j.com], 
+* the https://neo4j-contrib.github.io/neo4j-apoc-procedures/[APOC documentation], 
+* `:play http://guides.neo4j.com/apoc` in your Browser,
+* the https://neo4j.com/tag/APOC/[past blog articles on the topic] on neo4j.com,
+* https://www.google.com/webhp#q=apoc+procedures+neo4j+cypher[Articles about using APOC] from lots of different authors
+* http://github.com/neo4j-contrib/neo4j-apoc-procedures[the APOC source code] on GitHub
+
+Enjoy and have as much fun as we do, when putting some cool stuff together for others to use & learn.
+
+Michael, for the developer relations team here at Neo4j

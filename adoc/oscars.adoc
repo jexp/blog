@@ -1,0 +1,960 @@
+= Quick-Graph: Academy Awards (Oscars) in Neo4j
+
+:img: https://dl.dropboxusercontent.com/u/14493611
+
+I came across the tweet from http://twitter.com/LynnLangit[@LynnLangit] about first step with mxnet, which I really liked.
+
+image::https://dl.dropboxusercontent.com/u/14493611/lynn-langit-mxnet.jpg[width=400]
+
+////
+++++
+<blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">hello <a href="https://twitter.com/hashtag/mxnet?src=hash">#mxnet</a> <a href="https://t.co/gcSdR6ptAF">pic.twitter.com/gcSdR6ptAF</a></p>&mdash; Lynn Langit (@lynnlangit) <a href="https://twitter.com/lynnlangit/status/835431747613409280">February 25, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+++++
+////
+
+So I wanted to do the same for Neo4j and was looking for a good dataset.
+
+Then I realized that the 89th Academy Awards (Oscars) ceremony was already the next day.
+I was really looking forward to it, hoping it would come with some strong statements towards the current administration.
+And then him rage tweeting about it on Monday morning.
+
+But instead we got a fun Jimmy Kimmel performance and the well know Moonlight and La-La-Land mess-up by the (ex)-PWC people.
+
+So I found the data and imported it and had this post ready to go.
+
+But then got distracted trying to scrape IMDB with import.io and missed the date.
+
+But as it is a nice dataset interestingly not as widely available as you'd think, I feel it's still worth publishing.
+
+So enjoy my struggles with data (quality).
+
+== Install Neo4j
+
+image::{img}/brew-install-neo4j.jpg[width=800]
+
+== Find the data as CSV
+
+It was that easy to find a full dataset for the Oscar nominations and award winners. 
+
+Most CSVs you could find were limited in terms of detail or timespan.
+
+The offical http://awardsdatabase.oscars.org/[Academy Awards Database] had no CSV output format from their search, I'll skip it for now, it also misses the Nominations for the 89th awards.
+It would be nice to scrape it with http://import.io, which is probably what others have done.
+
+Kaggle has a https://www.kaggle.com/theacademy/academy-awards[CSV with data to 1927 to 2015] but it is a bit messed up, I try to import it in the second part of this post.
+
+I found the data for the Oscars from 1927 to 2010 https://www.aggdata.com/awards/oscar[here at AggData] which is a good start.
+
+Especially as it had a directly downloadable URL of the CSV: https://www.aggdata.com/download_sample.php?file=academy_awards.csv
+
+== Importing the Data
+
+I wanted to create nodes for Nominations (optionally with an Award label), Nominees, Movies, Categories and Years.
+
+[source,cypher]
+----
+create constraint on (c:Category) assert c.name is unique;
+create constraint on (n:Nominee) assert n.name is unique;
+create constraint on (m:Movie) assert m.title is unique;
+create constraint on (y:Year) assert y.value is unique;
+create constraint on (g:Genre) assert g.name is unique;
+----
+
+image::{img}/oscars-schema.jpg[width=500]
+
+So the import statement is pretty straightforward.
+
+Only as the CSV had empty (null) columns *in the header* I couldn't use `LOAD CSV WITH HEADERS`, but had to create the  column to name mapping myself.
+
+[source,cypher]
+----
+// load the CVS as stream of row records
+LOAD CSV FROM 'https://www.aggdata.com/download_sample.php?file=academy_awards.csv' AS row
+
+// create a map from each row
+WITH { year: row[0], category: row[1], nominee: row[2], 
+       info: row[3], won: row[4]} AS data 
+// skip the broken header
+SKIP 1
+
+// get-or-create nodes for Year, Category and Nominee
+MERGE (y:Year {value:data.year})
+MERGE (c:Category {name: data.category})
+MERGE (n:Nominee {name: data.nominee})
+
+// create the Nomination node, set the full data as attributes
+CREATE (a:Nomination) SET a = data
+
+// create relationships from the nomination to the other nodes
+CREATE (c)<-[:IN_CATEGORY]-(a)-[:IN_YEAR]->(y)
+CREATE (a)-[:NOMINATED]->(n)
+
+// if there is a YES in the won column, also set the :Award label
+WITH * WHERE data.won = "YES" SET a:Award;
+----
+
+image::{img}/neo4j-academy-awards.jpg[width=800]
+
+== Some Fun Queries
+
+Nominees who got the most nominations over the years (note our dataset is limited to 2010).
+
+Some suprises here for me. I was for instance not aware that Mary Poppins or Jack Nicholson got that many Oscars.
+
+[source,cypher]
+----
+MATCH (n:Nominee)<-[:NOMINATED]-(a)-[:IN_YEAR]->(y)
+RETURN n.name, count(*), collect(distinct y.value) 
+ORDER BY count(*) DESC LIMIT 10;
+----
+
+[opts=headers]
+:===
+"n.name"                                           :"count(*)":"collect(distinct y.value)"                                                                         
+"Meryl Streep"                                     :16        :["2008 (81st)","2006 (79th)","2002 (75th)","1998 (71st)","1999 (72nd)","2009 (82nd)","1990 (63rd)","
+"Titanic"                                          :14        :["1953 (26th)","1997 (70th)"]                                                                       
+"A Star Is Born"                                   :13        :["1937 (10th)","1976 (49th)","1954 (27th)"]                                                         
+"Cleopatra"                                        :13        :["1934 (7th)","1963 (36th)"]                                                                        
+"Mutiny on the Bounty"                             :12        :["1935 (8th)","1962 (35th)"]                                                                        
+"Jack Nicholson"                                   :12        :["2002 (75th)","1969 (42nd)","1970 (43rd)","1973 (46th)","1974 (47th)","1975 (48th)","1992 (65th)","
+"Moulin Rouge"                                     :12        :["2001 (74th)","1952 (25th)"]                                                                       
+"Katharine Hepburn"                                :12        :["1932/33 (6th)","1951 (24th)","1935 (8th)","1942 (15th)","1940 (13th)","1967 (40th)","1968 (41st)",
+"The Lord of the Rings The Fellowship of the Ring":12        :["2001 (74th)"]                                                                                     
+"Mary Poppins"                                     :12        :["1964 (37th)"]                                                                                     
+:===
+
+////
+----
+╒═══════════════════════════════════════════════════╤══════════╤════════════════════════════════════════════════════════════════════════════════════════════════════╕
+│"n.name"                                           │"count(*)"│"collect(distinct y.value)"                                                                         │
+╞═══════════════════════════════════════════════════╪══════════╪════════════════════════════════════════════════════════════════════════════════════════════════════╡
+│"Meryl Streep"                                     │16        │["2008 (81st)","2006 (79th)","2002 (75th)","1998 (71st)","1999 (72nd)","2009 (82nd)","1990 (63rd)","│
+│                                                   │          │1988 (61st)","1995 (68th)","1978 (51st)","1981 (54th)","1979 (52nd)","1983 (56th)","1982 (55th)","19│
+│                                                   │          │87 (60th)","1985 (58th)"]                                                                           │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Titanic"                                          │14        │["1953 (26th)","1997 (70th)"]                                                                       │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"A Star Is Born"                                   │13        │["1937 (10th)","1976 (49th)","1954 (27th)"]                                                         │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Cleopatra"                                        │13        │["1934 (7th)","1963 (36th)"]                                                                        │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Mutiny on the Bounty"                             │12        │["1935 (8th)","1962 (35th)"]                                                                        │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Jack Nicholson"                                   │12        │["2002 (75th)","1969 (42nd)","1970 (43rd)","1973 (46th)","1974 (47th)","1975 (48th)","1992 (65th)","│
+│                                                   │          │1997 (70th)","1981 (54th)","1983 (56th)","1987 (60th)","1985 (58th)"]                               │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Moulin Rouge"                                     │12        │["2001 (74th)","1952 (25th)"]                                                                       │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Katharine Hepburn"                                │12        │["1932/33 (6th)","1951 (24th)","1935 (8th)","1942 (15th)","1940 (13th)","1967 (40th)","1968 (41st)",│
+│                                                   │          │"1956 (29th)","1955 (28th)","1959 (32nd)","1962 (35th)","1981 (54th)"]                              │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"The Lord of the Rings: The Fellowship of the Ring"│12        │["2001 (74th)"]                                                                                     │
+├───────────────────────────────────────────────────┼──────────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Mary Poppins"                                     │12        │["1964 (37th)"]                                                                                     │
+└───────────────────────────────────────────────────┴──────────┴────────────────────────────────────────────────────────────────────────────────────────────────────┘
+----
+////
+
+image::{img}/oscars-top.jpg[width=800]
+
+*And it seems Meryl Streep is not an failing actress after all :)*
+
+Let's have a look at her achievements.
+
+[source,cypher]
+----
+MATCH  path = (n:Nominee {name:"Meryl Streep"})<-[:NOMINATED]-()-->()
+RETURN path
+----
+
+image::{img}/oscars-meryl.jpg[width=800]
+
+== Part 2: Full Import from Kaggle
+
+Now as that dataset was a bit limited, let's import the Kaggle Data instead (with a lot of special cases).
+
+And then add the 2016 nominations and winners, which I manually scraped from http://oscar.go.com/news/winners/oscar-winners-2017-see-the-complete-list[oscar.go.com] and turned into the Kaggle format.
+
+The CSV's are here:
+
+* {img}/oscars-1926-2015.csv
+* {img}/oscars-2017.csv
+
+The Kaggle file stated it has this structure: 
+
+* Year
+* Ceremony (Number)
+* Award (Type of Award)
+* Winner (1 or empty)
+* Name
+* Film
+
+In recent years, the *last two columns* were only correctly populated for the *Actress/Actor awards*
+Otherwise the movie was in the "Name" column and some inconsistent text in the "Film" column
+
+Let's look at the Winners of 2015.
+
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/oscars-1926-2015.csv" AS row
+WITH * WHERE row.Winner="1" and row.Year = "2015"
+RETURN row.Award, row.Name, row.Film
+----
+
+[opts="headers"]
+,===
+row.Award,row.Name,row.Film
+Actor in a Leading Role,Leonardo DiCaprio,The Revenant
+Actor in a Supporting Role,Mark Rylance,Bridge of Spies
+Actress in a Leading Role,Brie Larson,Room
+Actress in a Supporting Role,Alicia Vikander,The Danish Girl
+Animated Feature Film,Inside Out,Pete Docter and Jonas Rivera
+Costume Design,Mad Max: Fury Road,Jenny Beavan
+Directing,The Revenant,Alejandro G. Iñárritu
+Documentary (Feature),Amy,Asif Kapadia and James Gay-Rees
+,===
+
+////
+----
+╒══════════════════════════════════╤═══════════════════════════════════════════════╤════════════════════════════════════════════════════════════════════════════╕
+│"row.Award"                       │"row.Name"                                     │"row.Film"                                                                  │
+╞══════════════════════════════════╪═══════════════════════════════════════════════╪════════════════════════════════════════════════════════════════════════════╡
+│"Actor in a Leading Role"         │"Leonardo DiCaprio"                            │"The Revenant"                                                              │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Actor in a Supporting Role"      │"Mark Rylance"                                 │"Bridge of Spies"                                                           │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Actress in a Leading Role"       │"Brie Larson"                                  │"Room"                                                                      │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Actress in a Supporting Role"    │"Alicia Vikander"                              │"The Danish Girl"                                                           │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Animated Feature Film"           │"Inside Out"                                   │"Pete Docter and Jonas Rivera"                                              │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Costume Design"                  │"Mad Max: Fury Road"                           │"Jenny Beavan"                                                              │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Directing"                       │"The Revenant"                                 │"Alejandro G. Iñárritu"                                                     │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Documentary (Feature)"           │"Amy"                                          │"Asif Kapadia and James Gay-Rees"                                           │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+----
+////
+
+////
+│"Documentary (Short Subject)"     │"A Girl in the River: The Price of Forgiveness"│"Sharmeen Obaid-Chinoy"                                                     │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Film Editing"                    │"Mad Max: Fury Road"                           │"Margaret Sixel"                                                            │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Foreign Language Film"           │"Son of Saul"                                  │"Hungary"                                                                   │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Makeup and Hairstyling"          │"Mad Max: Fury Road"                           │"Lesley Vanderwalt, Elka Wardega and Damian Martin"                         │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Music (Original Score)"          │"The Hateful Eight"                            │"Ennio Morricone"                                                           │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Music (Original Song)"           │"Writing's On The Wall from Spectre"           │"Music and Lyric by Jimmy Napes and Sam Smith"                              │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Best Picture"                    │"Spotlight"                                    │"Michael Sugar, Steve Golin, Nicole Rocklin and Blye Pagon Faust, Producers"│
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Production Design"               │"Mad Max: Fury Road"                           │"Production Design: Colin Gibson; Set Decoration: Lisa Thompson"            │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Short Film (Animated)"           │"Bear Story"                                   │"Gabriel Osorio and Pato Escala"                                            │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Short Film (Live Action)"        │"Stutterer"                                    │"Benjamin Cleary and Serena Armitage"                                       │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Sound Editing"                   │"Mad Max: Fury Road"                           │"Mark Mangini and David White"                                              │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Sound Mixing"                    │"Mad Max: Fury Road"                           │"Chris Jenkins, Gregg Rudloff and Ben Osmo"                                 │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Visual Effects"                  │"Ex Machina"                                   │"Andrew Whitehurst, Paul Norris, Mark Ardington and Sara Bennett"           │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Writing (Adapted Screenplay)"    │"The Big Short"                                │"Screenplay by Charles Randolph and Adam McKay"                             │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Writing (Original Screenplay)"   │"Spotlight"                                    │"Written by Josh Singer & Tom McCarthy"                                     │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Jean Hersholt Humanitarian Award"│"Debbie Reynolds"                              │null                                                                        │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Honorary Award"                  │"Spike Lee"                                    │null                                                                        │
+├──────────────────────────────────┼───────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────┤
+│"Honorary Award"                  │"Gena Rowlands"                                │null                                                                        │
+└──────────────────────────────────┴───────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────┘
+----
+////
+
+So we saw, that for these Awards, it was not correct, and we had take that into account.
+To simplify our import statement we did a double pass.
+
+We could basically reuse our import statement from the beginning with some minor changes.
+
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/oscars-1926-2015.csv" AS data
+
+// only use the Actress and Actor awards
+WITH data WHERE data.Award STARTS WITH "Act"
+
+MERGE (y:Year {value:data.Year})
+MERGE (c:Category {name: data.Award})
+MERGE (n:Nominee {name: data.Name})
+MERGE (m:Movie {title: data.Film})
+
+// create the Nomination node, set the full data as attributes
+CREATE (a:Nomination) SET a = data
+
+// create relationships from the nomination to the other nodes
+CREATE (c)<-[:IN_CATEGORY]-(a)-[:IN_YEAR]->(y)
+CREATE (a)-[:NOMINATED]->(n),(a)-[:FOR_MOVIE]->(m)
+MERGE (n)-[:ACTED_IN]->(m)
+// if there is a "1" in the Winner column, also set the :Award label
+WITH * WHERE data.Winner = "1" SET a:Award;
+----
+
+For the other awards, we had to treat the "Name" column as movie and run some text processing on the "Film" column to extract the clean(ish) names of the relevant people.
+
+For reduced complexity we just replace a bunch of regular expressions with apoc's regreplace function.
+// As I don't want to use APOC here, we do our old trick of reducing over a set of replacements.
+
+It was quite annoying because the "free-form" text was quite varied but I got most weeded out, using the query below as my check.
+
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/oscars-1926-2015.csv" AS data
+
+// do not use the Actress and Actor awards
+WITH data WHERE NOT data.Award STARTS WITH "Act" AND data.Film contains "by"
+
+WITH *, apoc.text.regreplace(apoc.text.regreplace(apoc.text.regreplace(data.Film,"(?i)([;&]|\\b(and|aka)\\b)",","),"[^A-Za-z0-9, ]?",""),
+     "(?i)\\b(Third|Second|Producers?|Story|Written|Adaptation|Art|Score|Direction|Production|Set|Decoration|Sound|Department|"+
+     "Co-Producer|Design|Director|(English )?Lyrics?|Music|Special|Audible|Musical|Screenplay|Dialogue|by|Interior|Head of|"+
+     "Score|Photographic|Effects|in collaboration|with|Visual|Ballet|Made by|with( the)? cooperation of|"+
+     "Photography|Thematic|Adapted|Song|Orchestral|for the screen|Stories|Jr|Based on a|Original|Screen)\\b","") as cleanFilm
+WITH *,[s IN split(cleanFilm,",") WHERE trim(s) <> "" | trim(s)] as nominees
+WHERE any(n in nominees WHERE size(split(n," ")) <> 2)
+RETURN data.Film, nominees;
+----
+
+Then we could use our cleaned up data to not only create the movie from the "Name" column but also all nominees from that free-form "Film" column.
+We used the name of the award as relationship-type between nominee and movie.
+
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/oscars-1926-2015.csv" AS data
+
+// do not use the Actress and Actor awards
+WITH data WHERE NOT data.Award STARTS WITH "Act"
+
+MERGE (y:Year {value:data.Year})
+MERGE (c:Category {name: data.Award})
+MERGE (m:Movie {title: data.Name})
+
+// create the Nomination node, set the full data as attributes
+CREATE (a:Nomination) SET a = data
+
+// create relationships from the nomination to the other nodes
+CREATE (c)<-[:IN_CATEGORY]-(a)-[:IN_YEAR]->(y)
+CREATE (a)-[:FOR_MOVIE]->(m)
+
+FOREACH (winner IN CASE data.Winner WHEN "1" THEN [a] ELSE [] END | SET winner:Award)
+
+WITH *, apoc.text.regreplace(apoc.text.regreplace(apoc.text.regreplace(data.Film,"(?i)([;&]|\\b(and|aka)\\b)",","),"[^A-Za-z0-9, ]?",""),
+     "(?i)\\b(Third|Second|Producers?|Story|Written|Adaptation|Art|Score|Direction|Production|Set|Decoration|Sound|Department|"+
+     "Co-Producer|Design|Director|(English )?Lyrics?|Music|Special|Audible|Musical|Screenplay|Dialogue|by|Interior|Head of|"+
+     "Score|Photographic|Effects|in collaboration|with|Visual|Ballet|Made by|with( the)? cooperation of|"+
+     "Photography|Thematic|Adapted|Song|Orchestral|for the screen|Stories|Jr|Based on a|Original|Screen)\\b","") as cleanFilm
+WITH *,[s IN split(cleanFilm,",") WHERE trim(s) <> "" | trim(s)] as nominees
+
+UNWIND nominees as nominee
+
+MERGE (n:Nominee {name: trim(nominee)})
+CREATE (a)-[:NOMINATED]->(n)
+WITH * WHERE NOT EXISTS ((n)-->(m))
+CALL apoc.create.relationship(n,toUpper(data.Award),{},m) YIELD rel
+RETURN count(*);
+----
+
+Now the meta-model of our graph looks like this:
+
+image::{img}/oscars-kaggle-meta-model.jpg[width=600]
+
+As we created the most recent academy data ourselves, it's less detailed but cleaner, so we can just use one statement:
+
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM "https://dl.dropboxusercontent.com/u/14493611/oscars-2017.csv" AS data
+
+MERGE (y:Year {value:data.Year})
+MERGE (c:Category {name: data.Award})
+
+
+// create the Nomination node, set the full data as attributes
+CREATE (a:Nomination) SET a = data
+
+// create relationships from the nomination to the other nodes
+CREATE (c)<-[:IN_CATEGORY]-(a)-[:IN_YEAR]->(y)
+WITH *
+UNWIND split(data.Name,";") as name
+MERGE (n:Nominee {name: name})
+MERGE (a)-[:NOMINATED]->(n)
+WITH *
+UNWIND split(data.Film,";") as film
+
+MERGE (m:Movie {title: film})
+MERGE (a)-[:FOR_MOVIE]->(m)
+
+// if there is a "1" in the Winner column, also set the :Award label
+FOREACH (winner IN CASE data.Winner WHEN "1" THEN [a] ELSE [] END | SET winner:Award)
+WITH * WHERE NOT EXISTS ((n)-->(m))
+call apoc.create.relationship(n,toUpper(data.Award),{},m) yield rel
+RETURN count(*);
+----
+
+Now we have the full data in our graph, which you can [access on this instance] of the http://neo4j.com/sandbox-v2[*brand new Neo4j Sandbox*].
+
+== Fun Queries
+
+
+Next time we'll look at using import.io to scrape IMDB and the http://awardsdatabase.oscars.org/[Academy Awards Database].
+
+////
+
+== Part 3: Scraping IMDB's Oscars Page with import.io
+
+http://import.io[Import.io] is a pretty neat tool to scrape Websites for data (and much more).
+Here we used it to create an extractor to scrape the http://www.imdb.com/oscars/nominations/[Oscars 2017 page of IMDB].
+
+The JSON result of the scraping looks like this:
+
+[source,json]
+----
+"extractorData": {
+"url": "http://www.imdb.com/oscars/nominations/",
+"resourceId": "7afba7cd801a75f1de1fdf34611f3f75",
+"data": [
+	{
+	"group": [
+		{
+		"Nominatedfor": [
+			{
+			"text": "Best Motion Picture of the Year"
+			}
+		],
+		"Listitemblock": [],
+		"Listitemlink": [
+			{
+			"text": "Arrival",
+			"href": "http://www.imdb.com/title/tt2543164/?ref=fea_nomw"
+			},
+			{
+			"text": "Shawn Levy",
+			"href": "http://www.imdb.com/name/nm0506613/?ref=fea_nomw"
+			},
+			{
+			"text": "Dan Levine",
+			"href": "http://www.imdb.com/name/nm1362282/?ref=fea_nomw"
+			},
+----
+
+We can load the JSON via `apoc.load.json` into Cypher which gives us the root element.
+
+You would need an API key then you can use the extractor URL directly in your `apoc.load.json` but for this effort I just stored the resulting JSON in dropbox.
+
+`https://extraction.import.io/query/extractor/ef997049-d45a-4938-aa96-6fd899e6ef10?_apikey={api}&url=http%3A%2F%2Fwww.imdb.com%2Foscars%2Fnominations%2F`
+
+So we have to deconstruct the JSON in Cypher 
+
+[source,cypher]
+----
+CALL apoc.load.json(url) YIELD value 
+UNWIND value.extractorData.data AS data
+UNWIND data.group as group
+WITH group.Nominatedfor[0].text as award,group.Listitemlink as items
+...
+----
+
+The award text is a bit more verbose than we had before, so we need to clean it up a bit `apoc.text.regreplace(award,"(Best Achievement in | of the Year|Best | for Motion Pictures)","")`
+
+We have two types of awards:
+
+Awards for people and the related movies, which have pairs of people and movies in `Listitemlink`.
+
+And Awards for movies, that have a leading movie entry and then an arbitrary number of person entries in `Listitemlink`.
+
+Let's tackle the first, simpler case.
+
+:imdb_oscar_nominations: "https://dl.dropboxusercontent.com/u/14493611/imdb-oscar-nominations-2016.json"
+
+[source,cypher,subs="attributes"]
+----
+WITH {imdb_oscar_nominations} AS url
+CALL apoc.load.json(url) YIELD value 
+UNWIND value.extractorData.data AS data
+UNWIND data.group as group
+WITH group.Nominatedfor[0].text as award,group.Listitemlink as items
+// a person award
+WHERE items[0].href CONTAINS "/name/"
+
+WITH items, apoc.text.regreplace(award,"(Best Achievement in | of the Year|Best | for Motion Pictures)","") as award
+
+MERGE (c:Category {name:award})
+MERGE (y:Year {value:2016})
+WITH *
+
+UNWIND range(0,size(items)-1,2) as idx
+WITH y,c, award, items[idx] as person, items[idx+1] as movie
+
+CREATE (a:Nomination {year:2016,category:award,person:person.text,movie:movie.text})
+CREATE (a)-[:IN_YEAR]->(y)
+
+MERGE (m:Movie {title:movie.text}) ON CREATE SET m.url = movie.href
+MERGE (p:Person {name:person.text}) ON CREATE SET p.url = person.href, p:Nominee
+// MERGE (p)-[:ACTED_IN]->(m)
+CREATE (a)-[:NOMINATED]->(p),(a)-[:IN_CATEGORY]->(c),(a)-[:FOR_MOVIE]->(m);
+----
+
+////
+WITH {imdb_oscar_nominations} AS url
+CALL apoc.load.json(url) YIELD value 
+UNWIND value.extractorData.data AS data
+UNWIND data.group as group
+WITH group.Nominatedfor[0].text as award,group.Listitemlink as items
+// a person award
+WHERE items[0].href CONTAINS "/title/"
+WITH award, items, filter(i in range(0,size(items)-1) WHERE items[i].href CONTAINS "/title/") as movies
+UNWIND range(0,size(movies)-1) as midx
+WITH award,items[movies[midx]] as movie,items[movies[midx]+1..coalesce(movies[midx+1],0)-1] as people
+RETURN *
+////
+
+And now the more tricky challenge of finding the positions of the movies in the items list.
+And then extracting the people in between two movies.
+
+[source,cypher,subs="attributes"]
+----
+WITH {imdb_oscar_nominations} AS url
+CALL apoc.load.json(url) YIELD value 
+UNWIND value.extractorData.data AS data
+UNWIND data.group as group
+WITH group.Nominatedfor[0].text as award,group.Listitemlink as items
+// a movie award
+WHERE items[0].href CONTAINS "/title/"
+
+WITH items, apoc.text.regreplace(award,"(Best Achievement in | of the Year|Best | for Motion Pictures)","") as award
+
+MERGE (c:Category {name:award})
+MERGE (y:Year {value:2016})
+WITH y,c, award, items, filter(i in range(0,size(items)-1) WHERE items[i].href CONTAINS "/title/") as movies
+UNWIND range(0,size(movies)-1) as midx
+WITH y,c, award,items[movies[midx]] as movie,items[movies[midx]+1..coalesce(movies[midx+1],0)-1] as people
+
+CREATE (a:Nomination {year:2016,category:award,movie:movie.text})
+CREATE (a)-[:IN_YEAR]->(y)
+
+MERGE (m:Movie {title:movie.text}) ON CREATE SET m.url = movie.href
+CREATE (a)-[:IN_CATEGORY]->(c),(a)-[:FOR_MOVIE]->(m)
+
+WITH * 
+UNWIND people as person
+
+MERGE (p:Person {name:person.text}) ON CREATE SET p.url = person.href
+CREATE (a)-[:NOMINATED]->(p);
+----
+
+== Adding all the imdb Oscar pages via import.io extractors
+
+There are dedicated pages on imdb for each year's Oscars.
+
+http://www.imdb.com/event/ev0000003/2017
+
+Let's use import.io to create a custom extractor for each of them.
+
+
+== Adding Movie Details from OMDB
+
+We want to augment our movies with their details via the  OMDB API
+
+The OMDB API would return this data for a movie.
+
+E.g. for "Arrival" using http://www.omdbapi.com/?i=tt2543164
+
+----
+{
+"Title": "Arrival",
+"Year": "2016",
+"Rated": "PG-13",
+"Released": "11 Nov 2016",
+"Runtime": "116 min",
+"Genre": "Drama, Mystery, Sci-Fi",
+"Director": "Denis Villeneuve",
+"Writer": "Eric Heisserer (screenplay), Ted Chiang (based on the story \"Story of Your Life\" written by)",
+"Actors": "Amy Adams, Jeremy Renner, Forest Whitaker, Michael Stuhlbarg",
+"Plot": "When twelve mysterious spacecraft appear around the world, linguistics professor Louise Banks is tasked with interpreting the language of the apparent alien visitors.",
+"Language": "English, Russian, Mandarin",
+"Country": "USA",
+"Awards": "Nominated for 8 Oscars. Another 32 wins & 186 nominations.",
+"Poster": "https://images-na.ssl-images-amazon.com/images/M/MV5BMTExMzU0ODcxNDheQTJeQWpwZ15BbWU4MDE1OTI4MzAy._V1_SX300.jpg",
+"Metascore": "81",
+"imdbRating": "8.1",
+"imdbVotes": "204,081",
+"imdbID": "tt2543164",
+"Type": "movie",
+"Response": "True"
+}
+----
+
+In our update we set all those properties on the movie just to store them but then we also turn actors, genres, directors, writers into separate nodes.
+
+We can run the lookup via the movies' *imdb id* from the URL of the scraped page.
+
+[source,cypher]
+----
+MATCH (m:Movie) WHERE exists(m.url)
+WITH m, split(m.url,"/")[4] as imdbId
+CALL apoc.load.json("http://www.omdbapi.com/?i="+imdbId) YIELD value
+SET m += value
+FOREACH (name IN split(value.Genre,", ") | 
+ MERGE (g:Genre {name:name})
+ MERGE (m)-[:IN_GENRE]->(g)
+)
+FOREACH (name IN split(value.Actors,", ") | 
+ MERGE (n:Nominee {name:name})
+ MERGE (n)-[:ACTED_IN]->(m)
+)
+FOREACH (name IN split(value.Director,", ") | 
+ MERGE (n:Nominee {name:name})
+ MERGE (n)-[:DIRECTED]->(m)
+)
+FOREACH (name IN split(value.Writer,", ") | 
+ MERGE (n:Nominee {name:split(name," (")[0]})
+ MERGE (n)-[r:WROTE]->(m) ON CREATE SET r.detail = name
+)
+----
+
+As we only have this information for a few movies, we can also look them up via their *title*, which is more generally applicable.
+
+I also tried to add the year of the award for additional safety of duplicate entries but it seems several movies were only nominated a year after their release, so that caused them not to be found.
+
+----
+http://www.omdbapi.com/?t=title&y=year
+----
+
+(So we would have to make at least two lookups for the year of the award and the one before, but I just left it off for now.)
+
+
+To make sure that the whole operation is not affected by individual failures (e.g. network or read timeout or other errors) of the lookup, I used `apoc.periodic.iterate` 
+to do the API lookups and updates for all the movies that don't have an imdbID yet, in transactional batches of 10 at a time.
+
+// MATCH (m) fixes a type system issue
+[source,cypher]
+----
+CALL apoc.periodic.iterate('
+MATCH (m:Movie) WHERE not exists(m.imdbID) and not exists(m.Error)
+RETURN m LIMIT 1000
+','
+WITH {m} as m
+call apoc.util.sleep(100) 
+CALL apoc.load.json("http://www.omdbapi.com/?t="+apoc.text.urlencode(apoc.text.regreplace(m.title,"[^\\w ]+",""))) YIELD value
+
+MATCH (m)
+// store response on movie
+SET m += value
+
+// error response
+WITH * WHERE size(keys(value)) > 2
+
+FOREACH (name IN split(value.Genre,", ") | 
+ MERGE (g:Genre {name:name})
+ MERGE (m)-[:IN_GENRE]->(g)
+)
+FOREACH (name IN split(value.Actors,", ") | 
+ MERGE (n:Nominee {name:name})
+ MERGE (n)-[:ACTED_IN]->(m)
+)
+FOREACH (name IN split(value.Director,", ") | 
+ MERGE (n:Nominee {name:name})
+ MERGE (n)-[:DIRECTED]->(m)
+)
+FOREACH (name IN split(value.Writer,", ") | 
+ MERGE (n:Nominee {name:split(name," (")[0]})
+ MERGE (n)-[r:WROTE]->(m) ON CREATE SET r.detail = name
+)
+',{batchSize:10,parallel:false})
+----
+
+== More Queries
+
+* Most different categories
+* Which generes win most oscars
+* Which countries win most oscars (except the US)
+* prediction for 2017
+
+=== Most Oscars
+
+[source,cypher]
+----
+MATCH (n:Nominee)<-[:NOMINATED]-(a:Award)
+RETURN n.name as winner, count(*) as count, collect(distinct a.Award) as awards
+ORDER BY count DESC LIMIT 10;
+----
+
+----
+╒════════════════════════════╤═══════╤════════════════════════════════════════════════════════════════════════════════════════════════════╕
+│"winner"                    │"count"│"awards"                                                                                            │
+╞════════════════════════════╪═══════╪════════════════════════════════════════════════════════════════════════════════════════════════════╡
+│"Walt Disney"               │22     │["Short Subject (Cartoon)","Short Subject (Two Reel)","Documentary (Feature)","Documentary (Short Su│
+│                            │       │bject)","Short Subject (Live Action)"]                                                              │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Italy"                     │11     │["Foreign Language Film"]                                                                           │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Metro-Goldwyn-Mayer"       │11     │["Outstanding Production","Short Subject (Two Reel)","Short Subject (One Reel)","Short Subject (Cart│
+│                            │       │oon)","Outstanding Motion Picture","Special Effects"]                                               │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Cedric Gibbons"            │10     │["Art Direction","Art Direction (Black and White)","Art Direction (Color)"]                         │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Alfred Newman"             │9      │["Music (Scoring)","Music (Music Score of a Dramatic or Comedy Picture)","Music (Scoring of a Musica│
+│                            │       │l Picture)","Music (Scoring of Music, Adaptation or Treatment)"]                                    │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"France"                    │9      │["Foreign Language Film"]                                                                           │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Dennis Muren"              │8      │["Special Achievement Award (Visual Effects)","Visual Effects"]                                     │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Edith Head"                │8      │["Costume Design (Black and White)","Costume Design (Color)","Costume Design"]                      │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Edwin B. Willis"           │8      │["Art Direction (Color)","Art Direction (Black and White)"]                                         │
+├────────────────────────────┼───────┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Metro-Goldwyn-Mayer Studio"│8      │["Sound Recording","Sound"]                                                                         │
+└────────────────────────────┴───────┴────────────────────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+[source,cypher]
+----
+MATCH (n:Nominee)<-[:NOMINATED]-(a:Nomination)-[:IN_YEAR]->(y)
+WHERE y.value > "1950"
+RETURN n.name as winner, count(*) as count, collect(distinct a.Award) as awards
+ORDER BY count DESC LIMIT 10;
+----
+
+=== Most different Awards
+
+[source,cypher]
+----
+MATCH (n:Nominee)<-[:NOMINATED]-(a:Award)
+RETURN n.name as winner, collect(distinct split(a.Award," (")[0]) as awards
+ORDER BY size(awards) DESC LIMIT 5;
+----
+
+----
+╒═════════════════════╤═════════════════════════════════════════════════════════════════════════════════════════╕
+│"winner"             │"awards"                                                                                 │
+╞═════════════════════╪═════════════════════════════════════════════════════════════════════════════════════════╡
+│"Metro-Goldwyn-Mayer"│["Outstanding Production","Short Subject","Outstanding Motion Picture","Special Effects"]│
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+│"Billy Wilder"       │["Directing","Writing","Best Motion Picture"]                                            │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+│"James Cameron"      │["Directing","Film Editing","Best Picture"]                                              │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+│"Ethan Coen"         │["Writing","Directing","Best Picture"]                                                   │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────┤
+│"Robert Wise"        │["Directing","Best Motion Picture","Best Picture"]                                       │
+└─────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────┘
+----
+
+
+=== Which Countries got the most Oscars
+
+[source,cypher]
+----
+MATCH (a:Award)-[:FOR_MOVIE]->(m:Movie)
+UNWIND split(m.Country,", ") as country
+RETURN country, count(*) as c
+ORDER BY c DESC LIMIT 5;
+----
+
+----
+╒═════════╤════╕
+│"country"│"c" │
+╞═════════╪════╡
+│"USA"    │1673│
+├─────────┼────┤
+│"UK"     │366 │
+├─────────┼────┤
+│"France" │122 │
+├─────────┼────┤
+│"Germany"│72  │
+├─────────┼────┤
+│"Italy"  │51  │
+└─────────┴────┘
+----
+
+
+=== Which Genres won most
+
+[source,cypher]
+----
+MATCH (a:Award)-[:FOR_MOVIE]->(m:Movie)-[:IN_GENRE]->(g:Genre)
+RETURN g.name, count(*) as c
+ORDER BY c DESC LIMIT 5;
+----
+
+----
+╒═══════════╤════╕
+│"g.name"   │"c" │
+╞═══════════╪════╡
+│"Drama"    │1316│
+├───────────┼────┤
+│"Romance"  │414 │
+├───────────┼────┤
+│"Comedy"   │376 │
+├───────────┼────┤
+│"Biography"│347 │
+├───────────┼────┤
+│"Adventure"│279 │
+└───────────┴────┘
+----
+
+image::{img}/oscars-genres.jpg[width=600]
+
+=== How often did someone win directly or indirectly
+
+E.g. via the movie they participated in.
+
+[source,cypher]
+----
+MATCH (y:Year)<-[:IN_YEAR]-(a:Award)-[*1..2]-(n:Nominee)
+WHERE y.value > "1950"
+AND none(term IN ["Studio","N/A","Metro-Goldwyn-Mayer"] WHERE n.name contains term)
+RETURN n.name, count(distinct a) as c, collect(distinct a.Award)
+ORDER BY c DESC LIMIT 10;
+----
+
+----
+╒═══════════════════╤═══╤════════════════════════════════════════════════════════════════════════════════════════════════════╕
+│"n.name"           │"c"│"collect(distinct a.Award)"                                                                         │
+╞═══════════════════╪═══╪════════════════════════════════════════════════════════════════════════════════════════════════════╡
+│"John Williams"    │56 │["Production Design","Cinematography","Costume Design","Art Direction","Sound","Sound Effects Editin│
+│                   │   │g","Directing","Film Editing","Costume Design (Black and White)","Cinematography (Color)","Music (Or│
+│                   │   │iginal Score)","Best Picture","Writing (Screenplay Based on Material Previously Produced or Publishe│
+│                   │   │d)","Special Achievement Award (Sound Effects Editing)","Visual Effects","Special Achievement Award │
+│                   │   │(Visual Effects)","Music (Scoring: Adaptation and Original Song Score)"]                            │
+├───────────────────┼───┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Steven Spielberg" │37 │["Actor in a Supporting Role","Production Design","Actor in a Leading Role","Sound Editing","Sound",│
+│                   │   │"Sound Effects Editing","Directing","Cinematography","Film Editing","Irving G. Thalberg Memorial Awa│
+│                   │   │rd","Music (Original Score)","Best Picture","Writing (Screenplay Based on Material Previously Produc│
+│                   │   │ed or Published)","Visual Effects","Art Direction","Special Achievement Award (Sound Effects Editing│
+│                   │   │)"]                                                                                                 │
+├───────────────────┼───┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│"Christopher Boyes"│36 │["Visual Effects","Sound Editing","Sound Mixing","Cinematography","Art Direction","Film Editing","Di│
+│                   │   │recting","Costume Design","Sound Effects Editing","Sound","Best Picture","Music (Original Dramatic S│
+│                   │   │core)","Makeup","Music (Original Score)","Writing (Adapted Screenplay)","Writing (Story and Screenpl│
+│                   │   │ay)","Special Achievement Award (Visual Effects)"]                                                  │
+├───────────────────┼───┼────────────────────────────────────────────────────────────────────────────────────────────────────┤
+----
+
+=== Directors directly and indirectly
+
+[source,cypher]
+----
+MATCH (y:Year)<-[:IN_YEAR]-(a:Award)-[*1..2]-(n:Nominee)
+WHERE y.value > "1950"
+AND none(term IN ["Studio","N/A","Metro-Goldwyn-Mayer"] WHERE n.name contains term)
+AND exists( (n)-[:DIRECTED]->() )
+RETURN n.name, count(distinct a) as c, collect(distinct a.Award)
+ORDER BY c DESC LIMIT 10;
+----
+
+----
+╒══════════════════╤═══╕
+│"n.name"          │"c"│
+╞══════════════════╪═══╡
+│"Steven Spielberg"│37 │
+├──────────────────┼───┤
+│"Robert Redford"  │30 │
+├──────────────────┼───┤
+│"Gary Rydstrom"   │26 │
+├──────────────────┼───┤
+│"Fred Zinnemann"  │25 │
+├──────────────────┼───┤
+│"David Lean"      │25 │
+├──────────────────┼───┤
+│"Ralph Fiennes"   │24 │
+├──────────────────┼───┤
+│"Paul Newman"     │24 │
+├──────────────────┼───┤
+│"Marlon Brando"   │24 │
+├──────────────────┼───┤
+│"James Cameron"   │21 │
+├──────────────────┼───┤
+│"Peter Jackson"   │21 │
+└──────────────────┴───┘
+----
+
+=== The Unlucky ones, most often nominated with least wins
+
+[source,cypher]
+----
+MATCH (a:Nomination)-[:NOMINATED]->(n:Nominee)
+WITH n.name as name, sum(case when a:Award then 1 else 0 end) as won, count(*) as total
+RETURN name, won, total, 100*won/total as percent
+ORDER BY percent asc, total desc LIMIT 10;
+----
+
+----
+╒═════════════════╤═════╤═══════╤═════════╕
+│"name"           │"won"│"total"│"percent"│
+╞═════════════════╪═════╪═══════╪═════════╡
+│"Kevin O'Connell"│0    │20     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Greg P. Russell"│0    │16     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Alex North"     │0    │15     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Roland Anderson"│0    │15     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Thomas Newman"  │0    │13     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Republic Studio"│0    │12     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Roger Deakins"  │0    │12     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"George Folsey"  │0    │12     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Rick Kline"     │0    │11     │0        │
+├─────────────────┼─────┼───────┼─────────┤
+│"Walter Lantz"   │0    │10     │0        │
+└─────────────────┴─────┴───────┴─────────┘
+----
+
+----
+╒═════════════════════╤═════╤═══════╤═════════╕
+│"name"               │"won"│"total"│"percent"│
+╞═════════════════════╪═════╪═══════╪═════════╡
+│"Metro-Goldwyn-Mayer"│11   │61     │18       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"Walt Disney"        │22   │60     │36       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"John Williams"      │5    │50     │10       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"Alfred Newman"      │9    │46     │19       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"Warner Brothers"    │7    │43     │16       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"Cedric Gibbons"     │10   │38     │26       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"France"             │9    │37     │24       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"Edith Head"         │8    │35     │22       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"Edwin B. Willis"    │8    │32     │25       │
+├─────────────────────┼─────┼───────┼─────────┤
+│"Max Steiner"        │4    │29     │13       │
+└─────────────────────┴─────┴───────┴─────────┘
+----
+
+////
+
+== Other Resources
+
+* https://github.com/bencxs/oscars
+* https://projects.fivethirtyeight.com/oscar-predictions-2017/
+* https://www.kaggle.com/sebask/d/theacademy/academy-awards/the-oscars-dataset-preparing-for-2017
+* https://www.kaggle.com/uvcelokesh/d/deepmatrix/imdb-5000-movie-dataset/and-the-oscars-go-to
+* http://awardsdatabase.oscars.org/[Academy Awards Database]
+* https://www.kaggle.com/theacademy/academy-awards
+* https://www.aggdata.com/awards/oscar[AggData Oscars Data]

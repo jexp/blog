@@ -1,0 +1,33 @@
+Software analytics with Graphs Take 2
+
+LinkedIn case study
+Atomist
+vizipi Adam Himmelman
+SoftViz3d
+jQA
+
+EADS
+
+jörn
+
+Linz/Hagenberg
+
+ikwattro GitHub
+
+Clemens? <- linz
+
+https://hyperonomy.com/2016/10/19/crossing-the-ea-chasm-marrying-open-ea-data-with-graph-databases/
+
+Analyzing the NPM dependency network https://medium.com/graph-commons/analyzing-the-npm-dependency-network-e2cf318c1d0d?source=linkShare-8a4bc2c0841e-1476941591 #software #js #ecosystem @mesirii
+
+https://twitter.com/graphcommons/status/788976735085793280
+
+NPM dependencies Will
+
+RBS? https://www.youtube.com/watch?v=DG5j542b3b8
+ YouTube Neo4j - the World's Leading Graph Database
+RBS: Inside the Spider’s Web: Dependency Management with Neo4j 
+
+
+@mesirii Visualize structure and behavior of Java applications: http://findtheflow.io
+https://twitter.com/YoannBuch/status/789074707895255040

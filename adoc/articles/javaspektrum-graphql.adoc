@@ -1,0 +1,500 @@
+= GraphQL in Java
+
+image::http://graphql.org/img/logo.svg[float=right,width=300]
+
+Im September 2015 veröffentlichte Facebook GraphQL eine flexible Abfragesprache für APIs, die hauptsächlich für ihre eigenen, mobilen Anwendungen entwickelt worden war.
+
+Vom Erfolg des Projektes waren die Maintainer definitv überrascht, besonders Web- und App-Entwickler, die in den Javascript (React) und iOS / Android Welten zuhause sind, haben sich mit Begeisterung darauf gestürzt und nutzen die Vorteile für sich aus.
+In einem Bereich, in dem seit dem Abgang von SOAP und der Etablierung von REST und HATEOAS nur wenig Neues zu vermelden gab, ist seitdem wieder viel Aktivität zu sehen.
+
+Ende Mai 2017 konnte ich an der [GraphQL-Europe] in Berlin Konferenz teilnehmen und muss sagen, dass mich die Energie und Innovation sehr begeistert hat.
+
+Ich habe in den letzten 12 Monaten ein paar Erfahrungen mit GraphQL bei der Entwicklung der GraphQL-API für Neo4j gesammelt.
+
+Die dabei genutzte, serverseitige [graphql-java] Bibliothek, hat mir das Leben sehr erleichtert.
+Daher ganz herzlichen Dank an die Entwickler, besonders Andi Marek aus Berlin.
+
+== Ziele von GraphQL
+
+GraphQL ist vor allem die Spezifikation einer Abfragesprache [GraphQLSpec] für APIs und eine Laufzeitumgebung (Referenzimplementierung) die diese effizient umsetzt.
+
+Sie stellt eine Protokollvereinbarung zwischen Frontend und Backend-Entwicklern dar, die das gemeinsame Domänenmodell an dieser Schnittstelle repräsentiert.
+Aus Sicht von Domain Driven Design wäre das die Domäne des Translation Layers des Bounded-Contexts.
+
+In GraphQL wird ein "Schema-First" Ansatz propagiert, d.h. das gemeinsame Verständnis der API besteht aus einer Einigung auf ein konsistentes Schema als Basis.
+
+Damit können beide Seiten unabhängig voneinander entwickeln, und haben keine weiteren Abhängigkeiten, die sie in Betracht ziehen müssen.
+Gleichzeitig gibt es den Front-End Entwicklern viel Flexibilität für Abfragen beliebiger Komplexität.
+Und der Backend-Entwickler kann für jeden Typ und jedes Feld individuell bestimmen, woher und wie effizient er es ermittelt.
+
+Evolution des Schemas geschieht über einen additiven Ansatz, `@deprecated`-Direktiven und Monitoring der Nutzung von Schemaelementen durch Clients.
+
+Mit diesem Schema ist auch das "Graph" in GraphQL gemeint, der (Meta-)Graph des Datenmodells auf dem Abfragen ausgeführt werden können.
+
+== GraphQL Grundlagen
+
+Die strukturierten Grundelemente des Schemas sind: _Objekt-Typen_ und _Interfaces_ mit _Feldern_ definierten Typs.
+Basistypen sind _ID, String, Int, Float_ sowie selbstdefinierte _Eingabeobjekte_(InputObjects), _Enumerationen_ und _skalare Typen_.
+Diese können für _Parameter_ und _Felder_ von Objekten genutzt werden, entweder direkt oder als _Arrays_. 
+
+Neben den Typen besteht das Schema auch noch aus optionalen _Update-Aktionen_ (Mutations) und spezifischen _Abfragen_.
+
+Die Schemadefinition ist Kern jedes GraphQL Backends und wird meist programmatisch erzeugt.
+In der nächsten Version ist auch textuelle IDL-Schema Definitionen in der GraphQL Spezifikation enthalten.
+
+Jeder Client kann das Schema mittels Introspektions-Abfragen in Erfahrung bringen und somit z.B. in Abfragetools für Eingabeunterstützung nutzen.
+
+Basierend auf diesem Datenmodell können Anwendungsentwickler sehr flexible Abfragen stellen, die den exakt den Anforderungen jedes spezifischen UI-Anwendungsfalles (Screens) entsprechen.
+
+Diese Abfragen stellen Baumstrukturen dar, die beliebig tief geschachtelt sein können, sie werden im Server vor Ausführung auf Validität in Bezug auf das Schema geprüft.
+Anfragen können Para
+
+Auf der Serverseite wird sichergestellt, dass für jeden deklarierten Typ bzw. dessen Felder eine effiziente Auflösung unter Berücksichtigung von Parametern erfolgt.
+Es gibt keine Vorgabe woher die Informationen kommen, sie können individuell aus Datenbanken, von APIs, aus in-memory-Repräsentationen oder dynamischen Berechnungen ermittelt werden.
+
+Bei Facebook werden alle Abfrage-Felder zum Beispiel auf den internen, in-memory Key-Value Store gemappt, der sich transparent auch um Rechte und Sichtbarkeiten für den aktuellen Nutzer kümmert, andere APIs nutzen eine Kombination von klassischen Datenbankabfragen.
+
+Die GraphQL-Runtime kümmert sich dann um das effiziente Mapping und partielle Caching dieser Ergebnisse auf die Abfrage des Clients.
+
+In vielen Infrastrukturen werden GraphQL-Schema und statische Abfragen direkt für SourceCode-Generierung von Client- und Server-Klassen und Funktionen genutzt, für die höchstmögliche Performanz und Typsicherheit.
+
+== Ein einfaches Beispiel
+
+Auf einer Filmdatenbank, wird folgende Abfrage gestellt:
+
+.movieByTitle.graphql
+----
+query movieQuery($title: String) {
+
+  movieByTitle(title:$title) {
+    title
+    released
+    directors {
+      name
+    }
+    actors {
+      name
+      born
+      movies {
+        title
+      }
+    }
+  }
+}
+----
+
+.Parameter
+----
+{"title":"The Matrix"}
+----
+
+Die Abfrage besteht prinzipiell nur aus Domäneninformationen (Typen und Felder), es gibt (fast) keine Klauseln oder andere Syntax ausser der des verschachtelten Baumes.
+
+Sie ist also leicht zu verstehen und direkt 1:1 auf das View-Modell und die (JSON-)Ergebnisse zu mappen.
+
+.movies.json
+----
+{"movieByTitle" :  {
+  "title": "The Matrix",
+  "released": 1999,
+  "directors": [{"name":"Lilly Wachowski"},{"name":"Lana Wachowski"}]
+  "actors": [
+    { name:"Keanu Reeves", "born":1964, 
+      "movies": [{"title":"The Matrix"},{"title":"Speed"}]},
+    { name:"Carrie Ann Moss", "born":1967, 
+      "movies": [{"title":"Memento"},{"title":"Chocolat"}]},
+    { name:"Hugo Weaving", "born":1960, 
+      "movies": [{"title":"Cloud Atlas"},{"title":"The Hobbit"}]}
+   ]}
+}
+----
+
+Das GraphQL Schema auf dem die Abfrage basiert und validiert wird, es bildet aber die Grundlage der streng getypten Information der Abfrage und Ergebnisse.
+Um zu zeigen, dass man die Abfrage auch ohne das Schema verstehen kann, zeige ich es erst im Anschluss.
+
+.movies-schema.graphql
+----
+type Movie {
+  title: String
+  released: Int
+  actors: [Person]
+  directors: [Person]
+}
+
+type Person {
+   name: String
+   born: Int
+   movies: [Movie]
+}
+
+schema {
+   query: QueryType
+   mutation: MutationType
+}
+type MutationType {
+  createPerson(name:String, born:Int) : Person
+}
+type QueryType {
+  movieByTitle(title:String) : Movie
+}
+----
+
+== Erste Schritte mit GraphQL
+
+Der Einstieg in GraphQL wird sehr leicht gemacht.
+Durch das statische, streng typisierte Schema, ist es möglich in interaktiven Abfragetools, wie [GraphiQL] (sprich `/ˈɡrafək(ə)l/`) eine IDE-ähnliche Interaktion zu erlauben.
+
+Der Editor bietet automatische Vervollständigung, Fehlerhinweise bei inkorrekter Schreibweise, Typen oder Position von Elementen, Inline-Hilfe beim Tippen und das Schema als navigierbare Dokumentantion.
+
+.GraphiQL Tool
+image::https://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/20170524035049/neo4j-graphql-1024x460.png[]
+
+Für Entwickler ist es sehr hilfreich, dass [GitHub] seine APIs jetzt auch als GraphQL zur Verfügung stellt, damit kann man in einer bekannten Domäne die ersten Schritte wagen, und weiss welche Strukturen und Ergebnisse einen erwarten.
+Ähnlich nützlich sind auch [GraphQLHub]'s API Wrapper von Twitter, Reddit, HackerNews uvm.
+
+Ich empfehle jeden, diese APIs direkt, interaktiv auszuprobieren, es macht wirklich Spass.
+
+Andere bekannte Anbieter von GraphQL APIs sind Yelp, Shopify und Mattermark, aber in den meisten grossen Web-Firmen wird an ähnlichen Offerten gearbeitet.
+
+== GraphQL vs. REST
+
+Da dies eine sehr breite Diskussion ist, die sehr leidenschaftlich geführt wird, werde ich mich nur kurz dazu äussern.
+
+Bei REST werden Entitäten mittels der Repräsentation via URI und Zugriff darauf mittels der HTTP-Verben (GET,POST,PUT,DELETE) für Clients verfügbar gemacht.
+Navigation zwischen Entitäten und möglichen Aktionen wird mittels Links, die Teil der Serverantwort sind, erreicht.
+Die Granularität der Entität, ist prinzipiell fix, wird aber in der Praxis oft mittels zusätzlichen URL Parametern gesteuert.
+
+Die Hauptkritikpunkte der GraphQL Befürworter an REST sind die relativ fixe Granularität von Entitäten, die es oft erzwingt, verschiedene Ressourcen derselben Entität für verschiedene Anwendungsfälle (z.B. Mobil vs. Desktop-Browser oder Übersicht vs. Detailansicht) bereitzustellen.
+Desweiteren sei die Limitierung auf die HTTP Verben ein Manko, da auf der Domäne eher konkrete und spezifische Aktionen (Commands) mit wohldefinierten Parametern benötigt werden.
+
+Und die fehlende Spezifikation und Typsicherheit für Query-Parameter, Request-Payloads, Links und Ergebnisse ist ein weiterer Kritikpunkt.
+
+Wie REST ist auch GraphQL an der Schnittstelle zwischen Services und deren Konsumenten angesiedelt.
+
+Der Hauptfokus liegt auf der typsicheren Kommunikation zwischen beiden Schichten mittels flexibler Abfragen und Aktionen.
+Aus dieser Sicht ist GraphQL ein klarer Vertreter der Kommunikationsmuster aus Command Query Response Separation (CQRS).
+
+Die "Root"-Queries entsprechen den REST-Resourcen, aber mit flexibler, definierter Parametrisierung.
+Für saubere Projektionen beliebiger Breite und Tiefe ist die geschachtelte Projektion von GraphQL optimal geeignet.
+Dabei können Felder auch berechnete Werte oder Metainformationen zur Verfügung stellen.
+Und Mutations sind das dynamischere Äquivalent zu den HTTP-Verben.
+
+Durch den starken Fokus auf Middleware im GraphQL Stack, sind Proxies üblich, die Integration mehrerer Backends, Caching und Monitoring anbieten.
+
+== GraphQL Server in Java
+
+Die Quellen für die gezeigten Bespiele ist in [GraphQLDemo] verfügbar.
+
+Für unseren Service nutzen wir die graphql-java Bibliothek im neuen Release 3.0.0, welche weit verbreitet und sehr umfassend ist, wie auch in der eigenen "awesome-graphql-java" Übersicht zu sehen ist.
+
+Genau wie im Client ist auch im Server das Schema der Ausgangspunkt der GraphQL API.
+
+Hier bauen wir es programmatisch auf, die Typen werden unspektakulär mittels einer fluent-Builder-API erzeugt.
+Es gibt auch die Möglichkeit mit Zusatzbibliotheken das Schema aus POJOs (mit Annotationen für Services) zu generieren.
+
+Der wirklich spannende Teil ist der jeweilige `DataFetcher`, der sich um das Laden der relevanten Informationen für das Feld bzw. den Typ kümmert.
+
+Wie schon vorher erwähnt, ist die Quelle der Informationen für GraphQL irrelevant, in unserem Beispiel holen wir die Filme aus einer In-Memory Quelle. 
+Die Personen könnten genauso gut einer relationalen Datenbank, die Filme aus einer DocumentDB und die Verknüpfungen aus einem Graphdatenbank kommen.
+
+Wir könnten natürlich auch einfach eine API wie von IMDB oder themoviedb.org kapseln.
+
+Unsere "Datenbank" sind der Einfachheit halber 2 Maps mit Filmen und Personen, einmal verschachtelte Maps für Filme und POJOs für Personen.
+Dankenswerterweise handhabt die Bibliothek beides automatisch für direkte Feldzugriffe.
+
+.Daten-Setup
+[source,java]
+----
+public static class Person {
+  public final String name;
+  public final int born;
+  public final List<String> movies;
+  
+  // ohne Konstruktor & Getter 
+}
+
+Map<String,Map<String,Object>> movies=new HashMap<>();
+Map<String,Person> people=new HashMap<>();
+{
+  movies.put("The Matrix", map("title","The Matrix","released",1999,
+          "actors", asList("Keanu Reeves"),"directors",asList("Lana Wachowski")));
+  
+  people.put("Keanu Reeves", new Person("Keanu Reeves",1964,
+           asList("The Matrix", "Speed")));
+  people.put("Carrie Ann Moss", new Person("Carrie Ann Moss",1967,
+           asList("Memento","Chocolat","The Matrix")));
+}
+----
+
+Beispielhaft ist hier die komplette Definition des Typs für "Person" dargestellt, die Meta-Informationen könnten natürlich auch aus anderen Quellen kommen, wie Schema-Files, Annotationen oder Datenbank-Metadaten.
+
+Interessant ist hier der DataFetcher der das "movies" Feld rekursiv auflöst, in dem er für jeden Titel das zugehörige Film-Objekt aus der Film-Map heraussucht.
+Die `DataFetchingEnvironment` API hat Zugriff auf den Kontext, das aktuelle Objekt (Source), etwaige Argumente, aktuelle Felder, Feld-Typ, Objekt-Typ, globales-Schema.
+
+.GraphQL Schema für Person mittels fluent-Builder und DataFetcher
+[source,java]
+----
+GraphQLObjectType person =
+  GraphQLObjectType.newObject().name("Person")                                         // <1>
+  .field(newFieldDefinition().name("name").type(GraphQLString))                        // <2>
+  .field(newFieldDefinition().name("born").type(GraphQLInt))
+  .field(newFieldDefinition().name("movies").type(new GraphQLList(new GraphQLTypeReference("Movie"))) // <3>
+
+    .dataFetcher((env) -> env.<Person>getSource().getMovies().stream()                 // <4>
+                    .map(env.<MovieExample>getContext().movies::get).collect(toList()) // <5>
+    ))
+  .build();
+----
+
+<1> Typ unseres GraphQL-Objektes "Person"
+<2> Einfaches Feld "name" vom Typ String, wird direkt mittels Property-Access aus dem Ergebnis gelesen
+<3> Referenz-Feld "movies" zum Typ "Liste von Movie"
+<4> Zugriff auf aktuelles Objekt (getSource() und auf die "movies" Liste von Titeln)
+<5> Zugriff auf "Datenbank" über Kontext, Heraussuchen jedes Filmes via Titel aus der `movies` Quelle
+
+Das Schema-Objekt für Filme sieht ähnlich aus, nur dass im DataFetcher kein POJO sondern die Map benutzt wird.
+
+
+.GraphQL Schema mit Typen, Top-Level Query und Mutations-Operationen
+[source,java]
+----
+GraphQLSchema schema = GraphQLSchema.newSchema()
+
+  .query(GraphQLObjectType.newObject().name("QueryType")                      // <1>
+    .field(newFieldDefinition().name("movieByTitle").type(reference("Movie")) // <2>
+      .argument(newArgument().name("title").type(GraphQLString))              // <3>
+      .dataFetcher((env) -> env.<MovieExample>getContext().movies             // <4>
+        .get(env.<String>getArgument("title")))                               // <5>
+    ))
+
+  .mutation(GraphQLObjectType.newObject().name("MutationType")
+    .field(newFieldDefinition().name("createPerson").type(reference("Person"))
+    .argument(newArgument().name("name").type(GraphQLString))
+    .argument(newArgument().name("born").type(GraphQLInt))
+    .argument(newArgument().name("movies").type(new GraphQLList(GraphQLString)))
+      .dataFetcher((env) -> { env.<MovieExample>getContext().movies
+        .put(env.<String>getArgument("name"), env.getArguments()); 
+        return env.getArguments(); })
+    ))
+
+  .build(asSet(person,movie)); // <6>
+
+GraphQL graphQL = GraphQL.newGraphQL(schema).build();
+----
+
+<1> Top-Level Query-Objekt
+<2> Jedes Feld steht als Abfrage-Startpunkt zur Verfügung, hier "movieByTitle" vom Typ "Movie"
+<3> Ein Parameter "title" vom Typ String
+<4> DataFetcher, der wiederum aus dem Kontext, der Map für Filme
+<5> Den Film mit dem Titel des übergebenen Arguments herausholt und zurückgibt
+<6> Registrierung beider Objekt-Typen
+
+NOTE: Man beachte, dass der DataFetcher jeweils nur das Haupt-Objekt zurückgibt, ohne die verschachtelten Felder aufzulösen, das machen dann die invididuellen DataFetcher pro Feld bei Bedarf (und auch wirklich nur, wenn es benötigt wird.).
+
+Interessant ist auch, dass auch Mutationen, neben der Datenaktualisierung auch wieder Objekte zurückggeben können, auf die diesselben Abfragen / Projektionen angewandt werden können.
+
+.Beispiel für Abfrage auf dem Film-Schema und -Daten
+[source,java]
+----
+String query = "{ movieByTitle(title:\"The Matrix\") { title, released, actors { name, born } } }";
+MovieExample context = this;
+ExecutionResult result = graphQL.execute(query, context);
+return result.getData();
+
+/*
+{movieByTitle={title=The Matrix, released=1999, 
+ actors=[{name=Keanu Reeves, born=1950, 
+          movies=[{title=The Matrix}]}]}}
+*/
+----
+
+Die Einbindung unserer API in einen HTTP Endpunkt würde dann so aussehen.
+Wir benutzen wie schon zuvor [SparkJava] als minimalen HTTP Server.
+
+[source,java]
+----
+public class MoviesEndpoint {
+    public static void main(String[] args) {
+        port(8080);
+
+        MovieExample context = new MovieExample();
+        GraphQL graphQL = context.movieSchema();
+        Gson gson = new Gson();
+
+        post("/graphql", (req, res) -> {
+            Map body = gson.fromJson(req.body(), Map.class);
+
+            String query = (String) body.get("query");
+            String variablesString = body.getOrDefault("variables", "{}").toString();
+            Map<String, Object> arguments = gson.fromJson(variablesString,Map.class);
+
+            ExecutionResult result = graphQL.execute(query, context, arguments);
+
+            Map<String, Object> resultData = result.getErrors().isEmpty() ?  
+               map("data", result.getData()) : 
+               map("data", result.getData(),"errors",result.getErrors());
+
+            return gson.toJson(resultData);
+        });
+    }
+}
+----
+
+Der Aufruf unserer Abfragen erfolgt dann ganz einfach mittels einer HTTP Ressource, die einen JSON Payload mit `{"query":"...", "variables":"..."}` entgegennimmt und ein Ergebnis der Form `{"data": {....}, "errors":[...]}` zurückggibt.
+
+Zum Beispiel manuell 
+
+----
+curl -d'{"query":"{ movieByTitle(title:\"The Matrix\") {title}}","variables":{}}' \
+  http://localhost:8080/graphql
+----
+
+oder mit GraphiQL:
+
+image::https://dl.dropboxusercontent.com/u/14493611/GraphiQL-Movies.jpg[width=800]
+
+Diese Route ruft auf unserem Schema `graphQL.execute(query, context, params)` auf und reicht die Ergebnisse zurück, wobei der Zugriff auf unsere Datenquellen über den Kontext erfolgt, der dann im DataFetcher bereitsteht.
+Der Rest ist nur spezielle Behandlung Request und Response, besonders für GraphiQL Anfragen.
+
+Richtig cool ist, dass wir jetzt einen kompletten GraphQL Endpunkt geschaffen haben, der mit all den Annehmlichkeiten und Features aufwartet, die wir am Anfang erwähnt haben.
+
+Seit der Version 3.0.0 kann die Bibliothek auch direkt IDL Dateien (wie unsere "movies-schema.graphql") parsen und in ein ausführbares Schema umwandeln.
+Der statische Teil des Schemas wird automatisch bereitgestellt, man muss nur noch die `DataFetcher` für die dynamischen Lookups definieren.
+
+[source,java]
+----
+TypeDefinitionRegistry compiledSchema = new SchemaParser().parse(moviesIdl);
+
+RuntimeWiring runtimeWiring = RuntimeWiring.newRuntimeWiring()
+  .type("MutationType", typeWiring -> typeWiring
+    .dataFetcher("createPerson",
+       (env) -> env.<MovieExample>getContext().movies
+               .put(env.<String>getArgument("name"), env.getArguments()))
+  ).type("QueryType", typeWiring -> typeWiring
+     .dataFetcher("movieByTitle",
+       (env) -> env.<MovieExample>getContext().movies
+               .get(env.<String>getArgument("title")))
+  ).type("Person", typeWiring -> typeWiring
+     .dataFetcher("movies", 
+       (env) -> env.<Person>getSource().getMovies().stream()
+               .map(env.<MovieExample>getContext().movies::get).collect(toList())
+     )
+  ...
+  )
+  .build();
+
+GraphQLSchema schema = new SchemaGenerator()
+                       .makeExecutableSchema(compiledSchema, runtimeWiring);
+----
+
+== GraphQL Client für Java
+
+Um unsere GraphQL API typsicher in Java zu konsummieren, können wir den Apollo-Client benutzen, der eine hohe Verbreitung durch mobile Anwendungen auf Android hat.
+
+Es gibt auch Clients für andere JVM Sprachen wie Scala und Clojure.
+
+Wie z.B. in JAXB werden GraphQL Abfrage-Ergebnisse auf vorher aus dem (JSON) Schema generierte Klassen gemappt.
+Für das JSON-Schema nutzt Apollo die schon erwähnten "Introspection"-Abfragen, die von graphql-java automatisch unterstützt werden.
+
+----
+apollo-codegen download-schema http://localhost:8080/graphql --output movies-schema.json
+----
+
+Für die Code-Generierung muss man ein Gradle-Plugin einbinden.
+
+[source,json]
+----
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.apollographql.apollo:gradle-plugin:0.3.0'
+    }
+}
+...
+apply plugin: 'com.apollographql.android'
+----
+
+Ein compile-Lauf mit Gradle erzeugt aus unseren Abfragen in Dateien in `src/main/graphql/movies/movieByTitle.graphql` den entsprechenden Quellcode für synchrone und asynchrone Aufrufe, die wir dann in unserem Code benutzten können.
+
+.ApolloClient synchroner Aufruf
+[source,java]
+----
+ApolloClient apolloClient = ApolloClient.builder()
+  .okHttpClient(new OkHttpClient())
+  .serverUrl("http://localhost:8080/graphql").build();
+
+ApolloCall<MovieByTitle.Data> call = apolloClient.newCall(MovieByTitle.builder()
+  .title("The Matrix")
+  .build());
+
+Response<MovieByTitle.Data> response = call.execute();
+
+MovieByTitle.Data.MovieByTitle1 movieByTitle = response.data().movieByTitle();
+System.err.println(movieByTitle.title());
+System.err.println(movieByTitle.actors());
+----
+
+.ApolloClient asynchroner Aufruf
+[source,java]
+----
+call.enqueue(new ApolloCall.Callback<MovieByTitle.Data>() {
+
+  public void onResponse(Response<MovieByTitle.Data> response) {
+    MovieByTitle.Data.MovieByTitle1 movieByTitle = response.data().movieByTitle();
+    System.err.println(movieByTitle.title());
+    System.err.println(movieByTitle.actors());
+  }
+  
+  public void onFailure(ApolloException e) {
+     e.printStackTrace();
+  }
+});
+----
+
+== Tools und Projekte
+
+Neben den schon genannten Tools und Bibliotheken, gibt es viele weitere, die alle in [AwesomeGraphQL] aufgeführt sind.
+
+Auf jeden Fall zu erwähnen sind Apollo (Meteor), die sich besonders um die JavaScript, iOS und Android Clients verdient gemacht haben.
+Apollo-Optics fügt Metriken für GraphQL Endpunkte hinzu oder Apollo Launchpad erlauben .
+
+Eine interessante Lösung für die automatische Erzeugung und Verwaltung von skalierbaren GraphQL Backends bietet GraphCool.
+Ähnliche Dienste bieten auch Scraphold und Reindex an.
+
+Für Nutzer des Spring Framework und Spring Boot gibt es [GraphQLSpringCommon] das die bequeme Definition des kompletten Schemas mittels annotierter Java-Klassen erlaubt.
+Abfragen und Aktionen werden asynchron mittels Reactor ausgeführt. 
+
+Dazu gibt es noch [GraphQLSpringBoot], dass graphql-java und graphql-spring-common unterstützt und die notwendingen Boot-Starter mitbringt, um mittels eines konfigurierbaren GraphQL-Servlets aus einer Spring-Boot Anwendung einen GraphQL Endpunkt zu machen.
+Als Goodie gibt es noch einen Boot-Starter dazu, der die GraphiQL-UI für die Anwendung bereitgestellt.
+
+Ein GraphQL Backend auf Basis der Graphdatenbank Neo4j liefert unser neo4j-graphql Projekt.
+Es war angenehm zu sehen, wie leicht sich sowohl das Schema, also auch die GraphQL Abfragen auf unser Property-Graph Datenmodell mappen liessen.
+Wir konnten zum einen die ganze verschachtelte Abfrage in eine einzige Cypher-Abfrage wandeln.
+Dank der Erweiterbarkeit des GraphQL-Schema mittels Direktiven, konnten wir es mit `@cypher` Annotationen für Felder, Mutationen und eigene Abfragen anreichern.
+Die konfigurierten Statements werden in die generierte Abfrage integriert und erlauben somit auch komplexe Graph-Abfragen ohne Programmierung.
+
+Mit einem einzigen Aufruf kann man auf der Basis eines Schema-Files, ein automatisches GraphQL-Backend das in einer Docker-Instanz von Neo4j läuft in der Cloud starten.
+
+----
+npm install -g neo4j-graphql-cli
+neo4j-graphql movies-schema.graphql
+----
+
+== Referenzen
+
+* [GraphQL] http://graphql.org/
+* [GraphQLSpec] http://facebook.github.io/graphql/
+* [AwesomeGraphQL] https://github.com/chentsulin/awesome-graphql
+* [GraphiQL] https://github.com/graphql/graphiql
+* [GitHub] https://developer.github.com/early-access/graphql/
+* [GitHubEng] https://githubengineering.com/the-github-graphql-api/
+* [GraphQLHub] https://www.graphqlhub.com/
+* [GraphQL-Java] https://github.com/graphql-java
+* [ApolloAndroid] https://github.com/apollographql/apollo-android
+* [GraphQL-Europe] http://graphql-europe.com
+* [GraphQLSpringCommon] https://github.com/oembedler/spring-graphql-common
+* [GraphQLSpringBoot] https://github.com/graphql-java/graphql-spring-boot
+* [Neo4j-GraphQL] https://neo4j.com/blog/graphql-neo4j-graph-database-integration/
+* [GraphQLDemo] https://github.com/jexp/javaspektrum-graphql-demo

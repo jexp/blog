@@ -1,0 +1,92 @@
+= The APOC Spring release
+
+_Michael Hunger, Head of Developer Relations_
+
+image::https://dl.dropboxusercontent.com/u/14493611/daisy.jpg[float=right]
+
+Since version 3.0 you can extend Neo4j with http://neo4j.com/docs/developer-manual/current/extending-neo4j/procedures/[user defined procedures, functions and going forward also aggregate functions].
+About a year ago during the 3.0 milestone phase, I started to work on the first set of graph refactoring procedures.
+These evolved into the APOC library, which at the release of Neo4j 3.0 featured about 100 procedures, with Neo4j 3.1 about 250 procedures and functions and now reached about 300.
+
+With the beginning of spring we gathered the contributions during the long winter nights and released 3 new versions for your pleasure.
+
+If you want to learn more about the exisiting APOC feature set, please visit the https://neo4j.com/developer/procedures-gallery/[procedures-gallery on neo4j.com], the https://neo4j-contrib.github.io/neo4j-apoc-procedures/[APOC documentation], `:play http://guides.neo4j.com/apoc` in your Browser or read the https://neo4j.com/tag/APOC/[past blog articles on the topic].
+
+But let's look at some of the new features since the last release in December:
+
+http://twitter.com/darthvader42[Stefan Armbruster] worked on automatizing the "manual" index updates, which you can enable with `apoc.autoUpdate.enabled=true` in your `neo4j.conf`.
+You also need a `autoUpdate:true` configuration setting in your manual index definition.
+He also added support for mixed content to `apoc.load.xml`, and provided the `apoc.test.regexGroups` functions for extracting parts of regular expressions.
+
+http://github.com/InverseFalcon[Andrew Bowman] started his first contributions this month but already added:
+
+* apoc.coll functions: `shuffle(), randomItem(), randomItems(), containsDuplicates(), duplicates(), duplicatesWithCount(), occurrences(), reverse()`
+* apoc.path procedures: `subgraphNodes(), subgraphAll(), and spanningTree()`
+* apoc.date functions: `convert() and add()`
+* apoc.algo functions: `cosineSimilarity(), euclideanDistance(), euclideanSimilarity()`
+* Extended the capabilities for the `apoc.path.expand` procedure with new operators for filtering end nodes, limits, excluding start node from filters and more.
+
+.Example cosine similarity
+[source,cypher]
+----
+MATCH (p1:Employee)
+MATCH (sk:Skill)<-[y:REQUIRES_SKILL]-(p2:Role {name:'Role 1-Analytics Manager'})
+OPTIONAL MATCH (p1)-[x:HAS_SKILL]->(sk)
+WITH p1, p2, 
+     collect(coalesce(x.proficiency,0)) as xprof, 
+     collect(coalesce(y.proficiency,0)) as yprof
+RETURN p1.name as name, apoc.algo.cosineSimilarity(xprof, yprof) as cosineSim
+----
+
+http://twitter.com/fbiville[Florent Biville] added a new feature to the https://neo4j.com/blog/user-defined-functions-neo4j-procedure-compiler/[procedure compiler], that allows us to generate the tabular information about procedures and functions automatically to be included in the documentation.
+That includes this really nice, searchable table at the beginning of the docs.
+
+[Tomaz Bratanic] submitted including a weight property as an improvement to the Gephi Streaming capability.
+He also wrote https://tbgraph.wordpress.com/2017/04/01/neo4j-to-gephi/[a really nice blog post] about it.
+
+I spent some time bugfixing (graphml export, TTL, setting array properties, more robust startup).
+I also worked on improving the documentation, now there are independent versions of the docs published for the different versions.
+
+Something I wanted for a longer time is to improve the performance of `apoc.periodic.iterate` which is used for managing large scale updates or data creation with batched transactions.
+If you now provide `iterateList:true` it will execute the inner statement only once but with prepending an `UNWIND`.
+Prefixing your inner statement with `WITH {foo} AS foo` for each return value is also no longer necessary.
+
+For conflicting queries, you can now for instance use `retries:5`.
+See also my blog post about http://jexp.de/blog/2017/03/5-tips-tricks-for-fast-batched-updates-of-graph-structures-with-neo4j-and-cypher/[performat updates with Cypher].
+
+For quite a while I wanted to add https://github.com/jayway/JsonPath[json-path] support to APOCs `load.json` procedure and the different json functions.
+Now this allows you to reach into a json document and pull out only the data you're interested in:
+
+.Question authors from StackOverflow using json-path
+[source,cypher]
+----
+WITH "http://bit.ly/so_neo4j" AS url
+CALL apoc.load.json(url,'$.items.*owner.display_name') YIELD value
+UNWIND value.result as name
+RETURN name, count(*)
+ORDER BY count(*) DESC LIMIT 5;
+----
+
+Bitwise operations were turned into a function
+I added `apoc.text.format, .lpad, .rpad` and added new *functions* for creating virtual nodes and relationships.
+Some missing procedures for updating/removing labels, properties, and relationships were also added.
+I also added support for gzipped streams for load csv and load xml, in the future we want to add more protocols here, e.g. "hdfs://" and allow URLs to follow redirects, so stay tuned.
+
+You can find the releases for the different Neo4j versions here:
+
+* https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases/tag/3.0.8.6[APOC 3.0.8.6 for Neo4j 3.0.x]
+* https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases/tag/3.1.3.6[APOC 3.1.3.6 for Neo4j 3.1.3]
+* https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases/tag/3.2.0.2[APOC 3.2.0.2 for Neo4j 3.2.x]
+
+I'm also very happy to announce that our partner *Larus BA from Vencice, Italy* will support me going forward in working on APOC in a more focused manner.
+With the help of their team, we will https://github.com/neo4j-contrib/neo4j-apoc-procedures/projects/1[take care of the open issues and feature requests and also add new cool stuff to APOC].
+They already addressed a number of issues which are included in this release.
+For example honoring Neo4j's import directory configuration, handling ElasticSearch scroll results, and following redirects when loading from files.
+
+*If you have any feedback* to existing functionality, bug reports of feature requests, please let us know by https://github.com/neo4j-contrib/neo4j-apoc-procedures/issues[issuing them to the repository].
+
+And if you like APOC please don't forget to https://github.com/neo4j-contrib/neo4j-apoc-procedures/stargazers[star it on GitHub] :)
+
+Cheers, Michael
+
+PS: All the http://neo4j.com/sandbox-v2[new Neo4j Sandboxes] also come with APOC installed.

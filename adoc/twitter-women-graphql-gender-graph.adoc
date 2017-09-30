@@ -1,0 +1,222 @@
+= Finding Awesome Women Tweeting about GraphQL using Gender-API
+
+I came across Peggys Twitter request:
+
+++++
+<blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">I&#39;m looking for some badass ladies who <a href="https://twitter.com/GraphQL">@GraphQL</a> to follow on Twitter. ������������������<br><br>Who are your favs? Comment below &amp; RT please!</p>&mdash; Peggy Rayzis ������������‍������ (@peggyrayzis) <a href="https://twitter.com/peggyrayzis/status/902651646483861511">August 29, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+++++
+
+Which got a really response from Bonnie that warmed my heart:
+
+++++
+<blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">Hi Peggy! ������ I&#39;m talking about <a href="https://twitter.com/GraphQL">@GraphQL</a> <a href="https://twitter.com/apollographql">@apollographql</a> <a href="https://twitter.com/neo4j">@neo4j</a> at <a href="https://twitter.com/AngularMix">@AngularMix</a> in Orlando in October, super excited! ✨ <a href="https://t.co/n8GuRlJbZk">https://t.co/n8GuRlJbZk</a></p>&mdash; Bonnie Brennan (@bonnster75) <a href="https://twitter.com/bonnster75/status/902659379476008961">August 29, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+++++
+
+And triggered an idea.
+As you might know, we're having a lot of fun showing the impressive engagement of developers in their communities (e.g. GraphQL, Neo4j, ...) in a single place
+by importing them into a "Community Graph".
+Usually it is really hard to follow the flurry of activity across Twitter, Slack, StackOverflow, GitHub, etc. to keep on top of whats happening.
+Especially if your community is growing quickly.
+
+So we scratched an itch and imported the activity for the Neo4j community into a single graph, which can then be queried and visualized and which is https://github.com/community-graph/documentation[accessible here^].
+
+We did the same for the GraphQL community, their data is also http://graphql.communitygraph.org/[accessible via GraphiQL^] and https://github.com/neo4j-graphql/graphql-community[documented here^].
+
+image::https://github.com/neo4j-graphql/graphql-community/raw/master/images/graphql-community-graph.jpg[width=400,link="http://graphql.communitygraph.org/"]
+
+So as we had all the activities of GraphQL of the last few months in our graph database, I thought it would be cool to use it to answer Peggys request.
+
+I googled for "gender api" and found http://gender-api.com which looked really nice and with 500 free monthly requests and a simple HTTP API.
+Perfect for my goal. 
+
+image::{img}/gender-api.jpg[]
+
+I tested a few of the names with that came back to Peggys request, unfortunately only a few got recommended: Peggy, Bonnie, Belén, Robin and Morgan.
+So I hoped that I could do better.
+
+I used the interactive check at the gender-api homepage, which resulted in these.
+I had to change the country to "US" as my default ("DE") didn't have the correct mapping for Robin and Morgan.
+
+// [%autowidth,opts="header",columns="a,m"]
+----
+| name | response
+| Peggy | {"name":"peggy","country":"US","gender":"female","samples":3015,"accuracy":99,"duration":"51ms"}
+| Bonnie | {"name":"bonnie","country":"US","gender":"female","samples":3984,"accuracy":98,"duration":"25ms"}
+| Morgan | {"name":"morgan","country":"US","gender":"female","samples":5956,"accuracy":76,"duration":"33ms"}
+| Belén | {"name":"belén","country":"US","gender":"female","samples":35,"accuracy":97,"duration":"64ms"}
+| Danielle | {"name":"danielle","country":"US","gender":"female","samples":12284,"accuracy":99,"duration":"47ms"}
+| Robin | {"name":"robin","country":"US","gender":"female","samples":8088,"accuracy":83,"duration":"31ms"}
+----
+
+Cool so I had some baseline data, I only gonna look at results with an accuracy of > 75 and at least 10 samples.
+
+I can execute the HTTP API like this: `+https://gender-api.com/get?key=<key>&country=US&name=peggy+`
+
+Back to our community graph, which you can access here: http://107.170.69.23:7474/browser/ using "graphql" as username and password.
+
+Let's just see if one of the women tweeting about GraphQL is in here, and show her tweets and their tags.
+
+[source,cypher]
+----
+MATCH (user:Twitter:User)-[:POSTED]->(t:Tweet)-[:TAGGED]->(tag:Tag) 
+WHERE user.screen_name = 'bonnster75'
+RETURN *
+----
+
+image::{img}/bonnie-tweets.jpg[]
+
+Now I wanted to test the gender api call with our known names.
+
+So we find twitter users by a list of screen-names, and split their name by space and take the first word.
+Which we then send to the "gender-api" API and get the result back as an map-value.
+We only want to return a few attributes from our user node.
+
+[source,cypher]
+----
+MATCH (user:Twitter:User) WHERE user.screen_name IN ['bonnster75','peggyrayzis','okbel','morgancodes','robin_heinze','danimman']
+WITH user, head(split(user.name," ")) as firstname
+CALL apoc.load.json("https://gender-api.com/get?key=<key>&country=US&name="+firstname) YIELD value
+RETURN user { .screen_name, .name, .followers, .statuses} as user_data, firstname, value;
+----
+
+This worked, only Morgan would probably not show up, b/c she has not tweeted.
+
+----
+| {"name":"Bonnie Brennan","screen_name":"bonnster75","followers":"467","statuses":"2831"} 
+| {"name":"bonnie","accuracy":"98","samples":"3984","country":"US","gender":"female"}                   
+
+| {"name":"Belén Curcio","screen_name":"okbel","followers":"3821","statuses":"35721"}
+| {"name":"belén","accuracy":"97","samples":"35","country":"US","gender":"female"}                      
+
+| {"name":"Morgan Laco","screen_name":"morgancodes","followers":null,"statuses":null}
+| {"name":"morgan","accuracy":"76","samples":"5956","country":"US","gender":"female"}                   
+----
+
+Now we want to find the "most active" women who tweet about GraphQL.
+A "score" could contain the number of tweets, and how often those have been favorited, retweeted or replied to.
+This is what we do, we find twitter accounts with tweets, compute our score per user and return the top 500 sorted by score.
+
+[source,cypher]
+----
+MATCH (u:Twitter:User)-[:POSTED]->(t:Tweet) 
+WITH u, count(*) as tweets, sum(t.favorites+size((t)<-[:RETWEETED|REPLIED_TO]-())) as score
+WHERE tweets > 5 AND tweets * score > 100
+RETURN u.name, u.screen_name, tweets, score 
+ORDER BY tweets * score DESC LIMIT 500
+----
+
+Looking at the results it also makes sense:
+
+----
+╒══════════════════════╤═════════════════╤═══════╤═══════╕
+│"u.name"              │"u.screen_name"  │"tweets"│"score"│
+╞══════════════════════╪═════════════════╪═══════╪═══════╡
+│"Sashko Stubailo"     │"stubailo"       │"538"  │"1567" │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"Apollo"              │"apollographql"  │"150"  │"1389" │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"ReactDOM"            │"ReactDOM"       │"221"  │"596"  │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"KOYCHEV.DE"          │"K0YCHEV"        │"309"  │"341"  │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"Graphcool"           │"graphcool"      │"84"   │"859"  │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"adeeb"               │"_adeeb"         │"179"  │"328"  │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"ReactJS News"        │"ReactJS_News"   │"93"   │"517"  │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"Max Stoiber"         │"mxstbr"         │"102"  │"450"  │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"Caleb Meredith"      │"calebmer"       │"135"  │"273"  │
+├──────────────────────┼─────────────────┼───────┼───────┤
+│"Lee Byron"           │"leeb"           │"53"   │"652"  │
+----
+
+Cool, now we can combine our two statements.
+To save some repeated API calls, I just store the gender information on the account (also the accuracy and samples) so that we can reuse it later.
+
+[source,cypher]
+----
+MATCH (u:Twitter:User)-[:POSTED]->(t:Tweet) 
+// name has have at least 2 parts, and gender not yet retrieved
+WHERE u.name contains " " AND NOT exists(u.gender)
+
+WITH u, count(*) AS tweets, sum(t.favorites+size((t)<-[:RETWEETED|REPLIED_TO]-())) AS score
+WHERE tweets > 5 AND tweets * score > 100
+
+WITH u, tweets, score, head(split(u.name," ")) as firstname
+ORDER BY tweets * score DESC LIMIT 500
+
+// call gender api
+CALL apoc.load.json("https://gender-api.com/get?key=<key>&name="+firstname) YIELD value
+
+// set result values as properties
+SET u.gender = value.gender, u.gender_meta = [value.accuracy,value.samples]
+RETURN count(*)
+----
+
+So we get our the 500 top accounts with a space in their name resolved via the API.
+
+Now we can look at our data, and hopefully find some accounts that we can recommend to Peggy.
+
+[source,cypher]
+----
+MATCH (u:Twitter:User)-[:POSTED]->(t:Tweet) 
+WHERE u.gender = "female" and u.gender_meta[0] > 75 and u.gender_meta[1] > 10
+
+WITH u, count(*) AS tweets, sum(t.favorites+size((t)<-[:RETWEETED|REPLIED_TO]-())) AS score
+ORDER BY tweets * score DESC LIMIT 50
+RETURN u { .screen_name, .name, .followers, .following, .statuses} as user, tweets, score;
+----
+
+[%autowidth,opts="headers"]
+|===
+| user                                                                                              | tweets | score | ok 
+| {name: "Danielle Man", statuses: 155, followers: 581, screen_name: "danimman"}                    | 38    | 76    | √  
+| {name: "Peggy Rayzis", statuses: 802, followers: 1870, screen_name: "peggyrayzis"}                | 28    | 86    | √  
+| {name: "Jess Telford", statuses: 5022, followers: 1241, screen_name: "jesstelford"}               | 37    | 42    | x  
+| {name: "Tracy Lee ladyleet", statuses: 53446, followers: 19030, screen_name: "ladyleet"}        | 13    | 74    | √! 
+| {name: "Bonnie Brennan", statuses: 2831, followers: 467, screen_name: "bonnster75"}               | 24    | 39    | √  
+| {name: "Ruby Inside", statuses: 4706, followers: 41121, screen_name: "RubyInside"}                | 6     | 78    | x  
+| {name: "Brittney Bond", statuses: 20753, followers: 310, screen_name: "_KarimaTounsya"}           | 31    | 15    | √! 
+| {name: "Jira Vinyoopongphan", statuses: 1558, followers: 243, screen_name: "thekamahele"}         | 21    | 22    | √! 
+| {name: "Laura Linda Laugwitz", statuses: 10007, followers: 1421, screen_name: "lauralindal"}      | 9     | 29    | √! 
+| {name: "Thea Lamkin", statuses: 882, followers: 580, screen_name: "thelamkin"}                    | 9     | 12    | √! 
+| {name: "Eve Porcello", statuses: 1334, followers: 626, screen_name: "eveporcello"}                | 8     | 13    | √! 
+| {name: "Nitya Narasimhan", statuses: 15764, followers: 3568, screen_name: "nitya"}                | 6     | 9     | √! 
+| {name: "Nastia Bratochkina", statuses: 327, followers: 88, screen_name: "Sestri4kina"}            | 7     | 6     | √! 
+| {name: "Bergé Greg", statuses: 3229, followers: 631, screen_name: "neoziro"}                      | 8     | 5     | x  
+| {name: "Samantha Demi", statuses: 93214, followers: 2311, screen_name: "queersorceress"}          | 6     | 5     | √! 
+| {name: "Jen Luker", statuses: 1731, followers: 468, screen_name: "knitcodemonkey"}                | 6     | 4     | √! 
+| {name: "Füsun Wehrmann", statuses: 924, followers: 570, screen_name: "fuesunw"}                   | 7     | 3     | √! 
+| {name: "Belén Curcio", statuses: 35721, followers: 3821, screen_name: "okbel"}                    | 18    | 1     | √  
+| {name: "Krisztina Hirth", statuses: 7605, followers: 394, screen_name: "YellowBrickC"}            | 6     | 3     | √! 
+| {name: "Berrak", statuses: 46891, followers: 1525, screen_name: "toggleModal"}                    | 6     | 2     | √! 
+| {name: "Hera Mudho", statuses: 1333, followers: 160, screen_name: "wuodaboge"}                    | 10    | 1     | x  
+| {name: "Brooke Smith", statuses: 460, followers: 93, screen_name: "BossOSmith"}                   | 7     | 1     | x  
+| {name: "Else if", statuses: 39079, followers: 1693, screen_name: "getelseif"}                     | 7     | 1     | x  
+| {name: "Ruby on Rails News", statuses: 3563, followers: 139, screen_name: "RubyonRailsNew1"}      | 11    | 0     | x  
+| {name: "Amelia Warner", statuses: 8641, followers: 2689, screen_name: "facetimeJS"}               | 11    | 0     | √! 
+| {name: "Lori Wilkins", statuses: 6278, followers: 565, screen_name: "webnerd_lw"}                 | 14    | 0     | √! 
+| {name: "Reme J", statuses: 38284, followers: 828, screen_name: "remelehane"}                      | 41    | 0     | x  
+| {name: "Hanène Maghrebi", statuses: 762, followers: 4300, screen_name: "SmartSemantics"}          | 6     | 0     | √! 
+| {name: "Nati Namvong", statuses: 7233, followers: 464, screen_name: "_nati"}                      | 12    | 0     | ?  
+| {name: "Kelly Goetsch", statuses: 878, followers: 417, screen_name: "KellyGoetsch"}               | 6     | 0     | x  
+| {name: "Piyali gradgospel", statuses: 2142, followers: 458, screen_name: "gradgospel"}          | 6     | 0     | √! 
+| {name: "Camilla AEscórcio", statuses: 14899, followers: 939, screen_name: "benedictusSit"}        | 9     | 0     | √! 
+|===
+
+Besides the funny (Ruby Inside, Else if) and the incorrectly classified (Jess,Brooke), we get a number of active women in the GraphQL community that were not recommended before: ladyleet, _KarimaTounsya, thekamahele, lauralindal, thelamkin, eveporcello and more. 
+
+I manually went over the screen-names, looked at these twitter profiles and set a check-mark √ for female accounts and an ! for new names.
+
+We found 22 women in total which is of course not a lot if you look at the totals, but hopefully a growing number.
+
+And I hope that Peggy, Bonnie and the others will engage with each other (and everyone else) and can encourage more women to become active in the GraphQL community.
+
+
+PS: We heard from Nikolas, the curator of @graphqlweekly, that our http://s3-eu-west-1.amazonaws.com/twigraphql/twigraphql.html["this week in GraphQL" overview page] helped them a lot, compiling the weekly newsletter. It also features an "Twitter Active" tab which should help you too to find people to follow.
+
+We're happy to offer the community graph service also to other communities, feel free to reach out to us via devrel@neo4j.com, if you're interested.

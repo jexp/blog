@@ -1,0 +1,132 @@
+Just a quick feedback.
+
+Each optional match spans up a new cardinality, so subsequent matches will be executed that many times.
+You see that already if you run the query with EXPLAIN that it explodes in terms of rows
+
+you should also turn your OPTIONAL matches (if you are only interested in the fact of a connection) into a where
+
+MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"})
+WHERE exists ((user)-[:COMMENTED]->()) AND exists ( (user)-[:FRIENDS_WITH]-() )  AND exists ( (user)-[:CURRENT_POST|NEXT_POST*..]->() ) 
+return user;
+It also doesn't make sense to return the user and the aggregation at the same time, like you did here: return user, COUNT(user) as count;
+
+
+To merge your statements is actually pretty easy as most of the information is available as degree on the user node
+
+MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"}) 
+RETURN user, size((user)-[:FRIENDS_WITH]-()) as friends, 
+                size( (user)-[:COMMENTED]->() ) as comments,
+                size( (user)-[:CURRENT_POST|NEXT_POST*..10]->() ) as shares;
+
+In other cases you should use an intermediate aggregation like this:
+
+MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"})
+OPTIONAL MATCH (user)-[friend_links:FRIENDS_WITH]-()
+WITH user, COUNT(friend_links) as friends
+OPTIONAL MATCH (user)-[shares:CURRENT_POST|NEXT_POST*..]->()
+WITH user, friends, COUNT(shares) as shares
+OPTIONAL MATCH (user)-[comments:COMMENTED]->()
+return user, friends, shares, COUNT(comments) as comments;
+
+Which everytime reduces the intermediate cardinality back to 1 again
+
+
+HTH
+
+
+Michael
+
+
+On Mon, Oct 17, 2016 at 8:22 PM, Ryan Boyd <ryan.boyd@neotechnology.com> wrote:
+Sorry Thomas, this was our big GraphConnect conference week. 
+
+I'm on vacation today and am traveling, but have cc'd the other DevRel folks. Both may be on planes today but if not may be able to look at your query. Thanks for all the details there. 
+
+In the future, it's best to submit through our support team if you're an enterprise customer or via StackOverflow if not. 
+
+Gabe, cc'd, runs our professional services team. You can work with him or your sales rep to investigate that. 
+
+Cheers
+Ryan
+
+
+On Monday, October 17, 2016, Thomas Kraus <admin@micit.com> wrote:
+Ryan,
+
+Still looking for some help and professional services.
+
+As Head of Developer Relations I need your help with
+that. What can we do here?
+
+
+
+Thanks,
+
+-Thomas Kraus
+t.kraus@micit.com
+
+
+I am running:
+	Version: 3.0.6
+	Name: graph.db
+	Size: 185.44 MiB
+
+I have a DB that contains users:
+	There are 4522 users in the DB
+
+One of them is "Sandra Kraus Lima". She has a unique uuid on and for the
+User nodes it has been indexed on this uuid.
+
+She has 557 friends.
+
+	MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"})
+	OPTIONAL MATCH (user)-[friend_links:FRIENDS_WITH]-()
+	return user, COUNT(friend_links) as count;
+
+	This created "Cypher version: CYPHER 3.0, planner: COST, runtime: INTERPRETED. 560 total db hits in 101 ms"
+
+She also has 18 blog entries:
+
+	MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"})
+	OPTIONAL MATCH (user)-[shares:CURRENT_POST|NEXT_POST*..]->()
+	return user, COUNT(shares) as count;
+
+	This created "Cypher version: CYPHER 3.0, planner: COST, runtime: INTERPRETED. 39 total db hits in 134 ms"
+
+She also has made 112 comments:
+
+	MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"})
+	OPTIONAL MATCH (user)-[comments:COMMENTED]->()
+	return user, COUNT(comments) as count;
+
+	This created "Cypher version: CYPHER 3.0, planner: COST, runtime: INTERPRETED. 115 total db hits in 100 ms"
+
+So far so good. The challenge is now when I put all these pieces together to return all the data in one.
+The below does not actually return all the data as I removed the WITH statement to reduce the query size.
+
+	MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"})
+	OPTIONAL MATCH (user)-[comments:COMMENTED]->()
+	OPTIONAL MATCH (user)-[shares:CURRENT_POST|NEXT_POST*..]->()
+	OPTIONAL MATCH (user)-[friend_links:FRIENDS_WITH]-()
+	return user, COUNT(user) as count;
+
+	This created "Cypher version: CYPHER 3.0, planner: COST, runtime: INTERPRETED. 1129187 total db hits in 886 ms"
+
+	Please note that is 1,129,187 in other words well over 1 millon DB hits. The DB I am using is slightly dated and
+	and the production server where there are now over 6000 users it goes to almost 4 million db hits. This just does
+	not seem right.
+
+Furthermore, if I remove the "COUNT(user) as count" the call never comes back. It hangs.
+
+	MATCH (user:User { uuid: "92d6dd3a-f67b-480e-8566-be9ad082c14f"})
+	OPTIONAL MATCH (user)-[comments:COMMENTED]->()
+	OPTIONAL MATCH (user)-[shares:CURRENT_POST|NEXT_POST*..]->()
+	OPTIONAL MATCH (user)-[friend_links:FRIENDS_WITH]-()
+	return user;
+
+Something is very much amiss here. I need some help to understand what the issue is here. Is is:
+
+	- A bug in the DB?
+	- A bad query?
+	- A suboptimal implementation (indices and all)?
+	- Something else?

@@ -1,0 +1,175 @@
+= Charting Neo4j 3.0
+:allow-uri-read:
+
+== Chart not Graph
+
+As you probably know, we people at Neo4j really want to discern graphs from charts.
+It's too easy to mix the two up in spoken language and "graph paper" doesn't help.
+If it's a chart like a bar-, pie- or line-chart then it's not a graph but a visualisation of data across multiple axes (mostly 2 - x and y).
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/img/charts-vs-graphs.png[]
+
+Fortunately the creators of http://chartjs.org/[chart.js] didn't call their impressive Javascript library graph.js :)
+
+Because that's what we gonna use today in our little experiement.
+
+== How did we get here
+
+Some of you might still remember webadmin our first web based Neo4j interface which was pretty cool for its time and had a number of cool features.
+One feature many people loved but left everyone confused was the chart at the beginning showing the growth of data volume (nodes, relationships and properties) in your graph over time.
+
+That's especially nice, to see progress when your importing data or have your production app running.
+
+image::http://fooo.fr/~vjeux/github/github-recommandation/db/doc/manual/html/images/operations/webadmin-charts.png[]
+
+But it was also confusing because it didn't actually show the counts of entites but the total storage file size, which can contain empty segments if you delete data.
+So people were wondering, "Why does this thing grow or not go down, when I actually delete data. Or why doesn't it grow when I create data."
+
+With Neo4j 3.0 we finally removed webadmin (RIP) but there are still a few things missing in Neo4j Browser.
+
+== New Features
+
+As there are some cool new features which come together, I thought it would be nice to give people the charting of graph data volume back while also combining those nice new features.
+
+* Fast Entity Counts
+* User Defined and Built-In Procedures
+* Binary Protocol
+* Official Drivers (incl. JavaScript)
+
+And of course chart.js, your friendly charting library.
+
+image::http://www.chartjs.org/img/chartjs-logo.svg[align=center,link=http://chartjs.org/]
+
+
+== Fast counting of entities
+
+With Neo4j 3.0 we provide counts of entites from Cypher no longer by actually counting them but by inspecting our transactional database statistics.
+Many databases have database statistics, but few keep them transactionally up to date, to have always accurate and reliable counts.
+
+So now when you issue Cypher statements like the following, you'll get the results back in milliseconds.
+
+[source,cypher]
+----
+MATCH () RETURN count(*);
+MATCH (n) RETURN count(*);
+MATCH (:Person) RETURN count(*);
+
+MATCH ()-->() RETURN count(*);
+MATCH ()-[:FOLLOWS]->() RETURN count(*);
+MATCH (n)-[:LIKES]->(m) RETURN count(*);
+----
+
+== Built-in and User Defined Procedures
+
+Calling procedures from Cypher is another really cool feature in 3.0.
+You can use the built in procedures to get information about procedures (how meta), indexes, constraints, and entity meta information like lablels, relationship types and property-keys.
+
+[source,cypher]
+----
+CALL db.relationshipTypes();
+
+// integrated call
+CALL db.labels() YIELD label
+RETURN label ORDER BY label;
+
+CALL dbms.procedures();
+
+// complex call, list procedures by package
+CALL dbms.procedures() YIELD name
+WITH split(name,".") as parts
+RETURN parts[0..-1] as package, count(*), collect(parts[-1]) as procedures
+ORDER BY count(*) DESC;
+----
+
+It's much more fun to write your own procedures or actually to contribute to the large collection of procedures we created in the https://github.com/neo4j-contrib/neo4j-apoc-procedures[APOC procedures community project].
+
+But I digress.
+So we can use the built in procedures to get information about labels and relationship types. Nice!
+Combined with the counting queries, we can not only get total counts but also fast counts by label and relationship type.
+
+== Binary Protocol and Official Drivers
+
+The next big thing with Neo4j 3.0 is our binary protocol "bolt", which is based on PackStream a extension of MessagePack.
+
+With the binary protocol, we also provide officially supported drivers for http://neo4j.com/developer/language-guides#bolt-drivers[.Net, Python, Java and JavaScript] (http://neo4j.com/docs/developer-manual/current/#driver[detailed documentation]) which are all Apache v2 licensed and can be found on https://github.com/neo4j?query=driver[GitHub].
+
+Our awesome contributor community also provided bolt drivers for PHP (thanks http://twitter.com/ikwattro[Christophe]) and is working on versions for Ruby and Go.
+
+To integrate with chart.js, I just needed the JavaScript driver, which works both with node.js and in the browser, it's available via Bower and https://npmjs.org/package/neo4j-driver[NPM].
+
+== Goals
+
+I want to provide an auto-updating chart of all the nodes in total and by label as well as the relationships in total and by relationship type.
+
+Also the user should be able to run free form queries to be charted.
+
+The https://gist.github.com/jexp/f4ae19be0e06d8a19867f294e09f0759[source code is available] under the MIT license. 
+
+== Implementation Database Statistics
+
+I haven't used chart.js before and my JS skills are pretty bad, so bear with me. Here are the basics of what I did.
+
+I pulled all Javascript libraries and CSS files from their CDNs. 
+For the Neo4j Javascript Driver I used the CDN of rawgit.
+So I actually don't need Bower or any other Hipster JavaScript build setup that downloads a Gigabyte of stuff onto my disk.
+
+These are my dependencies:
+
+* neo4j-driver
+* Chart.js
+* JQuery
+* Bootstrap
+
+I started with a basic bootstrap template and added a bunch of form fields and a button for the database connection, refresh frequency and to toggle the auto-updating.
+
+I just followed the tutorial for chart.js starting with a `<canvas>` element that's turned into a line-chart.
+For the statistics-view I wanted to use a logarithmic scale for the counts and a time scale for the measurements.
+
+Here are the steps that I do:
+
+0. button is pressed
+1. get the URL and password from the form fields
+2. instantiate a driver with those credentials and get a session
+3. use the session to query for the total counts with `MATCH () RETURN count(*)` and use a promise to receive the results and update the chart with the new information
+4. the chart updater is a separate function which I reuse for all the named updates of information that happens at the same time
+5. query for all label names via the `db.labels()` procedure
+6. create a second session and get the count for each label
+7. do the same for relationships
+8. the chart update also includes picking a color and making sure we only display 25 results in total, moving them to the left
+
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/img/neo-charts-components.png[]
+
+Here is the code:
+
+.Statistics Queries
+[source,javascript]
+----
+include::https://gist.githubusercontent.com/jexp/f4ae19be0e06d8a19867f294e09f0759/raw/index.html[tags=stats-query]
+----
+
+.Chart Update
+[source,javascript]
+----
+include::https://gist.githubusercontent.com/jexp/f4ae19be0e06d8a19867f294e09f0759/raw/index.html[tags=chart-update]
+----
+
+The chart update code is a bit awkward because of the datastructures chart.js uses and the way it handles updates.
+I spent 2 days figuring out a bug, that was caused by initializing a new data array with zeros. (1's work).
+
+== Implementation Free Query
+
+As a bonus feature I wanted to allow free querying, i.e. you enter a Cypher query that returns a stream of values where the first column is the X-Axis value and all subsequent columns are Y-axis values.
+
+So I added that in a similar fashion.
+
+== Result
+
+As it is only a single html page, I was not sure it was worth a repository, so just put it in a https://gist.github.com/jexp/f4ae19be0e06d8a19867f294e09f0759[GitHub Gist], which I can host with rawgit.com which is a pretty neat service to host html/css/js/json files with their correct mime-types. They even have a CDN.
+
+As the driver connects via websockets, there are also no CORS issues. Just provide the password and URL of the Neo4j installation you want to query and you're ready to go.
+
+Visit http://bit.ly/neo-charts to see it live and in action.
+The results below stem from importing a subset of the http://neo4j.com/blog/analyzing-panama-papers-neo4j/[Panama Papers] :)
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/img/neo4j-charts.png[link=http://bit.ly/neo-charts]

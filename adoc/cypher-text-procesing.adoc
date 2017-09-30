@@ -1,0 +1,47 @@
+= Text Processing and Import with Cypher
+
+I often tout Cypher as general programming language, and sometimes I'm impressed myself by all the things you can do.
+
+Today we want to look at some of the text processing functionality, which might help you with data import and also querying.
+
+I'm especially looking at text processing capabilities in Cypher.
+
+Sometimes I will refer to the [APOC procedure and function] library, which brings along a host of additional text functions,
+
+
+http://stackoverflow.com/questions/42522192/creating-a-string-from-a-path/42530434#42530434
+
+____
+up vote
+0
+down vote
+favorite
+I have a chain of nodes, e.g.
+
+{Name: 'X'}->{Name: 'Y'}->{Name: 'Z'}
+and I'd like to create a string representing the path in cypher (I know I can do it client-side but I want to do it in a query) that would look like this:
+
+'X->Y->Z'
+is that feasible? I've investigated use of collect() and UNWIND, and have googled till I'm blue in the face
+
+thoughts?
+
+as an addendum (and to make the problem more difficult) my query is going to return a collection of paths (a tree, a DAG), so I'll need to create a string for each of the paths in the tree
+____
+
+http://console.neo4j.org/
+match p=(n:Crew)-[r:KNOWS*]-(m) where n.name='Neo' RETURN apoc.text.join([n in nodes(p) | n.name],"->")
+
+----
+REDUCE is your friend here:
+
+WITH reduce(s="",n in nodes(p) | s+n.name+"->") as str 
+RETURN substring(str,0,length(str)-2)
+or if you want to save the extra operation
+
+RETURN reduce(s=head(nodes(p)).name, n in tail(nodes(p)) | s+"->"+n.name)
+
+// or with APOC
+RETURN apoc.text.join([n in nodes(p) | n.name],"->")
+----
+

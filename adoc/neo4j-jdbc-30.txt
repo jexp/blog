@@ -1,0 +1,94 @@
+= The new Neo4j-JDBC driver 3.0 release - solves many your Neo4j data integration questions
+
+Many of you have a wide variety of requirements to integrate Neo4j with other data-source, BI, ETL and Reporting tools and specific system components.
+While our new drivers allow you quickly to write such integrations in any of the supported languages, more often than not, you just want to use a standard library, 
+some configuration and the Cypher statements needed for your use-case.
+
+Meet the Neo4j-JDBC-Driver version 3.0, our newest contributorss effort, mainly developed by our [Italian Partner Larus BA] from beautiful Venice.
+
+== JDBC, the Powerhorse of Data Integration
+
+The JDBC standard is almost as old as Java itself and has evolved beyond database access for Java developers to a general integration component that allows tools of all kinds to interact with your trusted database.
+Originally built for relational databases, it has a lot of specifics around them (tables, schema etc) but in the essence covers the following aspects:
+
+* send parameterized textual query statements to a database
+* receive tabular results
+* provide result metdata and profiling
+* handle connection strings, with configuration options
+* support authentication
+* provide manual or automatic transaction managment.
+
+All of these are necessary regardless if your database is relational or not.
+Thats why also for a number of other NoSQL databases jdbc drivers where developed to ease integration (e.g. cassandra, mongodb).
+
+== History
+
+Our first Neo4j-JDBC driver started in https://rickardoberg.wordpress.com/2011/12/19/creating-a-jdbc-driver-for-neo4j/[Dec 2011], that was more than 4 years ago.
+It built upon the http endpoints and was just a spare time activity.
+
+This time we had the shiny new Neo4j 3.0 release with its officially supported drivers and our trusted and active partner Larus BA from Italy to http://www.larus-ba.it/en/blog/tag/neo4j-jdbc-en/[jump to Action].
+
+Due to requirements of their customers to integrate Neo4j with *Pentaho, JasperReports and Talend*, they saw the opportunity to work with us on creating this new JDBC driver from scratch using the latest APIs and technologies.
+
+We started with the implementation for the Bolt Protocol, then added a http transport for older Neo4j installations and even an embedded transport that can work directly with store-files on disk.
+
+After the development and http://neo4j.com/blog/couchbase-jdbc-integrations-neo4j-3-0/[presentation of an intermediate state at GraphConnect Europe], we were able to release several milestones and release candidates.
+
+++++
+<iframe src="//www.slideshare.net/slideshow/embed_code/key/3IAD4RgWOBqV3E" width="595" height="485" frameborder="0" marginwidth="0" marginheight="0" scrolling="no" style="border:1px solid #CCC; border-width:1px; margin-bottom:5px; max-width: 100%;" allowfullscreen> </iframe>
+++++
+
+A lot of testing with many of the integration tools was done, with a lot of additional help from other partners like http://www.tiq-solutions.de/en/business/tiq-management/ralf-becher/[Ralf Becher from TiQ solutions], https://www.linkedin.com/in/florentbiville[Florent Biville] the author of LiquiGraph and our trusted field engineers http://armbruster-it.de[Stefan Armbruster] and http://www.bsimard.com/blog[Benoit Simard]
+
+*And today we're happy to announce the general availability of the 3.0 version of Neo4j-JDBC for your integration needs.*
+
+You can:
+
+* download the TODO [JAR-library you need for your tools]
+* get the http://github.com/neo4j-contrib/neo4j-jdbc[source code] and contribute back
+* http://github.com/neo4j-contrib/neo4j-jdbc[raise issues and provide feedback]
+
+Following we want to demonstrate for some of the tools how you would get set up to integrate with Neo4j, most of the queries based on our movies data set.
+
+== Tools & Demos
+
+TODO similar to: http://neo4j.com/blog/cypher-jdbc-tools-testing-results/
+
+
+=== Squirrel SQL
+
+=== Pentaho
+
+=== Talend
+
+=== Matlab
+
+=== Jasper Reports
+
+=== BIRT
+
+=== APOC
+
+image::[width=400,float=right]
+
+And to go totally meta, we can of course also use our APOC procedures library to query a Neo4j database via JDBC.
+Just place the neo4j-jdbc-3.0.jar into your `$NEO4J_HOME/plugins` directory and restart your server to pick it up.
+
+Then you can run 
+
+[source,cypher]
+----
+CALL apoc.load.jdbc("jdbc:neo4j:bolt//localhost", "MATCH (a:Actor)-[:ACTED_IN]->(m:Movie) RETURN a.name, m.title")
+----
+
+
+////
+To visualize your results as a graph you can use virtual nodes and relationships
+
+[source,cypher]
+----
+CALL apoc.load.jdbc("jdbc:neo4j:bolt//localhost", "MATCH (a:Actor)-[:ACTED_IN]->(m:Movie) RETURN a.name as name, m.title as title") YIELD value
+WITH collect({value) as data
+CALL apoc.create.vNodes
+----
+////

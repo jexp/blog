@@ -1,0 +1,19 @@
+= Sampling Metadata with Cypher
+
+call db.labels()
+call db.relationshipTypes()
+
+MATCH (n:Officer) WHERE size((n)--()) < 1000
+WITH n LIMIT 100
+WITH collect(n) as nodes,
+     reduce(p=[], keys IN collect(distinct keys(n)) | 
+            reduce(a=p, k in keys | case when k in a then a else a + [k] end)) as properties
+// optional only if you need a sample of property-values for types
+WITH nodes, head(collect([k in properties | [k,head(nodes)[k]]])) as properties
+UNWIND nodes as n
+MATCH (n)-[r]-() 
+WITH n, properties, type(r) as type, n = startNode(r) as out, count(*) as count
+WITH properties, type,out, avg(count) as avg, max(count) as max, min(count) as min
+RETURN "Officer" as label, properties, collect({type:type, out:out, avg:avg,min:min,max:max}) as rel_info;
+
+

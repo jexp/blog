@@ -1,0 +1,163 @@
+= Queries covered by the Cypher Compiled Runtime in Neo4j 3.2
+
+Neo4j extends the previously introduced compiled runtime for Cypher with more capabilities.
+As not all possible queries are covered yet, this article should help determine if your queries can benefit from the compiled runtime and what you could tweak to make it cover more cases.
+
+The following Clauses and operations are covered by the compiled runtime, leading to much more efficient execution and higher performance.
+
+This is especially effective if you return large result volumes from the graph or with sorting and aggregation.
+
+You can determine if a query uses the compiled or interpreted runtime by prefixing it with `EXPLAIN` or `PROFILE`.
+
+You can also force a certain runtime by using `CYPHER RUNTIME=COMPILED/INTERPRETED MATCH ....`
+If the compiled runtime cannot handle your query, it will fall-back to the interpreted runtime for execution.
+
+It might be worthwhile to examine if any of your core, critical queries can be adapted to use the compiled runtime and perhaps move some work (like aggregation) into pre- or post-processing.
+
+== Compiled Clauses and Operations
+
+=== Clauses
+
+* `WITH`
+* `UNWIND` (also with parameters)
+* `ORDER BY` (only for `RETURN`, not `WITH`)
+* SKIP LIMIT (also with parameters)
+
+=== Node Lookups
+
+* by label
+* by label and property (also via index lookup)
+* by id (but *not by* parameter)
+* by label property IN list (also parameters)
+* INDEX hints
+
+=== Pattern Matches
+
+match of simple patterns with 
+
+* typed relationships
+* multiple relationships
+* untyped relationships
+* directed, undirected
+* anonymous nodes
+* `OPTIONAL MATCH`
+
+=== Predicates
+
+* Equality check
+* `NOT`
+* label predicate `n:Person`
+* `AND` operator for property predicates
+* `OR` operator on same property that's rewritten into a `IN list`
+
+=== Expressions
+
+* Property access like `m.title` and `m["title"]`
+* Property comparison with index
+
+* backticked identifiers
+* list and map literals
+* math operators `<, >, <>, ...` *in expressions only*, not in predicates!!
+* math computation in expressions
+* list concatenation `[1]+[2]`
+
+=== Projection/Aggregation
+
+* Aggregation, but only *`count(n)`* and *`count(distinct n)`*
+* DISTINCT 
+
+=== Functions
+
+* Functions like `id(n)`, `type(rel)`
+
+== Example Queries covered by the compiled runtime
+
+.Simple query
+[source,cypher]
+----
+EXPLAIN 
+MATCH (p:Person) 
+WHERE p.name IN $names
+WITH p ORDER BY p.name 
+MATCH (p)-[:ACTED_IN]->(m:Movie) 
+RETURN p.name, count(m) 
+SKIP 10 LIMIT 100
+----
+
+.Recommendation
+[source,cypher]
+----
+EXPLAIN 
+MATCH (user:User)-[:BOUGHT]->(product)<-[:BOUGHT]-(peer)-[:BOUGHT]->(reco) 
+WHERE user.name = $userName AND user <> peer
+RETURN reco,count(peer) as freq
+ORDER BY freq DESC LIMIT 10
+----
+
+.Data Transfer (e.g. 1bn relationships)
+[source,cypher]
+----
+EXPLAIN 
+MATCH (sender:User)-[:SENT]->(t:MoneyTransfer)-[:RECEIVED]-(receiver:User) 
+RETURN id(sender) as source, t.value, id(receiver) as target
+----
+
+== NON-Compiled Clauses and Operations
+
+=== Clauses
+
+* mutation / update queries
+* UNION (ALL)
+* LOAD CSV
+* FOREACH
+* Procedure calls
+
+=== Node Lookups
+
+* property comparison when there is no index !
+* `MATCH (n) WHERE id(n) IN list`
+
+=== Pattern Matches
+
+* variable length patterns
+* path assignment
+
+=== Predicates
+
+* math operators `<, >, <>, ...` in predicates!!
+* `OR` predicates
+* pattern predicates
+* string operators: `CONTAINS, STARTS WITH, ENDS WITH`
+* regular expressions
+* exists
+* `IS NULL`
+* list predicates `all(), none(), single(), none() `
+
+=== Expressions
+
+* `CASE`
+* list slices `list[0]` or `list[0..10]`
+* list comprehensions, extract, reduce, filter
+* pattern comprehensions
+* get-degree: `size((n)-->())`
+
+=== Projection/Aggregation
+
+* other aggregation functions than `count(n)`
+
+=== Functions
+
+* `coalesce`
+* `size()`
+* `substring`
+* `range`
+* math functions
+* head, tail
+* `nodes(path), rels(path), length(path)`
+* properties(n), labels(n)
+* startNode(r), endNode(r)
+* toInt(), toString(), toBoolean()
+* timestamp()
+* keys(m)
+* string functions, like `split, length, trim` etc.
+* `point(), distance()`
