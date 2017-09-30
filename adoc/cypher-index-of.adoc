@@ -1,0 +1,21 @@
+== Poor Mans "indexOf"
+
+Index-of is the same as the length of the string before the first occurence of the term
+So if we split our string by the term, it would be the length of the first splice.
+
+RETURN length(split(toLower(string,"term")[0]);
+
+If we wanted all indexs it would be another "reduce"
+
+WITH split(toLower(string,"term") as parts
+RETURN reduce(i=[],x in range(0,length(parts)-2) | i + [coalesce(i[x-1],0) + len(parts[x]) + length(term)] )
+
+
+
+START u=node:node_auto_index("fullName:*jay*") 
+MATCH (u:User) 
+WITH distinct u
+RETURN {firstName : u.firstName , lastName : u.lastName, fullName : u.fullName, profilePicture : u.profilePicture, id : u.id} as user
+ORDER BY length(split(toLower(u.fullName,"jay")[0]);
+
+

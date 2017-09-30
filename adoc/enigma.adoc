@@ -1,0 +1,25 @@
+= Enigma - Cypher Optmization Decision Tree / Human Planner Engine
+
+* run query, get plan & profile / explain
+* analyze query / runtime
+* decision tree
+
+== My query is slow / doesn't work
+
+* slow -> profile
+* doesn't work 
+
+== What are you doing
+
+* read / update / import
+
+== Import
+
+* CSV data quality
+* Check row-count
+* Sample first rows as array, as map
+
+* Eager
+* Periodic Commit
+
+

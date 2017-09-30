@@ -1,0 +1,20 @@
+= Graph Projections and Virtual Graphs
+
+History of schema
+
+
+
+WITH ["Andres","Wes","Rik","Mark","Peter","Kenny","Michael","Stefan","Max","Chris"] AS names
+UNWIND names as name
+call apoc.create.vNode(["Person"],{name:name}) yield node
+WITH names, size(names) as len, apoc.map.groupBy(collect(node),"name") as nodes
+UNWIND range(1,42) as idx
+CALL apoc.create.vRelationship(nodes[names[toInt(rand()*len)]],"KNOWS",{},nodes[names[toInt(rand()*len)]]) yield rel
+RETURN nodes,rel;
+
+
+WITH ["Andres","Wes","Rik","Mark","Peter","Kenny","Michael","Stefan","Max","Chris"] AS names
+
+Graph Projections for algortithms
+
+use cases jqa

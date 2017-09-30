@@ -1,0 +1,310 @@
+= The Meme Graph
+
+Saturday night after not enough drinks, I came across these tweets by @LeFloatingGhost.
+
+++++
+<blockquote class="twitter-tweet" data-lang="en"><p lang="und" dir="ltr"><a href="https://twitter.com/neo4j">@neo4j</a> <a href="https://t.co/sAGMSmljGf">pic.twitter.com/sAGMSmljGf</a></p>&mdash; Hannah Ward (@LeFloatingGhost) <a href="https://twitter.com/LeFloatingGhost/status/832678918482075649">February 17, 2017</a></blockquote>
+
+<blockquote class="twitter-tweet" data-lang="en"><p lang="und" dir="ltr"><a href="https://twitter.com/mesirii">@mesirii</a> <a href="https://t.co/Csbyqf5dxG">pic.twitter.com/Csbyqf5dxG</a></p>&mdash; Hannah Ward (@LeFloatingGhost) <a href="https://twitter.com/LeFloatingGhost/status/832699676323229697">February 17, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+++++
+
+
+They definitely look like a meme graph.
+
+We can do that too
+
+{img}/neo4j-memes.gif[Animated GIF (15M)]
+
+== Find us some memes
+
+http://lmgtfy.com/?q=csv+meme+github
+
+There is this really nice CSV from Reddit of the top memes around:
+
+https://github.com/umbrae/reddit-top-2.5-million/blob/master/data/memes.csv
+
+We want to grab the raw URL: https://raw.githubusercontent.com/umbrae/reddit-top-2.5-million/master/data/memes.csv
+
+
+*And use an empty Neo4j Sandbox from http://neo4jsandbox.com.*
+
+== What's the data?
+
+=== Check CSV
+
+[source,cypher]
+----
+WITH 'https://raw.githubusercontent.com/umbrae/reddit-top-2.5-million/master/data/memes.csv' as url
+LOAD CSV WITH HEADERS FROM url AS row
+RETURN count(*);
+----
+
+
+[source,cypher]
+----
+WITH 'https://raw.githubusercontent.com/umbrae/reddit-top-2.5-million/master/data/memes.csv' as url
+LOAD CSV WITH HEADERS FROM url AS row
+RETURN row limit 10;
+----
+
+== Load them memes
+
+[source,cypher]
+----
+WITH 'https://raw.githubusercontent.com/umbrae/reddit-top-2.5-million/master/data/memes.csv' as url
+LOAD CSV WITH HEADERS FROM url AS row
+WITH row LIMIT 100
+CREATE (m:Meme) SET m=row // we take it all into Meme nodes
+----
+
+=== Get some memes
+
+[source,cypher]
+----
+MATCH (m:Meme) return m limit 25;
+----
+
+//graph_result
+
+
+[source,cypher]
+----
+MATCH (m:Meme) return m.id, m.title limit 5;
+----
+//table
+
+== But we want the words !
+
+Let's grab the first meme and get going.
+
+=== Split the text into words.
+
+[source,cypher]
+----
+MATCH (m:Meme) WITH m limit 1
+RETURN split(m.title, " ") as words;
+----
+//table
+
+=== Shout it aloud
+
+[source,cypher]
+----
+MATCH (m:Meme) WITH m limit 1
+RETURN split(toUpper(m.title), " ") as words;
+----
+//table
+
+== Remove Punctuation
+
+Create an array of punctuation with split on empty string.
+
+[source,cypher]
+----
+return split(",!?'.","");
+----
+
+//table
+
+=== And replace each of the characters with nothing ''
+
+[source,cypher]
+----
+return reduce(s="a?b.c,d", c IN split(",!?'.","") | replace(s,c,''));
+----
+//table
+
+=== We got us some nice words
+
+[source,cypher]
+----
+MATCH (m:Meme)  WITH m limit 1
+// lets split the text into words
+RETURN split(reduce(s=toUpper(m.title), c IN split(",!?'.","") | replace(s,c,'')), " ") as words;
+----
+
+//table
+
+== Enough words, where are the nodes?
+
+=== Let's create some word nodes 
+
+(merge does get-or-create)
+
+//setup
+//output
+[source,cypher]
+----
+MATCH (m:Meme)  WITH m limit 1
+WITH split(reduce(s=toUpper(m.title), c IN split(",!?'.","") | replace(s,c,'')), " ") as words, m
+MERGE (a:Word {text:words[0]})
+MERGE (b:Word {text:words[1]});
+----
+
+=== Our first two words
+
+[source,cypher]
+----
+MATCH (n:Word) RETURN n;
+----
+//graph_result
+
+=== Unwind the ra(n)ge
+
+But we want all in the array, so let's unwind a range.
+
+//setup
+//output
+[source,cypher]
+----
+MATCH (m:Meme)  WITH m limit 1
+WITH split(reduce(s=toUpper(m.title), c IN split(",!?'.","") | replace(s,c,'')), " ") as words, m
+
+UNWIND range(0,size(words)-2) as idx // turn the range into rows of idx
+
+MERGE (a:Word {text:words[idx]})
+MERGE (b:Word {text:words[idx+1]});
+----
+
+[source,cypher]
+----
+MATCH (n:Word) RETURN n;
+----
+//graph_result
+
+== No Limits
+
+//setup
+//output
+[source,cypher]
+----
+MATCH (m:Meme) WITH m // no limits
+WITH split(reduce(s=toUpper(m.title), c IN split(",!?'.","") | replace(s,c,'')), " ") as words, m
+
+UNWIND range(0,size(words)-2) as idx // turn the range into rows of idx
+
+MERGE (a:Word {text:words[idx]})
+MERGE (b:Word {text:words[idx+1]});
+----
+
+
+[source,cypher]
+----
+MATCH (n:Word) RETURN count(*);
+----
+//table
+
+== Chain up the memes
+
+Connect the words via :NEXT and store the meme-ids on each rel in an `ids` property
+
+And for the first word (idx = 0) let's also connect the Meme node to the Word `a`
+
+//setup
+[source,cypher]
+----
+MATCH (m:Meme) WITH m 
+WITH split(reduce(s=toUpper(m.title), c IN split(",!?'.","") | replace(s,c,'')), " ") as words, m
+UNWIND range(0,size(words)-2) as idx // turn the range into rows of idx
+MERGE (a:Word {text:words[idx]})
+MERGE (b:Word {text:words[idx+1]})
+
+// Connect the words via :NEXT and store the meme-ids on each rel in an `ids` property
+MERGE (a)-[rel:NEXT]->(b) SET rel.ids = coalesce(rel.ids,[]) + [m.id]
+
+// to later recreate the meme along the next chain
+// connect the first word to the meme itself
+WITH * WHERE idx = 0
+MERGE (m)-[:FIRST]->(a);
+----
+
+*Yay done!*
+
+[source,cypher]
+----
+MATCH (n:Word)
+RETURN n LIMIT 33;
+----
+//graph_result
+
+== Which words appear most often
+
+[source,cypher]
+----
+MATCH (w:Word)
+WHERE length(w.text) > 4
+RETURN w.text, size( (w)--() ) as relCount
+ORDER BY relCount DESC LIMIT 10;
+----
+//table
+
+ifndef::env-graphgist[]
+----
+╒══════════════════╤══════════╕
+│"w"               │"relCount"│
+╞══════════════════╪══════════╡
+│{"text":"AFTER"}  │"56"      │
+├──────────────────┼──────────┤
+│{"text":"REDDIT"} │"34"      │
+├──────────────────┼──────────┤
+│{"text":"ABOUT"}  │"33"      │
+├──────────────────┼──────────┤
+│{"text":"TODAY"}  │"33"      │
+├──────────────────┼──────────┤
+│{"text":"SCUMBAG"}│"32"      │
+├──────────────────┼──────────┤
+│{"text":"EVERY"}  │"31"      │
+├──────────────────┼──────────┤
+│{"text":"FIRST"}  │"30"      │
+├──────────────────┼──────────┤
+│{"text":"ALWAYS"} │"28"      │
+├──────────────────┼──────────┤
+│{"text":"FRIEND"} │"27"      │
+├──────────────────┼──────────┤
+│{"text":"THOUGHT"}│"24"      │
+└──────────────────┴──────────┘
+----
+endif::env-graphgist[]
+
+== Now let's find our memes again
+
+[source,cypher]
+----
+// first meme
+MATCH (m:Meme) WITH m limit 1
+// from the :FIRST :Word follow the :NEXT chain
+MATCH path = (m)-[:FIRST]->(w)-[rels:NEXT*..15]->() // let's follow the chain of words starting 
+// from the meme, where all relationships contain the meme-id
+WHERE ALL(r in rels WHERE m.id IN r.ids)
+RETURN *;
+----
+
+//graph_result
+
+ifndef::env-graphgist[]
+image::{img}/memegraph.jpg[]
+endif::env-graphgist[]
+
+=== Show meme by id
+
+We can also get meme from the CSV list, 
+e.g. id '1kc9p2' - 'As stupid as memes are they can actually make valid points' 
+
+[source,cypher]
+----
+MATCH (m:Meme) WHERE m.id = '1kc9p2'
+
+MATCH path = (m)-[:FIRST]->(w)-[rels:NEXT*..15]->()
+WHERE ALL(r in rels WHERE m.id IN r.ids)
+
+RETURN *;
+----
+
+//graph_result
+
+ifndef::env-graphgist[]
+image::{img}/memegraph-2.jpg[]
+endif::env-graphgist[]
+
+Done. Enjoy !

@@ -1,0 +1,677 @@
+= Apoc Procedures Blog Series
+:github: https://github.com/neo4j-contrib/neo4j-apoc-procedures
+:img: https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/img
+
+== Awesome Procedures on Cypher (APOC) 1.1.0 Release
+
+I'm super thrilled to announce https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases/tag/1.1.0[last weeks 1.1.0 release] of the Awesome Procedures on Cypher (APOC).
+A lot of new and cool stuff has been added and some issues have been fixed.
+
+Thanks to everyone who contributed to the procedure collection, especially Stefan Armbruster, Kees Vegter, Florent Biville, Sascha Peukert, Craig Taverner, Chris Willemsen, and many more.
+
+And of course my thanks go to everyone who tried APOC and gave feedback, so that we could improve the library.
+
+[NOTE]
+If you are new to Neo4js procedures and APOC, please start by reading the https://neo4j.com/blog/intro-user-defined-procedures-apoc/[first article of my introductory blog series].
+
+The APOC library was first released as version 1.0 in conjunction with the Neo4j 3.0 release at the end of April with around 90 procedures and was mentioned in Emil's neo4j 3.0 release keynote.
+
+In early May we had a 1.0.1 release with a number of new procedures especially around free text search, graph algorithms and geocoding, which was also used by the journalists of the ICIJ for their https://neo4j.com/blog/panama-papers-graph-database-download/[downloadable Neo4j database of the Panama Papers].
+
+And now, 2 months later, we've reached 200 procedures that are provided by APOC.
+These are covering a wide range of capabilities, some of which I want to discuss today.
+
+In each section of this post I'll only list a small subset of the new procedures that were added.
+
+If you want get more detailed information, please check out the https://neo4j-contrib.github.io/neo4j-apoc-procedures/[documentation with examples].
+
+=== Notable Changes
+
+As the 100 new procedures represent quite a change, I want to highlight the aspects of APOC that got extended or documented with more practical examples.
+
+==== Metadata
+
+Besides the `apoc.meta.graph` functionality that was there from the start additional procedures to return and sample graph metadata were added.
+Some, like `apoc.meta.stats` access the transactional database statistics to quickly return information about label and relationship-type counts.
+
+There are now also procedures to return and check of types of values and properties.
+
+[cols="1m,5"]
+|===
+| CALL apoc.meta.subGraph({config}) | examines a sample sub graph to create the meta-graph, default sampleSize is 100 +
+config is: {labels:[labels],rels:[rel-types],sample:sample}
+| CALL apoc.meta.stats  yield labelCount, relTypeCount, propertyKeyCount, nodeCount, relCount, labels, relTypes, stats | returns the information stored in the transactional database statistics
+| CALL apoc.meta.type(value) | type name of a value (`INTEGER,FLOAT,STRING,BOOLEAN,RELATIONSHIP,NODE,PATH,NULL,UNKNOWN,MAP,LIST`)
+| CALL apoc.meta.isType(value,type) | returns a row if type name matches none if not
+|===
+
+==== Import / Export 
+
+The first export procedures output the provided graph data as Cypher statements in the format that neo4j-shell understands and that can also be read with `apoc.cypher.runFile`.
+
+Indexes and constraints as well as batched sets of create statements for nodes and relationships will be written to the provided file-path.
+
+[cols="1m,5"]
+|===
+| apoc.export.cypherAll(file,config) | exports whole database incl. indexes as cypher statements to the provided file
+| apoc.export.cypherData(nodes,rels,file,config) | exports given nodes and relationships incl. indexes as cypher statements to the provided file
+| apoc.export.cypherQuery(query,file,config) | exports nodes and relationships from the cypher statement incl. indexes as cypher statements to the provided file
+|===
+
+==== Data Integration
+
+Making integration with other databases easier is a *big aspiration* of APOC.
+
+Being able to directly read and write data from these source using Cypher statements is very powerful.
+As Cypher is an expressive data processing language that allows a variety of data filtering, cleansing and conversions, preparing the original data 
+
+APOC integrates with relational and other tabular databases like Cassandra using JDBC, each row returned from a table or statement is provided as a map value to Cypher to be processed.
+
+And for ElasticSearch the same is achieved by using the underlying JSON-HTTP functionality.
+For MongoDB we support connecting via their official Java driver.
+
+To avoid listing full database connection strings with usernames and passwords in your procedures, you can configure those in `$NEO4J_HOME/conf/neo4j.conf` using the `apoc.{jdbc,mongodb,es}.<name>.url` config parameters, and just pass `name` as the first parameter in the procedure call.
+
+Here is a part of the Cassandra example from the https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_data_integration[data integration section] of the docs using the https://github.com/adejanovski/cassandra-jdbc-wrapper#installing[Cassandra JDBC Wrapper].
+
+.Entry in neo4j.conf
+----
+apoc.jdbc.cassandra_songs.url=jdbc:cassandra://localhost:9042/playlist
+----
+
+[source,cypher]
+----
+CALL apoc.load.jdbc('cassandra_songs','track_by_artist') yield row
+MERGE (a:Artist {name:row.artist})
+MERGE (g:Genre {name:row.genre})
+CREATE (t:Track {id:toString(row.track_id), title:row.track, length:row.track_length_in_seconds})
+CREATE (a)-[:PERFORMED]->(t)
+CREATE (t)-[:GENRE]->(g);
+
+// Added 63213 labels, created 63213 nodes, set 182413 properties, created 119200 relationships.
+----
+
+For each datasource that you want to connect to, just provide the relevant driver in the `$NEO4J_HOME/plugins` directory as well, it will then automatically picked up by APOC.
+
+Even if you just visualize which kind of graphs are hidden in that data, there is already a big benefit of being able to do that withou leaving the comfort of Cypher and the Neo4j browser.
+
+To render virtual nodes, relationships and graphs, you can use the https://github.com/neo4j-contrib/neo4j-apoc-procedures/blob/master/readme.adoc#virtual-nodesrels[appropriate procedures] from the `apoc.create.*` package.
+
+==== Controlled Cypher Execution
+
+While individual Cypher statements can be run easily, more complex executions, like large data updates, background execution or parallel execution is not yet possible out of the box.
+
+These kind of abilities are added by the `apoc.periodic.*` and the `apoc.cypher.*` packages.
+Especially `apoc.peridoc.iterate` and `apoc.periodic.commit` are useful for batched updates.
+
+Procedures like `apoc.cypher.runMany` allow execution of semicolon separated statements and `apoc.cypher.mapParallel` allows parallel excecution of partial or whole Cypher statements driven by a collection of values.
+
+
+[cols="1m,5"]
+|===
+| CALL apoc.cypher.runFile(file or url) yield row, result | runs each statement in the file, all semicolon separated - currently no schema operations
+| CALL apoc.cypher.runMany('cypher;\nstatements;',{params}) | runs each semicolon separated statement and returns summary - currently no schema operations
+| CALL apoc.cypher.mapParallel(fragment, params, list-to-parallelize) yield value | executes fragment in parallel batches with the list segments being assigned to _
+|===
+
+
+[cols="1m,5"]
+|===
+| CALL apoc.periodic.commit(statement, params) | repeats an batch update statement until it returns 0, this procedure is blocking
+| CALL apoc.periodic.countdown('name',statement,delay-in-seconds) | submit a repeatedly-called background statement until it returns 0
+| CALL apoc.periodic.iterate('statement returning items', 'statement per item', {batchSize:1000,parallel:true}) YIELD batches, total | run the second statement for each item returned by the first statement. Returns number of batches and total processed rows
+|===
+
+==== Schema / Indexing
+
+Besides the manual index update and query support that was already there in release 1.0, more manual index management operations have been added.
+
+[cols="1m,5"]
+|===
+| CALL apoc.index.list() - YIELD type,name,config | lists all manual indexes
+| CALL apoc.index.remove('name') YIELD type,name,config | removes manual indexes
+| CALL apoc.index.forNodes('name',{config}) YIELD type,name,config | gets or creates manual node index
+| CALL apoc.index.forRelationships('name',{config}) YIELD type,name,config | gets or creates manual relationship index
+|===
+
+There is pretty neat support for free text search that is also https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_full_text_search[detailed with examples in the documentation].
+It allows you with `apoc.index.addAllNodes` to add a number of properties of nodes with certain labels to a free text search index which is then easily searchable with `apoc.index.search`.
+
+[cols="1m,5"]
+|===
+| apoc.index.addAllNodes('index-name',{label1:['prop1',...],...}) | add all nodes to this full text index with the given proeprties, additionally populates a 'search' index 
+| apoc.index.search('index-name', 'query') YIELD node, weight | search for the first 100 nodes in the given full text index matching the given lucene query returned by relevance
+|===
+
+==== Collection & Map Functions
+
+While Cypher has already great support for handling maps and collections, there are always some capabilities that are not possible yet.
+That's where APOCs map and collection functions come in. 
+
+You can dynamically create, cleane and update maps.
+
+[cols="1m,5"]
+|===
+| apoc.map.fromPairs([[key,value],[key2,value2],...]) | creates map from list with key-value pairs
+| apoc.map.fromLists([keys],[values]) | creates map from a keys and a values list
+| apoc.map.fromValues([key,value,key1,value1]) | creates map from alternating keys and values in a list
+| apoc.map.setKey(map,key,value) | returns the map with the value for this key added or replaced
+| apoc.map.clean(map,[keys],[values]) yield value | removes the keys and values (e.g. null-placeholders) contained in those lists, good for data cleaning from CSV/JSON
+|===
+
+There are means to convert and split collections to other shapes and much more.
+
+[cols="1m,5"]
+|===
+| apoc.coll.partition(list,batchSize) | partitions a list into sublists of `batchSize`
+| apoc.coll.zip([list1],[list2]) | all values in a list
+| apoc.coll.pairs([list]) | returns `[first,second],[second,third], ...
+| apoc.coll.toSet([list]) | returns a unique list backed by a set
+| apoc.coll.split(list,value) | splits collection on given values rows of lists, value itself will not be part of resulting lists
+| apoc.coll.indexOf(coll, value) | position of value in the list
+|===
+
+You can union, subtract, and intersection collections and much more.
+
+[cols="1m,5"]
+|===
+| apoc.coll.union(first, second) | creates the distinct union of the 2 lists
+| apoc.coll.intersection(first, second) | returns the unique intersection of the two lists
+| apoc.coll.disjunction(first, second) | returns the disjunct set of the two lists
+|===
+
+// ==== Graph and Path operations
+
+
+==== Graph Representation
+
+There are a number of operations on a graph that return a subgraph of nodes and relationships.
+
+With the `apoc.graph.*` operations you can create such a named graph representation from a number of sources.
+
+[cols="1m,5"]
+|===
+apoc.graph.from(data,'name',{properties}) yield graph | creates a virtual graph object for later processing it tries its best to extract the graph information from the data you pass in
+| apoc.graph.fromPaths([paths],'name',{properties}) | creates a virtual graph object for later processing
+| apoc.graph.fromDB('name',{properties}) | creates a virtual graph object for later processing
+| apoc.graph.fromCypher('statement',{params},'name',{properties}) | creates a virtual graph object for later processing
+|===
+
+The idea is that on top of this graph representation other operations (like export or updates) but also graph algorithms can be executed.
+
+The general structure of this representation is:
+
+[source,json]
+----
+{
+ name:"Graph name",
+ nodes:[node1,node2],
+ relationships: [rel1,rel2],
+ properties:{key:"value1",key2:42}
+}
+----
+
+=== Plans for the future
+
+Of course it doesn't stop here. As https://github.com/neo4j-contrib/neo4j-apoc-procedures#plans[outlined in the readme there are many ideas] for future development.
+
+One area to be expanded are graph algorithms and the quality and performance of their implementation.
+We also want to support import and export capabilities, for instance for graphml and binary formats.
+
+Something that in the future should be more widely supported by APOC procedures is to work with a subgraph representation of a named set of nodes, relationships and properties.
+
+=== Conclusion
+
+There is a lot more to explore, just take a moment and have a look at the wide variety of procedures listed in the readme.
+
+Going forward I want to achieve a *more regular release cycle* of APOC. 
+Every two weeks there should be a new release so that everyone benefits from bug fixes and new features.
+
+Now, please:
+
+* try out the link:{github}[new functionality],
+* check out the http://neo4j-contrib.github.io/neo4j-apoc-procedures[growing APOC documentation],
+* also provide feedback / report issues / suggest additions 
+** on the link:{github}/issues[GitHub issue tracker] 
+** or the https://neo4j-users.slack.com/messages/apoc/[#apoc Slack Channel] on the http://neo4j.com/slack[public  Neo4j-Users Slack].
+
+Cheers, Michael
+
+---- snip ----
+
+== Introduction to User Defined Procedures and APOC
+
+This is the first in a series of blog posts, in which I want to introduce you to Neo4j's user defined procedures and the APOC procedure library in particular.
+
+
+Besides many other cool things, of the best features of our recent Neo4j 3.0 release introduced were callable procedures.
+
+=== Built in Procedures
+
+There are a number of built-in procedures, that currently provide database management and introspection functionalities.
+Going forward more functionality will be provided through these procedures, e.g. user management and security, transaction management and more.
+
+But even more interesting than the built-in procedures, are "User Defined Procedures".
+You might know them from other databases as "Stored Procedures" or "User Defined Functions/Views".
+
+Essentially they are a way to extend the query language, in our case Cypher, with custom functionality that adds new capabilities.
+
+=== Calling Procedures 
+
+You can call procedures stand-alone as a singular statements, or as part of your more complex Cypher statement.
+
+Procedures can be called with parameters, and their return values are a stream of columns of data.
+
+Here are two examples:
+
+.Call a procedure as only content of a statement
+[source,cypher]
+----
+CALL db.labels();
+----
+
+[options="header"]
+|===
+| label
+| Movie
+| Person
+|===
+
+If you call a procedure as part of a Cypher statement you can pass in not only literal parameter values (strings, numbers, maps, lists), but also *nodes, relationships, paths*.
+This enables a procedure to execute graph operations from simple neighborhood expansions to complex iterative algorithms.
+For the result columns that are returned by a procedure, you have to use the `YIELD` keyword to select which of those are introduced and potentially aliased into the query.
+
+.Call a procedure as part of a more complex statement - list procedures grouped by package
+[source,cypher]
+----
+CALL dbms.procedures() YIELD name
+RETURN head(split(name,".")) as package, count(*), collect(name) as procedures;
+----
+
+[options="header",cols="1,1,4"]
+|===
+|package | count(*) | procedures
+|db |	5	| [db.constraints, db.indexes, db.labels, db.propertyKeys, db.relationshipTypes]
+|dbms   |	4	| [dbms.changePassword, dbms.components, dbms.procedures, dbms.queryJmx]
+| apoc	| 203	| [apoc.algo.aStar, apoc.algo.aStarConfig, apoc.algo.allSimplePaths, ... ]
+|===
+
+=== When and How to write a Procedure
+
+Procedures can be small, generic helper functions for common tasks, but also very specific solutions and additions to your specific use case.
+
+So consider them when:
+
+1. Cypher lacks a feature that you *really need* (but make sure to consult the http://neo4j.com/developer/cypher[documentation] and ask in our http://neo4j.com/slack[public Slack] first) or
+2. you need that last little bit of performance for a graph algorithm or operation where you can't afford any indirection between your code and the database core.
+
+*Only then* you should consider writing a user defined procedure.
+
+Writing a user defined procedure is pretty straightforward in most programming languages on the JVM.
+
+You just need to create an method annotated with `@Procedure` that takes in any of the https://neo4j.com/docs/developer-manual/current/#types[Cypher types] as named parameters and returns a stream of data transfer objects (DTOs) each of whose fields becomes a column in the procedure output.
+
+One very simple procedure that I also used before to explain this feature is providing the capability to generate UUIDs.
+As you probably know that's something very easy to do in Java, but not so much in Cypher, and still sometimes you want to add uniquely identifying ids to your nodes.
+
+In our example we will provide the `uuid` procedure with a number which indicates how many UUIDS we're interested in. 
+Note that the only numeric types supported by Cypher are `long` and `double` which encompass their smaller size brethren.
+
+For our results, we use a dedicated Java DTO, that contains our two result columns as `public final` fields.
+
+As a fun side-effect of using Neo4j procedures you also get to play with Java 8 streams, but _please don't overdo it_.
+
+[source,java]
+----
+@Procedure("example.uuid")
+public Stream<UuidResult> uuid(@Name("count") long count) {
+   return LongStream.range(0,count)
+     .mapToObj(row -> new UuidResult(row, UUID.randomUUID()));
+}
+static class UuidResult {
+   public final long row;
+   public final String uuid;
+   UuidResult(long row, UUID uuid) {
+      this.row = row;
+      this.uuid = uuid.toString();
+   }
+}
+----
+
+We then use our favorite build tool (gradle, maven, sbt) to package our procedure as a jar and put it into the `$NEO4J_HOME/plugins` directory.
+Please make sure that all dependencies also become part of that jar, otherwise they won't be found when your procedure is loaded.
+
+And mark the neo4j dependencies (and other libraries that are already within the Neo4j distribution) as `provided` so that they are not packaged with and blow up the size your procedure jar.
+
+After restarting your server, your procedure should be listed when you `CALL dbms.procedures()`. 
+If not please check `$NEO4J_HOME/logs/debug.log`.
+
+Now we can call our newly minted procedure to create nodes with uuids.
+
+[source,cypher]
+----
+WITH {data} as rows
+CALL example.uuid(size(rows)) YIELD row, uuid
+CREATE (p:Person {id:uuid}) SET p += rows[row]
+RETURN row, p;
+----
+
+We provide detailed documentation on how to do it in our https://neo4j.com/docs/developer-manual/current/#_user_defined_procedures[Developers Manual] and in an https://github.com/neo4j-examples/neo4j-procedure-template[example project on GitHub] that is ready for you to fork and adapt.
+
+=== APOC
+
+image::{img}/apoc.gif[float=right]
+
+While Neo4j 3.0 was maturing, I pondered about all the questions and feature requests I got over the years regarding certain functionality in Cypher.
+
+And I felt that it was a good idea to create a generally useable library of procedures that covered these aspects and more.
+
+Drawing from the https://en.wikipedia.org/wiki/List_of_minor_characters_in_the_Matrix_series#Apoc[unlucky technician in the "Matrix" movie] and the historic Neo4j "A Package Of Components", the name APOC was an obvious choice, which also stands for "Awesome Procedures On Cypher".
+So the hardest part of all the work was done.
+
+Starting with a small selection of procedures from various areas, the apoc library grew quickly, had already 100 entries for the Neo4j 3.0 release and now contains more than 200 procedures from all these areas:
+
+* graph algorithms
+* metadata
+* manual indexes,  relationship indexes
+* fulltext search
+* integration with other databases like MongoDB, ElasticSearch, Cassandra, relational databases
+* loading of XML and JSON from APIs and files
+* collection and map utilities
+* date and time functions
+* string and text functions
+* import and export
+* concurrent and batched Cypher execution
+* spatial functions
+* path expansion
+
+In this blog series I want to focus on each area with a specific blog post and just mention a few of the procedures today, to excite you.
+
+=== Installation
+
+Just download the apoc jar file from the https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases/latest[latest release on GitHub] and put it into `$NEO4J_HOME/plugins` directory.
+
+After restarting your Neo4j server, a lot of new procedures should be listed in `CALL dbms.procedures()`.
+
+You can also `CALL apoc.help("apoc")` or `CALL apoc.help("apoc.algo")` for the help function built into the library.
+
+If you want to use any of the database integration e.g. for relational databases, Cassandra or Mongo-DB make sure to add the relevant jar files for the drivers for those databases too.
+It's probably easiest to clone the repository and run `mvn dependency:copy-dependencies` to find the relevant jars in the `target/dependency` folder.
+
+Many of the APOC procedures just return a single `value` which is of the expected return type and can be aliased.
+Some of them act like boolean filters, i.e. if a certain condition does not match (e.g. `isType` or `contains`) they just return no row, otherwise they return a single row of "nothing", so no `YIELD` is needed.
+
+As there are no named procedure parameters yet, some APOC procedures take a configuration map which can be used to control the behavior of the procedure.
+
+=== apoc.meta.graph
+
+image::{img}/apoc.meta.graph.jpg[float=right]
+
+One very handy feature are the meta data capabilities of APOC.
+Being a schema free database, you probably wondered in the past, what the underlying graph structure looks like.
+
+The https://github.com/neo4j-contrib/neo4j-apoc-procedures#meta-graph[`apoc.meta.*` package] offers procedures that analyise the actual content or database statistics of your graph and return a meta graph representation.
+
+The simplest procedure `apoc.meta.graph` just iterates over the graph and records relationship-types between node labels as it goes along.
+Other more advanced procedures either sample the graph or use the database statistics to do their job.
+
+The visual metadata procedures return virtual nodes and relationships which don't exist in the graph but are returned correctly to the browser and client and are rendered just like normal graph nodes and relationships.
+Those virtual graph entities can also be used by you to represent an aggregated projection of the original graph data.
+
+=== apoc.load.json
+
+Loading data from web and other APIs has been been a http://neo4j.com/blog/cypher-load-json-from-url/[favorite past-time] of mine.
+
+With `apoc.load.json` it's now very easy to load JSON data from any file or URL.
+
+If the result is a JSON object is returned as a singular map. 
+Otherwise if it was an array is turned into a stream of maps.
+Let's take the StackOverflow example linked above.
+
+The URL for retrieving the last questions and answers of the http://stackoverflow.com/questions/tagged/neo4j[neo4j tag] is this:
+
+https://api.stackexchange.com/2.2/questions?pagesize=100&order=desc&sort=creation&tagged=neo4j&site=stackoverflow&filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf
+
+Now it can be used from within Cypher directly, let's first introspect the data that is returned.
+
+.JSON data from StackOverflow
+[source,cypher]
+----
+WITH "https://api.stackexchange.com/2.2/questions?pagesize=100&order=desc&sort=creation&tagged=neo4j&site=stackoverflow&filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf" AS url
+CALL apoc.load.json(url) YIELD value
+UNWIND value.items AS item
+RETURN item.title, item.owner, item.creation_date, keys(item)
+----
+
+image::{img}/apoc.load.json.so.png[]
+
+Combined with the cypher query from the blog post it's easy to create the full Neo4j graph of those entities.
+
+.Graph data created via loading JSON from StackOverflow
+[source,cypher]
+----
+WITH "https://api.stackexchange.com/2.2/questions?pagesize=100&order=desc&sort=creation&tagged=neo4j&site=stackoverflow&filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf" AS url
+CALL apoc.load.json(url) YIELD value
+UNWIND value.items AS q
+MERGE (question:Question {id:q.question_id}) ON CREATE
+  SET question.title = q.title, question.share_link = q.share_link, question.favorite_count = q.favorite_count
+
+MERGE (owner:User {id:q.owner.user_id}) ON CREATE SET owner.display_name = q.owner.display_name
+MERGE (owner)-[:ASKED]->(question)
+
+FOREACH (tagName IN q.tags | MERGE (tag:Tag {name:tagName}) MERGE (question)-[:TAGGED]->(tag))
+FOREACH (a IN q.answers |
+   MERGE (question)<-[:ANSWERS]-(answer:Answer {id:a.answer_id})
+   MERGE (answerer:User {id:a.owner.user_id}) ON CREATE SET answerer.display_name = a.owner.display_name
+   MERGE (answer)<-[:PROVIDED]-(answerer)
+)
+----
+
+image::{img}/apoc.load.json-so-result.png[]
+
+The https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_load_json[documentation] also contains other examples, like loading from Twitter and Geocoding.
+
+=== apoc.coll.* and apoc.map.*
+
+While Cypher sports more collection and data-structure operations that most other query languages, there is always this one thing you couldn't do yet.
+Until now.
+
+With procedures it is easy to provide solutions for these missing pieces, oftentimes just a one-liner in the procedure.
+That's why APOC contains https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_helpers[a lot of these utility functions] for creating, manipulating, converting and operating on data.
+
+Here are two examples:
+
+Creatings pairs of a list of nodes or relationships can be used to compare them pair-wise, without a double loop around over an index value.
+
+.Create a list of pairs from a single list
+[source,cypher]
+----
+WITH range(1,5) as numbers
+CALL apoc.coll.pairs(numbers) YIELD value
+RETURN value
+----
+
+|===
+| value
+| [[1,2],[2,3],[3,4],[4,5],[5,null]]
+|===
+
+
+Currently you can't create a map from raw data in Cypher, only literal maps are supported and the `properties()` function on nodes and relationships.
+That's why APOC has a number of convenience functions to create and modify maps based on data from any source.
+
+.Create a map from pairs of data
+[source,cypher]
+----
+WITH [["Stark","Winter is coming"],["Baratheon","Ours is the fury"],["Targaryen","Fire and blood"],["Lannister","Hear me roar"]] as pairs
+CALL apoc.map.fromPairs(pairs) YIELD value as houses
+RETURN houses
+----
+
+|===
+| houses
+| {Stark:"Winter is coming", Baratheon:"Ours is the fury", Targaryen:"Fire and blood", Lannister:"Hear me roar"}
+|===
+
+=== apoc.date.* - Date and Time functions
+
+Converting between numeric time information and it's string counterparts can be cumbersome.
+
+APOC provides a number of https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_date_time_support[flexible conversion procedures] between the two:
+
+[source,cypher]
+----
+CALL apoc.date.format(timestamp(),"ms","dd.MM.yyyy")
+// -> 07.07.2016
+CALL apoc.date.parse("13.01.1975 19:00","s","dd.MM.yyyy HH:mm")
+// -> 158871600
+----
+
+More details can be found in https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_date_and_time_conversions[the documentation].
+
+////
+
+=== apoc.algo.dijkstra
+
+There are a number of graph algorithms already contained in APOC.
+Some of them just expose existing functionality of the Neo4j Java APIs like `A*`, `dijkstra` or `allSimplePaths`.
+Others, like centrality, page-rank and component finding are adding more advanced algorithms.
+
+Our example here is a quick demonstration on how you can combine spatial data and the `distance` function
+
+The quality of the algorithm implementations varies, so if you have any expertise in the area and time to contribute, we'd love to see more work in this area.
+
+////
+
+=== apoc.export.cypher*
+
+Exporting your database with the `dump` command that's built into neo4j-shell generates a single large create statement and has a hard time dealing with large databases.
+
+Using the original export code I wrote a few years ago, the https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_export_import[`apoc.export.cypher*` procedures] can export you graph data to a file with Cypher statements.
+The graph data to be exported can be:
+
+* the whole database
+* collections of nodes of relationships
+* results of a cypher statement
+
+The procedure first writes commands to create constraints and indexes.
+Nodes and relationships are created in singular Cypher statements, batched in transactional blocks.
+
+For node-lookup it uses constrained properties on a label (kind of a primary key) if they exist.
+Otherwise it adds a temporary, artificial label and property (the node-id) which are cleaned up at the end.
+
+.Export Full Database
+[source,cypher]
+----
+CALL apoc.export.cypherAll('/tmp/stackoverflow.cypher', {})
+----
+
+.Export Specific Nodes and Relationships
+[source,cypher]
+----
+MATCH (q:Question)-[r:TAGGED]->(t:Tag)
+WITH collect(q) + collect(t) as n, collect(r) as r
+CALL apoc.export.cypherData(n, r, '/tmp/stackoverflow.cypher', {batchSize:1000})
+YIELD nodes, relationships, properties, time
+RETURN nodes, relationships, properties, time
+----
+
+.Export From Statement
+[source,cypher]
+----
+CALL apoc.export.cypherQuery('MATCH (:Question)-[r:TAGGED]->(:Tag) RETURN r', '/tmp/stackoverflow.cypher', {nodesOfRelationships: true})
+----
+
+----
+╒═════════════════════════╤════════════════════════════════╤══════╤═════╤═════════════╤══════════╤════╕
+│file                     │source                          │format│nodes│relationships│properties│time│
+╞═════════════════════════╪════════════════════════════════╪══════╪═════╪═════════════╪══════════╪════╡
+│/tmp/stackoverflow.cypher│statement: nodes(181), rels(283)│cypher│181  │283          │481       │25  │
+└─────────────────────────┴────────────────────────────────┴──────┴─────┴─────────────┴──────────┴────┘
+----
+
+.Resulting Export File
+[source,cypher]
+----
+begin
+CREATE (:`Question` {`id`:38226745, `favorite_count`:0, `share_link`:"http://stackoverflow.com/q/38226745", `title`:"How can I use order and find_each in neo4j.rb, Rails?"});
+...
+CREATE (:`Question` {`id`:38038019, `favorite_count`:0, `share_link`:"http://stackoverflow.com/q/38038019", `title`:"Convert neo4j Integer object to JavaScript integer"});
+CREATE (:`Tag`:`UNIQUE IMPORT LABEL` {`name`:"ruby-on-rails", `UNIQUE IMPORT ID`:500});
+...
+CREATE (:`Tag`:`UNIQUE IMPORT LABEL` {`name`:"fuzzy-search", `UNIQUE IMPORT ID`:580});
+commit
+
+begin
+CREATE INDEX ON :`Tag`(`name`);
+CREATE CONSTRAINT ON (node:`Question`) ASSERT node.`id` IS UNIQUE;
+CREATE CONSTRAINT ON (node:`UNIQUE IMPORT LABEL`) ASSERT node.`UNIQUE IMPORT ID` IS UNIQUE;
+commit
+
+schema await
+
+begin
+MATCH (n1:`Question`{`id`:38226745}), (n2:`UNIQUE IMPORT LABEL`{`UNIQUE IMPORT ID`:500}) CREATE (n1)-[:`TAGGED`]->(n2);
+...
+MATCH (n1:`Question`{`id`:38038019}), (n2:`UNIQUE IMPORT LABEL`{`UNIQUE IMPORT ID`:532}) CREATE (n1)-[:`TAGGED`]->(n2);
+MATCH (n1:`Question`{`id`:38038019}), (n2:`UNIQUE IMPORT LABEL`{`UNIQUE IMPORT ID`:501}) CREATE (n1)-[:`TAGGED`]->(n2);
+commit
+
+begin
+MATCH (n:`UNIQUE IMPORT LABEL`)  WITH n LIMIT 20000 REMOVE n:`UNIQUE IMPORT LABEL` REMOVE n.`UNIQUE IMPORT ID`;
+commit
+
+begin
+DROP CONSTRAINT ON (node:`UNIQUE IMPORT LABEL`) ASSERT node.`UNIQUE IMPORT ID` IS UNIQUE;
+commit
+----
+
+=== Conclusion
+
+Even the journalists of the ICIJ used APOC as part of the browser guide they created for the downloadable https://offshoreleaks.icij.org/pages/database[Panama Papers Neo4j database].
+Really cool!
+
+The next blog post will cover data integration with APOC.
+
+Please try out the procedures library, you can find it https://github.com/neo4j-contrib/neo4j-apoc-procedures[here on GitHub], and might https://neo4j-contrib.github.io/neo4j-apoc-procedures/[its documentation (WIP)] helpful.
+
+If you have any feedback or issues, please report them as https://github.com/neo4j-contrib/neo4j-apoc-procedures/issues[GitHub issues].
+
+I *want to thank* all the https://github.com/neo4j-contrib/neo4j-apoc-procedures/graphs/contributors[contributors] that provided feedback, code and fixes to the library.
+
+
+---- End of Blog Post ----
+
+== Utilities
+
+* datetime
+* map
+* coll
+* phonetic
+
+== Data Integration
+
+* load json
+* load xml
+* load jdcb mysql + cassandra
+* ES
+
+== Import and Export
+
+* export
+* runFile
+* Gephi
+
+== Manual and Schema Indexes
+
+* index management
+* fulltext indexing
+* relationship indexes
+* sorted schema indexes
+
+== Graph Algorithms and Path operations
+
+* dijkstra
+* A*
+* explore path
+* pagerank, centralities

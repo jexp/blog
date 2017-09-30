@@ -1,0 +1,3021 @@
+= onnx2graph - Store and Visualize Machine Learning Models
+:img: ../img
+
+I've been dabbling with https://github.com/neo4j-contrib/neo4j-ml-procedures[Machine Learning Procedures for Neo4j^] for a little bit now.
+Besides providing machine learning capabilities for your graph data, *one goal was to support storage, visualization and querying of machine learning models (neural network configurations) in the graph database*.
+
+I tried to import TensorFlow models via their protobuf serialization, but unfortunately, the examples protobuf files I found, were incompatible with their Java TensorFlow Protobuf library (https://mvnrepository.com/artifact/org.tensorflow/proto/1.3.0[maven^]). If any of you has any insights there I would be supper happy to make that work.
+
+
+image::https://www.graphcore.ai/hubfs/images/alexnet_label%20logo.jpg[width=300,float=right,title="AlexNet from Tensorflow (c) GraphCore"]
+
+I was inspired to look into putting neural network models into the graph by https://www.graphcore.ai/posts/what-does-machine-learning-look-like[this amazing article from graphcore.ai] which features impressive visualizations of compute networks and a really interesting discussion of the topic.
+
+
+Last week, my colleague http://twitter.com/akollegger[Andreas^] pointed me to https://venturebeat.com/2017/09/07/microsoft-and-facebook-launch-open-source-project-to-make-neural-networks-portable/[the recent announcment of Facebook and Microsoft^] to open-source the ONNX "Open Neural Network Exchange" project for an interoperable AI/ML/DeepLearning format.
+
+____
+Microsoft and Facebook have announced a new open source project today that’s aimed at creating a shared model representation for neural networks across different programming frameworks. Called the Open Neural Network Exchange (ONNX), the new project will make it possible to share models across the Cognitive Toolkit, PyTorch, and Caffe2.
+____
+
+// image::https://venturebeat.com/wp-content/uploads/2017/05/brain.jpg?fit=930%2C659&strip=all[]
+
+I found the https://github.com/onnx/onnx[ONNX project on GitHub^] and while it was quite sparsely documented, I saw a Juypter notebook, containing a few examples for small network descriptions.
+So I thought, this could be a worthwhile candidate for my stated goal. Let's spend our Saturday morning getting this to work.
+
+////
+____
+Microsoft and Facebook have announced a new open source project today that’s aimed at creating a shared model representation for neural networks across different programming frameworks. Called the Open Neural Network Exchange (ONNX), the new project will make it possible to share models across the Cognitive Toolkit, PyTorch, and Caffe2.
+
+ONNX is supposed to help solve one of the key issues in the machine learning ecosystem right now. There is a profusion of different frameworks for setting up and executing neural networks and other machine learning systems, but they’re all different, and they aren’t interoperable.
+
+Using ONNX, it’s possible for Facebook to export a trained model created with PyTorch and use it with Caffe2 for inference. That’s important for taking a model created in research (something that PyTorch is good at) and bringing it to production with Caffe2. Microsoft said that it’s working on releasing a version of Cognitive Toolkit (also known as CNTK) that supports ONNX.
+____
+////
+
+== Installing ONNX
+
+Unfortunately there was some serious Yak-shaving involved for me, to install ONNX.
+So perhaps reading about my mishaps is helpful for others.
+
+I tried to follow the instructions in the README but they didn't really work.
+
+First of all you have to have a `protoc` compiler on your system, otherwise it complains during installation.
+So I figured out where to get it from and ran `brew install protobuf` which worked.
+
+Then I tried to install ONNX via `pip` but that failed. 
+
+_Someone later commented that one shouldn't do that in the root of the checked out repository._
+
+----
+mh$ pip install onnx
+
+Collecting onnx
+  Downloading onnx-0.1.tar.gz (588kB)
+    100% |████████████████████████████████| 593kB 1.3MB/s 
+...
+Successfully built onnx
+Installing collected packages: onnx
+Successfully installed onnx-0.1
+
+python -c 'import onnx'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+----
+
+Back then I couldn't figure out why and created an https://github.com/onnx/onnx/issues/6[issue on their repository^] though, which gathered some discussion since.
+
+Then I tried to install it from source, which also failed and made me install first `pytest` and then `pybind11` from source.
+That also didn't work that well (failing in some tests) but I somehow could get it installed and then the manual install of ONNX succeeded.
+
+*Later, in the issue I createdm I was pointed to the recursive submodule for `pybind11`*
+
+So you have to get the ONNX source, either with *`git clone --recursive https://github.com/onnx/onnx` or do a `git submodule update --init`* after cloning.
+
+----
+brew install protobuf
+git clone https://github.com/onnx/onnx
+cd onnx
+
+git submodule update --init
+  Submodule 'third_party/pybind11' (https://github.com/pybind/pybind11.git) registered for path 'third_party/pybind11'
+  Cloning into '/Users/mh/d/python/onnx/third_party/pybind11'...
+  Submodule path 'third_party/pybind11': checked out 'a1041190c8b8ff0cd9e2f0752248ad5e3789ea0c'
+
+pip install -e .
+  Obtaining file:///Users/mh/d/python/onnx
+  Requirement already satisfied: six in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+  Requirement already satisfied: numpy in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+  Requirement already satisfied: protobuf in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+  Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from protobuf->onnx==0.1)
+  Installing collected packages: onnx
+    Found existing installation: onnx 0.1
+      Uninstalling onnx-0.1:
+        Successfully uninstalled onnx-0.1
+    Running setup.py develop for onnx
+  Successfully installed onnx
+
+python -c 'import onnx'
+----
+
+Phew, that worked (for me on Saturday, it was 2 hours later).
+
+== ONNX Examples
+
+Now let's look at the examples in the https://github.com/onnx/onnx/blob/master/onnx/examples/Protobufs.ipynb[Juypter Notebook^].
+
+They are pretty straightforward, so I only looked at the last one, which set up a complete graph.
+
+[source,python]
+----
+from onnx.onnx_pb2 import *
+from onnx import checker, helper
+
+# An node that is also a graph
+graph = helper.make_graph(
+    [
+        helper.make_node("FC", ["X", "W1", "B1"], ["H1"]),
+        helper.make_node("Relu", ["H1"], ["R1"]),
+        helper.make_node("FC", ["R1", "W2", "B2"], ["Y"]),
+    ],
+    "MLP",
+    ["X", "W1", "B1", "W2", "B2"],
+    ["Y"]
+)
+
+print(str(graph))
+----
+
+_(It didn't find the `registry` import for me, so I left it off.)_
+
+Here is the structure.
+
+----
+node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+----
+
+Please note that these repeated `input`, `output` and `node` attributes (note, singular!) are actually a kind of collection, we get back to that soon.
+
+So we have a graph with a bunch of nodes, which have inputs and outputs pointing from or to other nodes.
+Sounds perfect for our needs.
+
+== Quick Neo4j Intro
+
+In a graph database like Neo4j you store your connected data as _Nodes_ and _Relationships_, both with labels and arbitrary attributes.
+In that way our conceptional model is the same as your object model, is the same as your graph model, and your visualization.
+
+The core essence of that graph model is _patterns_ where nodes are connected to each other via relationships.
+You can use these patterns on a whiteboard, diagram, or visualization but also as ascii-art to find and create them in the graph query language Cypher (think "SQL for graphs").
+
+Each node is surrounded by parentheses like a circle `(:Person {name:Michael})` and +
+relationships form ascii-art arrows: `+(me)-[:LOVES]->(you)+`.
+
+image::{img}/cypher-match.jpg[]
+
+You would send data from ONNX to Neo4j by using the https://neo4j.com/developer/python/[Python driver^] and sending parameterized Cypher statements to the database.
+You can find the http://neo4j.com/docs/api/python-driver/current/[full driver API docs here^].
+
+====
+You can run Neo4j via http://hub.docker.com/_/neo4j[Docker^] (`docker run -p 7474:7474 -p 7687:7687 neo4j`) on the http://neo4j.com/sandbox[Neo4j Sandbox^] or on any http://neo4j.com/developer/guide-cloud-deployment[cloud platform^].
+Just grab the relevant auth information (after setting the initial password) and database URL from your installation.
+====
+
+----
+pip install neo4j-driver
+----
+
+[source,python]
+----
+from neo4j.v1 import GraphDatabase, basic_auth
+
+driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+session = driver.session()
+
+# create a pattern, 2 nodes one relationship
+statement = """
+CREATE (p:Person {name:$name})-[:USES]->(d:Database {name:$what})
+"""
+# parameters to avoid injection
+params = {"name":"Michael","what":"Neo4j"}
+
+session.run(statement,params).consume
+
+# query for a pattern, "what does a person use"
+result = session.run(
+  "MATCH (who:Person)-[:USES]->(tech) RETURN who.name as name, tech.name as what")
+
+# output result columns
+for record in result:
+  print("%s %s" % (record["name"], record["what"]))
+
+session.close()
+----
+
+== Onnx2Graph
+
+Ok, it shouldn't be so hard to import that graph object into neo4j, we just need to turn this data into a property graph model.
+
+We have a node representing the _compute graph_, labeled `:Graph` and pointing with INPUT/OUTPUT relationships to the _inputs and outputs_ of the computation.
+
+Then inside the computation we have `:Node` labeled _neurons_, which get and send information via IN and OUT relationships to their respective inputs and outputs.
+
+An example model is here:
+
+image::{img}/onnx2graph-model.jpg[]
+
+To turn the Python object from ONNX into a Neo4j datastructure, we need a small Cypher statement that takes the whole object, iterates over ites parts and turns it into our graph model.
+
+That annotated statement looks like this (`$graph` is the parameter we pass in):
+
+[source,cypher]
+----
+// create the :Graph node
+MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+
+// create input nodes in the context of this graph and connect them
+FOREACH (name in $graph.inputs | MERGE (i:Node {name:name})-[:INPUT]->(g) SET i:Input)
+
+// create output nodes in the context of this graph and connect them
+FOREACH (name in $graph.outputs | MERGE (g)<-[:OUTPUT]-(o:Node {name:name}) SET o:Output)
+
+WITH *
+
+// iterate over all nodes of the graph
+UNWIND $graph.nodes as node
+
+// create the compute node, set it's attributes (attributes can vary widely)
+CREATE (n:Node) SET n += node.attr
+
+// find-or-create input nodes to our node and connect them, mark them as input nodes
+FOREACH (name in node.inputs | MERGE (i:Node {name:name}) SET i:Input MERGE (i)-[:IN]->(n))
+
+// find-or-create output nodes to our node and connect them, mark them as output nodes
+FOREACH (name in node.outputs | MERGE (o:Node {name:name}) SET o:Output MERGE (n)-[:OUT]->(o));
+----
+
+Now we only have to turn the ONNX object in a proper nested dictionary, that represented the graph structured we wanted to pass into our statement.
+
+I didn't realize first, that I have to convert the nested protobuf collections manually.
+
+My initial attempt looked like this, and "succeeded", and looked ok in Python.
+
+[source,python]
+----
+params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input, "outputs":graph.output,
+"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input,"outputs":n.output}, graph.node)}}
+
+{'graph': {'inputs': [u'X', u'W1', u'B1', u'W2', u'B2'], 
+           'nodes': [{'inputs': [u'X', u'W1', u'B1'], 'attr': {'op_type': u'FC'}, 'outputs': [u'H1']}, 
+                     {'inputs': [u'H1'], 'attr': {'op_type': u'Relu'}, 'outputs': [u'R1']}, 
+                     {'inputs': [u'R1', u'W2', u'B2'], 'attr': {'op_type': u'FC'}, 'outputs': [u'Y']}], 
+                      'name': u'MLP', 'outputs': [u'Y'], 'attr': {'ir_version': 1L}}}
+----
+
+When I tried to insert that data into my Neo4j instance, though it failed with error:
+
+----
+ValueError: Values of type <class 'google.protobuf.internal.containers.RepeatedScalarFieldContainer'> are not supported
+----
+
+So initially I transferred all 4 of those sneaky `RepeatedScalarFieldContainer`'s manually with lambdas `map(lambda x: str(x), graph.input)` which was not really pretty.
+
+Googling for `RepeatedScalarFieldContainer` I found some https://fossies.org/dox/XtreemFS-1.5.1/classgoogle_1_1protobuf_1_1internal_1_1containers_1_1RepeatedScalarFieldContainer.html[API docs^], which pointed me to the https://fossies.org/dox/XtreemFS-1.5.1/containers_8py_source.html#l00050[`_values` field in the superclass^], which I could use instead.
+
+[source,python]
+----
+params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+----
+
+So, now we could put it all together.
+
+[source,python]
+----
+from neo4j.v1 import GraphDatabase, basic_auth
+
+driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+session = driver.session()
+
+statement = """	
+MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+FOREACH (name in $graph.inputs | MERGE (i:Node {name:name})-[:INPUT]->(g) SET i:Input)
+FOREACH (name in $graph.outputs | MERGE (g)<-[:OUTPUT]-(o:Node {name:name}) SET o:Output)
+WITH *
+UNWIND $graph.nodes as node
+CREATE (n:Node) SET n += node.attr
+FOREACH (name in node.inputs | MERGE (i:Node {name:name}) SET i:Input MERGE (i)-[:IN]->(n))
+FOREACH (name in node.outputs | MERGE (o:Node {name:name}) SET o:Output MERGE (n)-[:OUT]->(o));
+"""
+
+params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+
+session.run(statement,params).consume
+session.close()
+----
+
+I put all the code also into this [Jupyter Notebook: onnx2graph^].
+
+After running this statement, we can visit the Neo4j browser and see our tiny compute graph in its full beauty.
+
+image::{img}/onnx2graph.jpg[]
+
+We can also inspect the schema, which is what we expected.
+
+image::{img}/onnx2graph-schema.jpg[]
+
+
+After this initial achievement, at the end of the weekend, I looked at the http://pytorch.org/docs/master/onnx.html[ONNX support for torch^]
+
+____
+The torch.onnx module contains functions to export models into the ONNX IR format. These models can be loaded with the ONNX library and then converted to models which run on other deep learning frameworks.
+____
+
+
+With this example, which sounded exciting, starting from my original graphcore.ai inspiration:
+
+____
+Example: End-to-end AlexNet from PyTorch to Caffe2
+Here is a simple script which exports a pretrained AlexNet as defined in torchvision into ONNX. It runs a single round of inference and then saves the resulting traced model to alexnet.proto
+____
+
+Let's import the full AlexNet ONNX file:
+
+[source,python]
+----
+----
+
+If you like this approach, please let me know and I can turn this into a proper library.
+
+As soon as there are Java bindings for ONNX I can add support for this to the https://github.com/neo4j-contrib/neo4j-ml-procedures[neo4j-ml-procedures^]
+
+Have fun
+
+
+////
+
+
+pip install pytest-cov
+Collecting pytest-cov
+  Downloading pytest_cov-2.5.1-py2.py3-none-any.whl
+Collecting pytest>=2.6.0 (from pytest-cov)
+  Downloading pytest-3.2.2-py2.py3-none-any.whl (187kB)
+    100% |████████████████████████████████| 194kB 2.8MB/s 
+Collecting coverage>=3.7.1 (from pytest-cov)
+  Downloading coverage-4.4.1-cp27-cp27m-macosx_10_10_x86_64.whl (172kB)
+    100% |████████████████████████████████| 174kB 1.2MB/s 
+Collecting py>=1.4.33 (from pytest>=2.6.0->pytest-cov)
+  Downloading py-1.4.34-py2.py3-none-any.whl (84kB)
+    100% |████████████████████████████████| 92kB 5.2MB/s 
+Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from pytest>=2.6.0->pytest-cov)
+Installing collected packages: py, pytest, coverage, pytest-cov
+Successfully installed coverage-4.4.1 py-1.4.34 pytest-3.2.2 pytest-cov-2.5.1
+
+----
+
+
+My Python fu is weak, but I tried it anyway.
+
+
+
+Learning about type() ->  
+
+https://fossies.org/dox/XtreemFS-1.5.1/classgoogle_1_1protobuf_1_1internal_1_1containers_1_1RepeatedScalarFieldContainer.html
+RepeatedScalarFieldContainer 
+
+https://fossies.org/dox/XtreemFS-1.5.1/containers_8py_source.html#l00050
+
+-> _values
+
+https://github.com/onnx/onnx/blob/master/onnx/examples/Protobufs.ipynb
+
+
+arrows
+
+onnx2graph-schema.jpg
+
+from neo4j.v1 import GraphDatabase, basic_auth
+
+driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+session = driver.session()
+
+statement = """	
+MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+FOREACH (name in $graph.inputs | MERGE (i:Node {name:name})-[:INPUT]->(g) SET i:Input)
+FOREACH (name in $graph.outputs | MERGE (g)<-[:OUTPUT]-(o:Node {name:name}) SET o:Output)
+WITH *
+UNWIND $graph.nodes as node
+CREATE (n:Node) SET n += node.attr
+FOREACH (name in node.inputs | MERGE (i:Node {name:name}) SET i:Input MERGE (i)-[:IN]->(n))
+FOREACH (name in node.outputs | MERGE (o:Node {name:name}) SET o:Output MERGE (n)-[:OUT]->(o));
+"""
+params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+
+session.run(statement,params).summary
+session.close()
+
+
+
+
+onnx2graph.jpg
+
+Last login: Thu Sep  7 20:06:23 on ttys042
+Ich:~ mh$ cd d/python/
+Ich:python mh$ git clone https://github.com/onnx/onnx.git
+Cloning into 'onnx'...
+remote: Counting objects: 90, done.
+remote: Compressing objects: 100% (65/65), done.
+remote: Total 90 (delta 17), reused 84 (delta 11), pack-reused 0
+Unpacking objects: 100% (90/90), done.
+Checking connectivity... done.
+Ich:python mh$ cd onnx/
+Ich:onnx mh$ ag load
+onnx/__init__.py
+12:def load(obj):
+14:    Loads a binary protobuf that stores onnx graph
+
+onnx/numpy_helper.py
+23:            "Currently not supporting loading segments.")
+Ich:onnx mh$ less onnx/__init__.py 
+Ich:onnx mh$ pip install .
+Processing /Users/mh/d/python/onnx
+    Complete output from command python setup.py egg_info:
+    Could not find "protoc" executable!
+    
+    ----------------------------------------
+Command "python setup.py egg_info" failed with error code 1 in /private/var/folders/3q/d9xqh3fx7lj5nf5y4z3r5zs80000gn/T/pip-oz8Fry-build/
+Ich:onnx mh$ python setup.py 
+Could not find "protoc" executable!
+Ich:onnx mh$ brew install protoc
+Updating Homebrew...
+==> Auto-updated Homebrew!
+Updated 3 taps (caskroom/cask, homebrew/core, homebrew/science).
+==> Updated Formulae
+abcmidi                                  io
+ace                                      libftdi
+allure                                   libtiff ✔
+angular-cli                              lynis
+bacula-fd                                node-build
+ccm                                      paket
+certbot                                  pre-commit
+deis                                     presto
+fizmo                                    rtv
+fs-uae                                   sqlcipher
+heroku                                   terraform
+homebrew/science/astrometry-net          tippecanoe
+homebrew/science/bowtie2                 todoman
+homebrew/science/kent-tools              vagrant-completion
+homebrew/science/nextflow                webpack ✔
+homebrew/science/spades                  yarn
+immortal
+
+Error: No available formula with the name "protoc" 
+==> Searching for a previously deleted formula...
+Error: No previously deleted formula found.
+==> Searching for similarly named formulae...
+==> Searching local taps...
+Error: No similarly named formulae found.
+==> Searching taps...
+==> Searching taps on GitHub...
+Error: No formulae found in taps.
+Ich:onnx mh$ pip install -e .
+Obtaining file:///Users/mh/d/python/onnx
+    Complete output from command python setup.py egg_info:
+    Could not find "protoc" executable!
+    
+    ----------------------------------------
+Command "python setup.py egg_info" failed with error code 1 in /Users/mh/d/python/onnx/
+Ich:onnx mh$ brew tap homebrew/versions
+Warning: homebrew/versions was deprecated. This tap is now empty as all its formulae were migrated.
+==> Tapping homebrew/versions
+Cloning into '/usr/local/Homebrew/Library/Taps/homebrew/homebrew-versions'...
+remote: Counting objects: 9, done.
+remote: Compressing objects: 100% (8/8), done.
+remote: Total 9 (delta 0), reused 5 (delta 0), pack-reused 0
+Unpacking objects: 100% (9/9), done.
+Checking connectivity... done.
+Tapped 0 formulae (36 files, 30.8KB)
+Ich:onnx mh$ brew install protobuf241
+Error: No available formula with the name "protobuf241" 
+==> Searching for a previously deleted formula...
+^C
+Ich:onnx mh$ brew install protobuf
+==> Downloading https://homebrew.bintray.com/bottles/protobuf-3.3.2.yosemite.bot
+==> Downloading from https://akamai.bintray.com/fe/fee139511c94fca32fd143a905ee8
+######################################################################## 100,0%
+==> Pouring protobuf-3.3.2.yosemite.bottle.tar.gz
+==> Caveats
+Editor support and examples have been installed to:
+  /usr/local/opt/protobuf/share/doc/protobuf
+==> Summary
+������  /usr/local/Cellar/protobuf/3.3.2: 260 files, 16.3MB
+Ich:onnx mh$ protoc
+Missing input file.
+Ich:onnx mh$ pip install -e .
+Obtaining file:///Users/mh/d/python/onnx
+Requirement already satisfied: six in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: numpy in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: protobuf in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from protobuf->onnx==0.1)
+Installing collected packages: onnx
+  Running setup.py develop for onnx
+    Complete output from command /usr/local/opt/python/bin/python2.7 -c "import setuptools, tokenize;__file__='/Users/mh/d/python/onnx/setup.py';f=getattr(tokenize, 'open', open)(__file__);code=f.read().replace('\r\n', '\n');f.close();exec(compile(code, __file__, 'exec'))" develop --no-deps:
+    running develop
+    running egg_info
+    writing requirements to onnx.egg-info/requires.txt
+    writing onnx.egg-info/PKG-INFO
+    writing top-level names to onnx.egg-info/top_level.txt
+    writing dependency_links to onnx.egg-info/dependency_links.txt
+    reading manifest file 'onnx.egg-info/SOURCES.txt'
+    reading manifest template 'MANIFEST.in'
+    warning: no files found matching '*' under directory 'third_party'
+    writing manifest file 'onnx.egg-info/SOURCES.txt'
+    running build_ext
+    running build_proto
+    compiling /Users/mh/d/python/onnx/onnx/onnx.proto
+    building 'onnx.onnx_cpp2py_export' extension
+    creating build
+    creating build/temp.macosx-10.10-x86_64-2.7
+    creating build/temp.macosx-10.10-x86_64-2.7/Users
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/experiments
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/generator
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/logical
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/math
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/nn
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/reduction
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/rnn
+    creating build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/tensor
+    clang -fno-strict-aliasing -fno-common -dynamic -g -O2 -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes -I/Users/mh/d/python/onnx -I/Users/mh/d/python/onnx/third_party/pybind11/include -I/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/include/python2.7 -I/usr/local/include -I/usr/local/opt/openssl/include -I/usr/local/opt/sqlite/include -I/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/include/python2.7 -c /Users/mh/d/python/onnx/onnx/cpp2py_export.cc -o build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/cpp2py_export.o -std=c++11 -stdlib=libc++
+    /Users/mh/d/python/onnx/onnx/cpp2py_export.cc:1:10: fatal error: 'pybind11/pybind11.h' file not found
+    #include <pybind11/pybind11.h>
+             ^
+    1 error generated.
+    error: command 'clang' failed with exit status 1
+    
+    ----------------------------------------
+Command "/usr/local/opt/python/bin/python2.7 -c "import setuptools, tokenize;__file__='/Users/mh/d/python/onnx/setup.py';f=getattr(tokenize, 'open', open)(__file__);code=f.read().replace('\r\n', '\n');f.close();exec(compile(code, __file__, 'exec'))" develop --no-deps" failed with error code 1 in /Users/mh/d/python/onnx/
+Ich:onnx mh$ brew install python3-dev
+Updating Homebrew...
+Error: No available formula with the name "python3-dev" 
+==> Searching for a previously deleted formula...
+^C
+Ich:onnx mh$ pip install onnx
+Collecting onnx
+  Downloading onnx-0.1.tar.gz (588kB)
+    100% |████████████████████████████████| 593kB 1.3MB/s 
+Requirement already satisfied: numpy in /usr/local/lib/python2.7/site-packages (from onnx)
+Requirement already satisfied: protobuf in /usr/local/lib/python2.7/site-packages (from onnx)
+Requirement already satisfied: six>=1.9 in /usr/local/lib/python2.7/site-packages (from protobuf->onnx)
+Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from protobuf->onnx)
+Building wheels for collected packages: onnx
+  Running setup.py bdist_wheel for onnx ... done
+  Stored in directory: /Users/mh/Library/Caches/pip/wheels/47/5a/a6/94021e538d5d53a87cc76abc631d4a4e0a77924eb956651619
+Successfully built onnx
+Installing collected packages: onnx
+Successfully installed onnx-0.1
+Ich:onnx mh$ find .
+.
+./.eggs
+./.eggs/pytest_runner-2.12.1-py2.7.egg
+./.eggs/README.txt
+./.git
+./.git/config
+./.git/description
+./.git/HEAD
+./.git/hooks
+./.git/hooks/applypatch-msg.sample
+./.git/hooks/commit-msg.sample
+./.git/hooks/post-update.sample
+./.git/hooks/pre-applypatch.sample
+./.git/hooks/pre-commit.sample
+./.git/hooks/pre-push.sample
+./.git/hooks/pre-rebase.sample
+./.git/hooks/prepare-commit-msg.sample
+./.git/hooks/update.sample
+./.git/index
+./.git/info
+./.git/info/exclude
+./.git/logs
+./.git/logs/HEAD
+./.git/logs/refs
+./.git/logs/refs/heads
+./.git/logs/refs/heads/master
+./.git/logs/refs/remotes
+./.git/logs/refs/remotes/origin
+./.git/logs/refs/remotes/origin/HEAD
+./.git/objects
+./.git/objects/04
+./.git/objects/04/ee9d00f11e9b956ed16de8970e1e78ca4ce48a
+./.git/objects/08
+./.git/objects/08/8b1228777dc860762e3bd5922ace727f91c65d
+./.git/objects/08/d52600d89b835c7b79638691be78bedeba6043
+./.git/objects/12
+./.git/objects/12/69488f7fb1f4b56a8c0e5eb48cecbfadfa9219
+./.git/objects/12/6f5fe51f15eed1f06f1474865025a0b3774763
+./.git/objects/16
+./.git/objects/16/c52051780d0952b855f8b65030bc53663bfabf
+./.git/objects/17
+./.git/objects/17/e20f236fc014448507c7cd8e791371bf395108
+./.git/objects/18
+./.git/objects/18/c483d65c9ee6dcf97e55adb4fa09f945701970
+./.git/objects/1a
+./.git/objects/1a/b36487c5d9878ee42b1e41c7f3da63927acc63
+./.git/objects/1f
+./.git/objects/1f/20c023fe96e70858727950d415541fad6459f3
+./.git/objects/23
+./.git/objects/23/af449ae6a6d0dadb0f14ba124a44a034a3b2b1
+./.git/objects/27
+./.git/objects/27/fc24ad88c3c685305d8932b793cda4f976b3ab
+./.git/objects/2b
+./.git/objects/2b/2f9fcfecb818409d40ee7db157a7a355f43bba
+./.git/objects/2d
+./.git/objects/2d/9ce67c050da66cc62ea97f9c655c3706016882
+./.git/objects/30
+./.git/objects/30/a27eb54418f488727beaae262f901b5d9bdeda
+./.git/objects/35
+./.git/objects/35/a572d74a0807873a1403fd608b531dad69774b
+./.git/objects/36
+./.git/objects/36/6b47d043a8abd2503b99182452e82faaf6b34c
+./.git/objects/3b
+./.git/objects/3b/3f61a6210ee0f7f19443ff3f8a8af9da7155a6
+./.git/objects/3b/a4d1f9bf576e6e57e99f1ae72df3d6b81818b8
+./.git/objects/44
+./.git/objects/44/dbef86c5782aab9bc59c9e5dc4bf4229b9d246
+./.git/objects/46
+./.git/objects/46/7eddbb76fea1a86de1d2fcfd377102646391fc
+./.git/objects/53
+./.git/objects/53/8599431915d235bbcc3b55f73a7ae182d42b2f
+./.git/objects/55
+./.git/objects/55/1e02af39997510e3bff330e0e7f5977ae589ba
+./.git/objects/55/cdd0863821d36cbb4b9c5c1e583b63bee38320
+./.git/objects/55/e94b61e1b8bb3173f72b8893af60f77de1e1e3
+./.git/objects/59
+./.git/objects/59/59b7b3137ad4edeb39766b0dd85ee1583022ad
+./.git/objects/5d
+./.git/objects/5d/079130bc186e7d91d8c49a4073b4f1f569911a
+./.git/objects/60
+./.git/objects/60/823e14f244639e6283a184dec593ad42618a34
+./.git/objects/65
+./.git/objects/65/eb4084d20408f789e5676938906bc44da6956d
+./.git/objects/67
+./.git/objects/67/00c9fb5ebf814e3ee01dbf82c422cd684f9c3f
+./.git/objects/68
+./.git/objects/68/2d0c083b4ecbf679d9eebbd325ebe72c385110
+./.git/objects/68/50503dde77188930f6d33a71332bc7d29a3468
+./.git/objects/69
+./.git/objects/69/25009297e8a104f8d7c7c6fd6afe11af494290
+./.git/objects/6f
+./.git/objects/6f/7dbb45188a3cc696ac1de7e3e127f68f457a4b
+./.git/objects/70
+./.git/objects/70/8179e42176275200c1f03a6c5707eb0d70795f
+./.git/objects/71
+./.git/objects/71/48e842f4cf567f8f08d2b8c8e2e0d2ed6acb24
+./.git/objects/74
+./.git/objects/74/dc46236e05a0c741e078ee82b6699cf557aef4
+./.git/objects/76
+./.git/objects/76/82e7348afb9591eea60522f1c34638b37fc11e
+./.git/objects/77
+./.git/objects/77/9ae1a5aaac066edae5bb506e8e4e37622ebb6b
+./.git/objects/7a
+./.git/objects/7a/244075722d8add66c33157aeba526135994f67
+./.git/objects/7b
+./.git/objects/7b/3c8c853a2ded3b87120da13e866dba7bc8cf6d
+./.git/objects/7c
+./.git/objects/7c/b82a4268ead15ee1777b13bcfc5c9f3c5a1ada
+./.git/objects/7d
+./.git/objects/7d/2081198b742a9cbf94a890e62d229f4a67f2a7
+./.git/objects/81
+./.git/objects/81/b7daa56d1a7fb8954faa1f16dab0a070213892
+./.git/objects/83
+./.git/objects/83/edc0cb2f1feaa04475cffc9da9eb522df33e27
+./.git/objects/89
+./.git/objects/89/1dcd6f7da690467b35205e7be48dc9e865eae7
+./.git/objects/8d
+./.git/objects/8d/8401ec6d19f50790ecbfff947255c34a5c1253
+./.git/objects/8d/e4e52c3259f2eb7bff49de5085f09fd017b6d9
+./.git/objects/95
+./.git/objects/95/c5f391ae1956e3b85783490681f4f0241edc70
+./.git/objects/9b
+./.git/objects/9b/baba589adfdef9c12fe5d0cd01cae71faaf759
+./.git/objects/9d
+./.git/objects/9d/1dcfdaf1a6857c5f83dc27019c7600e1ffaff8
+./.git/objects/9d/524b95ddf9a59c6882a46236044e306eb32886
+./.git/objects/9e
+./.git/objects/9e/1c6563a98d667b2e886956ef37f5f78c1c8872
+./.git/objects/9e/720aedb99df08186c5846d61e441e4f0a7dcfa
+./.git/objects/a3
+./.git/objects/a3/c8ce2963a5599e27a57fb9c0855b1adb4ad125
+./.git/objects/a8
+./.git/objects/a8/f90b8e26625d241d20655600f7652dd4229b92
+./.git/objects/a9
+./.git/objects/a9/5219ffcd25b6f5b90d862b29d36a03fb17673c
+./.git/objects/aa
+./.git/objects/aa/0f79aa53b4703971351a19beb276892bb4c80d
+./.git/objects/ae
+./.git/objects/ae/810f852b64ccc74081f5684ec0a57790d9b984
+./.git/objects/af
+./.git/objects/af/ba8c43d737abfb631742c8185e60533418571c
+./.git/objects/b3
+./.git/objects/b3/45c152f9f2b8e30afd0af4840e0a78b3c8b465
+./.git/objects/b8
+./.git/objects/b8/503b31302c7e398cdf2a1161742a96c6d2546f
+./.git/objects/b8/ab0ed286ffd0b0020a367e078f66bdc3303db5
+./.git/objects/bb
+./.git/objects/bb/e22f447a4f3c38642dc9ca7ba0e8dd1ebaef94
+./.git/objects/c1
+./.git/objects/c1/c7ca6d5db17bf103fbbae047ac91cb6b48680f
+./.git/objects/c6
+./.git/objects/c6/4c427114f03dfb32d6f34db9f5176c53d04d26
+./.git/objects/c6/94ced77036edcc215e56470133e5e7144466c5
+./.git/objects/c6/c130bbab1c33fc6baeae03910d46ec99cb4a17
+./.git/objects/c9
+./.git/objects/c9/4dfa6b5d0d05933817af703363c994e679a773
+./.git/objects/ca
+./.git/objects/ca/026fd134e367270a45f8a8189d6f44a7cc2466
+./.git/objects/cf
+./.git/objects/cf/9fc5b10c06bc365195b32f7e6f59e19c2b534d
+./.git/objects/d3
+./.git/objects/d3/dee8808ef69913138d8ec76d11e798204f6f7f
+./.git/objects/de
+./.git/objects/de/a4f96f992dd4ee64675ce39832f421ab23e15e
+./.git/objects/e0
+./.git/objects/e0/a02b9d5d837809bb6c722152e309440d8e7f1f
+./.git/objects/e0/e7ad457876d37f1d7349bfcfb60b103adfba33
+./.git/objects/e1
+./.git/objects/e1/66054114807b22c0f9fda9c69e213a5ad55b97
+./.git/objects/e3
+./.git/objects/e3/46486ba833674f60ec78c9d540a30211f3eced
+./.git/objects/e4
+./.git/objects/e4/7c41dc42932136f876f3fd90b4d3e96ac5cebc
+./.git/objects/e6
+./.git/objects/e6/9de29bb2d1d6434b8b29ae775ad8c2e48c5391
+./.git/objects/e6/ec94c57a94cfae9e27123b088a0ab3d012eb83
+./.git/objects/e8
+./.git/objects/e8/bb91b2b7b0af9b4dc5b1a1e2b641a6cd87704e
+./.git/objects/f0
+./.git/objects/f0/0ecce739b88a1d31404c966ee54c9c68dde3a6
+./.git/objects/f0/54ae9d51374de56a3a9ecd38cf7fe868682c56
+./.git/objects/f3
+./.git/objects/f3/5a65082466dd8180cb6608e2f937c06a3d50db
+./.git/objects/f4
+./.git/objects/f4/c6f86c87d5ed1ec6200099356730a6120d1af8
+./.git/objects/f5
+./.git/objects/f5/80093e31f5cc875ee5bf8e00cbce9d20f6ad5f
+./.git/objects/f7
+./.git/objects/f7/255dfd50d0a76247d60d6a2becaa93d51b635e
+./.git/objects/f9
+./.git/objects/f9/aba0ee35e448f710b8361535a63a43ca230650
+./.git/objects/fc
+./.git/objects/fc/4023bfd4d2361d67657b7aa7030237870d8423
+./.git/objects/ff
+./.git/objects/ff/f704c9e813c60cbf7c83fe488d7297fcf3679d
+./.git/objects/info
+./.git/objects/pack
+./.git/packed-refs
+./.git/refs
+./.git/refs/heads
+./.git/refs/heads/master
+./.git/refs/remotes
+./.git/refs/remotes/origin
+./.git/refs/remotes/origin/HEAD
+./.git/refs/tags
+./.gitignore
+./.gitmodules
+./.travis
+./.travis/build.sh
+./.travis/common
+./.travis/install.sh
+./.travis.yml
+./build
+./build/temp.macosx-10.10-x86_64-2.7
+./build/temp.macosx-10.10-x86_64-2.7/Users
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/experiments
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/generator
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/logical
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/math
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/nn
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/reduction
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/rnn
+./build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/defs/tensor
+./conda
+./conda/build.sh
+./conda/meta.yaml
+./docs
+./docs/IR.md
+./docs/Operators.md
+./docs/Overview.md
+./LICENSE
+./MANIFEST.in
+./onnx
+./onnx/__init__.py
+./onnx/backend
+./onnx/backend/__init__.py
+./onnx/backend/base.py
+./onnx/checker.py
+./onnx/cpp2py_export.cc
+./onnx/defs
+./onnx/defs/__init__.py
+./onnx/defs/experiments
+./onnx/defs/experiments/defs.cc
+./onnx/defs/gen_doc.py
+./onnx/defs/generator
+./onnx/defs/generator/defs.cc
+./onnx/defs/logical
+./onnx/defs/logical/defs.cc
+./onnx/defs/math
+./onnx/defs/math/defs.cc
+./onnx/defs/nn
+./onnx/defs/nn/defs.cc
+./onnx/defs/reduction
+./onnx/defs/reduction/defs.cc
+./onnx/defs/rnn
+./onnx/defs/rnn/defs.cc
+./onnx/defs/schema.cc
+./onnx/defs/schema.h
+./onnx/defs/tensor
+./onnx/defs/tensor/defs.cc
+./onnx/examples
+./onnx/examples/Protobufs.ipynb
+./onnx/frontend
+./onnx/frontend/__init__.py
+./onnx/helper.py
+./onnx/numpy_helper.py
+./onnx/onnx.pb.cc
+./onnx/onnx.pb.h
+./onnx/onnx.proto
+./onnx/onnx_pb2.py
+./onnx/test
+./onnx/test/.gitignore
+./onnx/test/basic_test.py
+./onnx/test/helper_test.py
+./onnx/test/numpy_helper_test.py
+./onnx/test/relu_test.py
+./onnx/test/schema_test.py
+./onnx.egg-info
+./onnx.egg-info/dependency_links.txt
+./onnx.egg-info/PKG-INFO
+./onnx.egg-info/requires.txt
+./onnx.egg-info/SOURCES.txt
+./onnx.egg-info/top_level.txt
+./README.md
+./setup.cfg
+./setup.py
+./third_party
+./third_party/pybind11
+Ich:onnx mh$ python
+Python 2.7.13 (default, Dec 18 2016, 07:03:34) 
+[GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from onnx.onnx_pb2 import *
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ImportError: No module named onnx_cpp2py_export
+>>> from onnx import checker, helper, registry
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ImportError: No module named onnx_cpp2py_export
+>>> 
+Ich:onnx mh$ python2
+Python 2.7.13 (default, Dec 18 2016, 07:03:34) 
+[GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> 
+KeyboardInterrupt
+>>> 
+Ich:onnx mh$ python3
+Python 3.6.0 (default, Dec 24 2016, 08:02:28) 
+[GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from onnx.onnx_pb2 import *
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/Users/mh/d/python/onnx/onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "/Users/mh/d/python/onnx/onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "/Users/mh/d/python/onnx/onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ModuleNotFoundError: No module named 'onnx.onnx_cpp2py_export'
+>>> from onnx import checker, helper, registry
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/Users/mh/d/python/onnx/onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "/Users/mh/d/python/onnx/onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "/Users/mh/d/python/onnx/onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ModuleNotFoundError: No module named 'onnx.onnx_cpp2py_export'
+>>> 
+Ich:onnx mh$ pip3 install onnx
+Collecting onnx
+  Using cached onnx-0.1.tar.gz
+Requirement already satisfied: protobuf in /usr/local/lib/python3.6/site-packages (from onnx)
+Requirement already satisfied: numpy in /usr/local/lib/python3.6/site-packages (from onnx)
+Requirement already satisfied: six>=1.9 in /usr/local/lib/python3.6/site-packages (from protobuf->onnx)
+Requirement already satisfied: setuptools in /usr/local/lib/python3.6/site-packages (from protobuf->onnx)
+Building wheels for collected packages: onnx
+  Running setup.py bdist_wheel for onnx ... done
+  Stored in directory: /Users/mh/Library/Caches/pip/wheels/47/5a/a6/94021e538d5d53a87cc76abc631d4a4e0a77924eb956651619
+Successfully built onnx
+Installing collected packages: onnx
+Successfully installed onnx-0.1
+Ich:onnx mh$ python3
+Python 3.6.0 (default, Dec 24 2016, 08:02:28) 
+[GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from onnx.onnx_pb2 import *
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/Users/mh/d/python/onnx/onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "/Users/mh/d/python/onnx/onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "/Users/mh/d/python/onnx/onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ModuleNotFoundError: No module named 'onnx.onnx_cpp2py_export'
+>>> from onnx import checker, helper, registry
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/Users/mh/d/python/onnx/onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "/Users/mh/d/python/onnx/onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "/Users/mh/d/python/onnx/onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ModuleNotFoundError: No module named 'onnx.onnx_cpp2py_export'
+>>> 
+Ich:onnx mh$ python -c 'import onnx'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ImportError: No module named onnx_cpp2py_export
+Ich:onnx mh$ python3 -c 'import onnx'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/Users/mh/d/python/onnx/onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "/Users/mh/d/python/onnx/onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "/Users/mh/d/python/onnx/onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ModuleNotFoundError: No module named 'onnx.onnx_cpp2py_export'
+Ich:onnx mh$ conda install -c ezyang onnx
+-bash: conda: command not found
+Ich:onnx mh$ brew install conda
+Updating Homebrew...
+Error: No available formula with the name "conda" 
+==> Searching for a previously deleted formula...
+^C
+Ich:onnx mh$ pip install onnx
+Requirement already satisfied: onnx in /usr/local/lib/python2.7/site-packages
+Requirement already satisfied: numpy in /usr/local/lib/python2.7/site-packages (from onnx)
+Requirement already satisfied: protobuf in /usr/local/lib/python2.7/site-packages (from onnx)
+Requirement already satisfied: six>=1.9 in /usr/local/lib/python2.7/site-packages (from protobuf->onnx)
+Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from protobuf->onnx)
+Ich:onnx mh$ pip3 install onnx
+Requirement already satisfied: onnx in /usr/local/lib/python3.6/site-packages
+Requirement already satisfied: protobuf in /usr/local/lib/python3.6/site-packages (from onnx)
+Requirement already satisfied: numpy in /usr/local/lib/python3.6/site-packages (from onnx)
+Requirement already satisfied: setuptools in /usr/local/lib/python3.6/site-packages (from protobuf->onnx)
+Requirement already satisfied: six>=1.9 in /usr/local/lib/python3.6/site-packages (from protobuf->onnx)
+Ich:onnx mh$ python -c 'import onnx'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "onnx/__init__.py", line 7, in <module>
+    from . import checker, helper
+  File "onnx/checker.py", line 14, in <module>
+    from onnx import defs
+  File "onnx/defs/__init__.py", line 6, in <module>
+    import onnx.onnx_cpp2py_export as C
+ImportError: No module named onnx_cpp2py_export
+Ich:onnx mh$ protoc
+Missing input file.
+Ich:onnx mh$ pip install -e .
+Obtaining file:///Users/mh/d/python/onnx
+Requirement already satisfied: six in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: numpy in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: protobuf in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from protobuf->onnx==0.1)
+Installing collected packages: onnx
+  Found existing installation: onnx 0.1
+    Uninstalling onnx-0.1:
+      Successfully uninstalled onnx-0.1
+  Running setup.py develop for onnx
+    Complete output from command /usr/local/opt/python/bin/python2.7 -c "import setuptools, tokenize;__file__='/Users/mh/d/python/onnx/setup.py';f=getattr(tokenize, 'open', open)(__file__);code=f.read().replace('\r\n', '\n');f.close();exec(compile(code, __file__, 'exec'))" develop --no-deps:
+    running develop
+    running egg_info
+    writing requirements to onnx.egg-info/requires.txt
+    writing onnx.egg-info/PKG-INFO
+    writing top-level names to onnx.egg-info/top_level.txt
+    writing dependency_links to onnx.egg-info/dependency_links.txt
+    reading manifest file 'onnx.egg-info/SOURCES.txt'
+    reading manifest template 'MANIFEST.in'
+    warning: no files found matching '*' under directory 'third_party'
+    writing manifest file 'onnx.egg-info/SOURCES.txt'
+    running build_ext
+    running build_proto
+    compiling /Users/mh/d/python/onnx/onnx/onnx.proto
+    building 'onnx.onnx_cpp2py_export' extension
+    clang -fno-strict-aliasing -fno-common -dynamic -g -O2 -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes -I/Users/mh/d/python/onnx -I/Users/mh/d/python/onnx/third_party/pybind11/include -I/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/include/python2.7 -I/usr/local/include -I/usr/local/opt/openssl/include -I/usr/local/opt/sqlite/include -I/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/include/python2.7 -c /Users/mh/d/python/onnx/onnx/cpp2py_export.cc -o build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/cpp2py_export.o -std=c++11 -stdlib=libc++
+    /Users/mh/d/python/onnx/onnx/cpp2py_export.cc:1:10: fatal error: 'pybind11/pybind11.h' file not found
+    #include <pybind11/pybind11.h>
+             ^
+    1 error generated.
+    error: command 'clang' failed with exit status 1
+    
+    ----------------------------------------
+  Rolling back uninstall of onnx
+Command "/usr/local/opt/python/bin/python2.7 -c "import setuptools, tokenize;__file__='/Users/mh/d/python/onnx/setup.py';f=getattr(tokenize, 'open', open)(__file__);code=f.read().replace('\r\n', '\n');f.close();exec(compile(code, __file__, 'exec'))" develop --no-deps" failed with error code 1 in /Users/mh/d/python/onnx/
+Ich:onnx mh$ ls
+LICENSE		MANIFEST.in	README.md	build		conda		docs		onnx		onnx.egg-info	setup.cfg	setup.py	third_party
+Ich:onnx mh$ python setup.py 
+usage: setup.py [global_opts] cmd1 [cmd1_opts] [cmd2 [cmd2_opts] ...]
+   or: setup.py --help [cmd1 cmd2 ...]
+   or: setup.py --help-commands
+   or: setup.py cmd --help
+
+error: no commands supplied
+Ich:onnx mh$ python setup.py  isntall
+usage: setup.py [global_opts] cmd1 [cmd1_opts] [cmd2 [cmd2_opts] ...]
+   or: setup.py --help [cmd1 cmd2 ...]
+   or: setup.py --help-commands
+   or: setup.py cmd --help
+
+error: invalid command 'isntall'
+Ich:onnx mh$ python setup.py install
+running install
+running bdist_egg
+running egg_info
+writing requirements to onnx.egg-info/requires.txt
+writing onnx.egg-info/PKG-INFO
+writing top-level names to onnx.egg-info/top_level.txt
+writing dependency_links to onnx.egg-info/dependency_links.txt
+reading manifest file 'onnx.egg-info/SOURCES.txt'
+reading manifest template 'MANIFEST.in'
+warning: no files found matching '*' under directory 'third_party'
+writing manifest file 'onnx.egg-info/SOURCES.txt'
+installing library code to build/bdist.macosx-10.10-x86_64/egg
+running install_lib
+running build_py
+running build_proto
+compiling /Users/mh/d/python/onnx/onnx/onnx.proto
+creating build/lib.macosx-10.10-x86_64-2.7
+creating build/lib.macosx-10.10-x86_64-2.7/onnx
+copying onnx/__init__.py -> build/lib.macosx-10.10-x86_64-2.7/onnx
+copying onnx/checker.py -> build/lib.macosx-10.10-x86_64-2.7/onnx
+copying onnx/helper.py -> build/lib.macosx-10.10-x86_64-2.7/onnx
+copying onnx/numpy_helper.py -> build/lib.macosx-10.10-x86_64-2.7/onnx
+copying onnx/onnx_pb2.py -> build/lib.macosx-10.10-x86_64-2.7/onnx
+creating build/lib.macosx-10.10-x86_64-2.7/onnx/backend
+copying onnx/backend/__init__.py -> build/lib.macosx-10.10-x86_64-2.7/onnx/backend
+copying onnx/backend/base.py -> build/lib.macosx-10.10-x86_64-2.7/onnx/backend
+creating build/lib.macosx-10.10-x86_64-2.7/onnx/defs
+copying onnx/defs/__init__.py -> build/lib.macosx-10.10-x86_64-2.7/onnx/defs
+copying onnx/defs/gen_doc.py -> build/lib.macosx-10.10-x86_64-2.7/onnx/defs
+creating build/lib.macosx-10.10-x86_64-2.7/onnx/frontend
+copying onnx/frontend/__init__.py -> build/lib.macosx-10.10-x86_64-2.7/onnx/frontend
+running build_ext
+building 'onnx.onnx_cpp2py_export' extension
+clang -fno-strict-aliasing -fno-common -dynamic -g -O2 -DNDEBUG -g -fwrapv -O3 -Wall -Wstrict-prototypes -I/Users/mh/d/python/onnx -I/Users/mh/d/python/onnx/third_party/pybind11/include -I/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/include/python2.7 -I/usr/local/include -I/usr/local/opt/openssl/include -I/usr/local/opt/sqlite/include -I/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/include/python2.7 -c /Users/mh/d/python/onnx/onnx/cpp2py_export.cc -o build/temp.macosx-10.10-x86_64-2.7/Users/mh/d/python/onnx/onnx/cpp2py_export.o -std=c++11 -stdlib=libc++
+/Users/mh/d/python/onnx/onnx/cpp2py_export.cc:1:10: fatal error: 'pybind11/pybind11.h' file not found
+#include <pybind11/pybind11.h>
+         ^
+1 error generated.
+error: command 'clang' failed with exit status 1
+Ich:onnx mh$ cd /Users/mh/Downloads/pybind11-master 
+Ich:pybind11-master mh$ mkdir build
+Ich:pybind11-master mh$ cd build
+Ich:build mh$ cmake ..
+-- The CXX compiler identification is AppleClang 6.1.0.6020053
+-- Check for working CXX compiler: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/c++
+-- Check for working CXX compiler: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/c++ -- works
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found PythonInterp: /usr/local/bin/python3.6 (found version "3.6") 
+-- Found PythonLibs: /usr/local/opt/python3/Frameworks/Python.framework/Versions/3.6/lib/libpython3.6m.dylib
+-- Performing Test HAS_CPP14_FLAG
+-- Performing Test HAS_CPP14_FLAG - Success
+-- Setting tests build type to MinSizeRel as none was specified
+-- Building tests WITHOUT Eigen
+-- Boost version: 1.60.0
+-- Performing Test HAS_FLTO_THIN
+-- Performing Test HAS_FLTO_THIN - Failed
+-- Performing Test HAS_FLTO
+-- Performing Test HAS_FLTO - Success
+-- LTO enabled
+CMake Error at tests/CMakeLists.txt:192 (message):
+  Running the tests requires pytest.  Please install it manually (try:
+  /usr/local/bin/python3.6 -m pip install pytest)
+
+
+-- Configuring incomplete, errors occurred!
+See also "/Users/mh/Downloads/pybind11-master/build/CMakeFiles/CMakeOutput.log".
+See also "/Users/mh/Downloads/pybind11-master/build/CMakeFiles/CMakeError.log".
+Ich:build mh$ pip3 isntall pytest
+ERROR: unknown command "isntall" - maybe you meant "install"
+Ich:build mh$ pip3 install pytest
+Collecting pytest
+  Using cached pytest-3.2.2-py2.py3-none-any.whl
+Collecting py>=1.4.33 (from pytest)
+  Using cached py-1.4.34-py2.py3-none-any.whl
+Requirement already satisfied: setuptools in /usr/local/lib/python3.6/site-packages (from pytest)
+Installing collected packages: py, pytest
+Successfully installed py-1.4.34 pytest-3.2.2
+Ich:build mh$ pip install pytest
+Requirement already satisfied: pytest in /usr/local/lib/python2.7/site-packages
+Requirement already satisfied: py>=1.4.33 in /usr/local/lib/python2.7/site-packages (from pytest)
+Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from pytest)
+Ich:build mh$ mkdir build
+Ich:build mh$ cd build
+Ich:build mh$ cmake ..
+-- Building tests WITHOUT Eigen
+-- Boost version: 1.60.0
+-- Catch not detected. Interpreter tests will be skipped. Install Catch headers manually or use `cmake -DDOWNLOAD_CATCH=1` to fetch them automatically.
+-- pybind11 v2.3.dev0
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /Users/mh/Downloads/pybind11-master/build
+Ich:build mh$ make check -j 4
+make: *** No rule to make target `check'.  Stop.
+Ich:build mh$ cd ..
+Ich:build mh$ cd ..
+Ich:pybind11-master mh$ mkdir build
+mkdir: build: File exists
+Ich:pybind11-master mh$ cd build
+Ich:build mh$ cmake ..
+-- Building tests WITHOUT Eigen
+-- Boost version: 1.60.0
+-- Catch not detected. Interpreter tests will be skipped. Install Catch headers manually or use `cmake -DDOWNLOAD_CATCH=1` to fetch them automatically.
+-- pybind11 v2.3.dev0
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /Users/mh/Downloads/pybind11-master/build
+Ich:build mh$ make check -j 4
+Scanning dependencies of target test_subdirectory_embed
+Scanning dependencies of target test_subdirectory_target
+Scanning dependencies of target test_subdirectory_function
+Scanning dependencies of target mock_install
+-- Install configuration: "MinSizeRel"
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/attr.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/buffer_info.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/cast.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/chrono.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/common.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/complex.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/class.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/common.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/descr.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/init.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/internals.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/typeid.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/eigen.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/embed.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/eval.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/functional.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/iostream.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/numpy.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/operators.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/options.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/pybind11.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/pytypes.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/stl.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/stl_bind.h
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11Config.cmake
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11ConfigVersion.cmake
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/FindPythonLibsNew.cmake
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11Tools.cmake
+-- Installing: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11Targets.cmake
+[  0%] Built target mock_install
+Scanning dependencies of target pybind11_tests
+[  2%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/pybind11_tests.cpp.o
+[  2%] Built target test_subdirectory_target
+Scanning dependencies of target pybind11_cross_module_tests
+[  5%] Building CXX object tests/CMakeFiles/pybind11_cross_module_tests.dir/pybind11_cross_module_tests.cpp.o
+[  5%] Built target test_subdirectory_embed
+[  8%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_buffers.cpp.o
+[  8%] Built target test_subdirectory_function
+Scanning dependencies of target test_installed_function
+Scanning dependencies of target test_installed_embed
+[ 11%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_builtin_casters.cpp.o
+[ 11%] Built target test_installed_function
+[ 14%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_call_policies.cpp.o
+[ 14%] Built target test_installed_embed
+[ 17%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_callbacks.cpp.o
+Scanning dependencies of target test_installed_target
+[ 20%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_chrono.cpp.o
+[ 22%] Linking CXX shared module ../../tests/pybind11_cross_module_tests.cpython-36m-darwin.so
+[ 25%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_class.cpp.o
+[ 28%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_constants_and_functions.cpp.o
+[ 28%] Built target test_installed_target
+[ 31%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_copy_move.cpp.o
+[ 31%] Built target pybind11_cross_module_tests
+[ 34%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_docstring_options.cpp.o
+Scanning dependencies of target test_cmake_build
+[ 34%] Built target test_cmake_build
+[ 37%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_enum.cpp.o
+[ 40%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_eval.cpp.o
+[ 42%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_exceptions.cpp.o
+[ 45%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_factory_constructors.cpp.o
+[ 48%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_iostream.cpp.o
+[ 51%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_kwargs_and_defaults.cpp.o
+[ 54%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_local_bindings.cpp.o
+[ 57%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_methods_and_attributes.cpp.o
+[ 60%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_modules.cpp.o
+[ 62%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_multiple_inheritance.cpp.o
+[ 65%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_numpy_array.cpp.o
+In file included from /Users/mh/Downloads/pybind11-master/tests/test_numpy_array.cpp:12:
+/Users/mh/Downloads/pybind11-master/include/pybind11/numpy.h:523:22: warning: too many braces around scalar initializer
+    array() : array({{0}}, static_cast<const double *>(nullptr)) {}
+                     ^~~
+[ 68%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_numpy_dtypes.cpp.o
+[ 71%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_numpy_vectorize.cpp.o
+In file included from /Users/mh/Downloads/pybind11-master/tests/test_numpy_dtypes.cpp:11:
+/Users/mh/Downloads/pybind11-master/include/pybind11/numpy.h:523:22: warning: too many braces around scalar initializer
+    array() : array({{0}}, static_cast<const double *>(nullptr)) {}
+                     ^~~
+In file included from /Users/mh/Downloads/pybind11-master/tests/test_numpy_vectorize.cpp:12:
+/Users/mh/Downloads/pybind11-master/include/pybind11/numpy.h:523:22: warning: too many braces around scalar initializer
+    array() : array({{0}}, static_cast<const double *>(nullptr)) {}
+                     ^~~
+[ 74%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_opaque_types.cpp.o
+1 warning generated.
+[ 77%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_operator_overloading.cpp.o
+1 warning generated.
+[ 80%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_pickling.cpp.o
+1 warning generated.
+[ 82%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_pytypes.cpp.o
+[ 85%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_sequences_and_iterators.cpp.o
+[ 88%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_smart_ptr.cpp.o
+[ 91%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_stl.cpp.o
+[ 94%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_stl_binders.cpp.o
+/Users/mh/Downloads/pybind11-master/tests/test_stl.cpp:23:8: warning: class template partial specialization contains a template parameter that cannot be deduced; this partial specialization will never be used
+struct type_caster<boost::variant<Ts...>> : variant_caster<boost::variant<Ts...>> {};
+       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/mh/Downloads/pybind11-master/tests/test_stl.cpp:22:23: note: non-deducible template parameter 'Ts'
+template <typename... Ts>
+                      ^
+In file included from /Users/mh/Downloads/pybind11-master/tests/test_stl_binders.cpp:13:
+/Users/mh/Downloads/pybind11-master/include/pybind11/numpy.h:523:22: warning: too many braces around scalar initializer
+    array() : array({{0}}, static_cast<const double *>(nullptr)) {}
+                     ^~~
+[ 97%] Building CXX object tests/CMakeFiles/pybind11_tests.dir/test_virtual_functions.cpp.o
+1 warning generated.
+1 warning generated.
+[100%] Linking CXX shared module ../../tests/pybind11_tests.cpython-36m-darwin.so
+------ pybind11_tests.cpython-36m-darwin.so file size: 1987432
+[100%] Built target pybind11_tests
+Scanning dependencies of target pytest
+=========================================================================================================== test session starts ============================================================================================================
+platform darwin -- Python 3.6.0, pytest-3.2.2, py-1.4.34, pluggy-0.4.0
+rootdir: /Users/mh/Downloads/pybind11-master/tests, inifile: pytest.ini
+collected 285 items                                                                                                                                                                                                                         
+
+test_buffers.py ....
+test_builtin_casters.py ....s.........
+test_call_policies.py ........
+test_callbacks.py .......
+test_chrono.py .......
+test_class.py ..............
+test_constants_and_functions.py ....
+test_copy_move.py ....s..
+test_docstring_options.py .
+test_eigen.py ssssssssssssssssssssssss
+test_enum.py .....
+test_eval.py .
+test_exceptions.py .......
+test_factory_constructors.py .........
+test_iostream.py ...........
+test_kwargs_and_defaults.py ....
+test_local_bindings.py .........
+test_methods_and_attributes.py ....................
+test_modules.py .....
+test_multiple_inheritance.py ...........
+test_numpy_array.py ................................
+test_numpy_dtypes.py ............
+test_numpy_vectorize.py .......
+test_opaque_types.py ..
+test_operator_overloading.py ...
+test_pickling.py ....
+test_pytypes.py ...........
+test_sequences_and_iterators.py ......
+test_smart_ptr.py .........
+test_stl.py .......s.F..
+test_stl_binders.py ........
+test_virtual_functions.py .......
+========================================================================================================= short test summary info ==========================================================================================================
+SKIP [1] test_builtin_casters.py:109: no <string_view>
+SKIP [1] test_copy_move.py:68: no <optional>
+SKIP [1] test_eigen.py:25: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:34: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:43: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:72: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:99: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:122: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:131: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:154: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:197: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:208: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:226: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:354: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:375: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:444: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:491: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:533: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:578: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:592: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:610: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:625: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:646: eigen and/or scipy are not installed
+SKIP [1] test_eigen.py:656: eigen and/or scipy are not installed
+SKIP [1] test_eigen.py:666: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:675: eigen and/or numpy are not installed
+SKIP [1] test_stl.py:93: no <optional>
+
+================================================================================================================= FAILURES =================================================================================================================
+_______________________________________________________________________________________________________________ test_variant _______________________________________________________________________________________________________________
+
+doc = <conftest.SanitizedString object at 0x10c3148d0>
+
+    @pytest.mark.skipif(not hasattr(m, "load_variant"), reason='no <variant>')
+    def test_variant(doc):
+>       assert m.load_variant(1) == "int"
+E       TypeError: load_variant(): incompatible function arguments. The following argument types are supported:
+E           1. (arg0: boost::variant<int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, double, std::nullptr_t>) -> str
+E       
+E       Invoked with: 1
+
+test_stl.py:139: TypeError
+============================================================================================= 1 failed, 257 passed, 27 skipped in 6.51 seconds =============================================================================================
+make[3]: *** [tests/CMakeFiles/pytest] Error 1
+make[2]: *** [tests/CMakeFiles/pytest.dir/all] Error 2
+make[1]: *** [tests/CMakeFiles/check.dir/rule] Error 2
+make: *** [check] Error 2
+Ich:build mh$ make install
+[  5%] Built target pybind11_cross_module_tests
+[100%] Built target pybind11_tests
+Install the project...
+-- Install configuration: "MinSizeRel"
+-- Installing: /usr/local/include/pybind11
+-- Installing: /usr/local/include/pybind11/attr.h
+-- Installing: /usr/local/include/pybind11/buffer_info.h
+-- Installing: /usr/local/include/pybind11/cast.h
+-- Installing: /usr/local/include/pybind11/chrono.h
+-- Installing: /usr/local/include/pybind11/common.h
+-- Installing: /usr/local/include/pybind11/complex.h
+-- Installing: /usr/local/include/pybind11/detail
+-- Installing: /usr/local/include/pybind11/detail/class.h
+-- Installing: /usr/local/include/pybind11/detail/common.h
+-- Installing: /usr/local/include/pybind11/detail/descr.h
+-- Installing: /usr/local/include/pybind11/detail/init.h
+-- Installing: /usr/local/include/pybind11/detail/internals.h
+-- Installing: /usr/local/include/pybind11/detail/typeid.h
+-- Installing: /usr/local/include/pybind11/eigen.h
+-- Installing: /usr/local/include/pybind11/embed.h
+-- Installing: /usr/local/include/pybind11/eval.h
+-- Installing: /usr/local/include/pybind11/functional.h
+-- Installing: /usr/local/include/pybind11/iostream.h
+-- Installing: /usr/local/include/pybind11/numpy.h
+-- Installing: /usr/local/include/pybind11/operators.h
+-- Installing: /usr/local/include/pybind11/options.h
+-- Installing: /usr/local/include/pybind11/pybind11.h
+-- Installing: /usr/local/include/pybind11/pytypes.h
+-- Installing: /usr/local/include/pybind11/stl.h
+-- Installing: /usr/local/include/pybind11/stl_bind.h
+-- Installing: /usr/local/share/cmake/pybind11/pybind11Config.cmake
+-- Installing: /usr/local/share/cmake/pybind11/pybind11ConfigVersion.cmake
+-- Installing: /usr/local/share/cmake/pybind11/FindPythonLibsNew.cmake
+-- Installing: /usr/local/share/cmake/pybind11/pybind11Tools.cmake
+-- Installing: /usr/local/share/cmake/pybind11/pybind11Targets.cmake
+Ich:build mh$ make check -j 4
+-- Install configuration: "MinSizeRel"
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/attr.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/buffer_info.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/cast.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/chrono.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/common.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/complex.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/class.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/common.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/descr.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/init.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/internals.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/detail/typeid.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/eigen.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/embed.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/eval.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/functional.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/iostream.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/numpy.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/operators.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/options.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/pybind11.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/pytypes.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/stl.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/include/pybind11/stl_bind.h
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11Config.cmake
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11ConfigVersion.cmake
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/FindPythonLibsNew.cmake
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11Tools.cmake
+-- Up-to-date: /Users/mh/Downloads/pybind11-master/build/mock_install/share/cmake/pybind11/pybind11Targets.cmake
+[  0%] Built target mock_install
+[ 94%] Built target pybind11_tests
+[100%] Built target pybind11_cross_module_tests
+[100%] Built target test_subdirectory_embed
+[100%] Built target test_subdirectory_target
+[100%] Built target test_subdirectory_function
+[100%] Built target test_installed_function
+[100%] Built target test_installed_embed
+[100%] Built target test_installed_target
+[100%] Built target test_cmake_build
+=========================================================================================================== test session starts ============================================================================================================
+platform darwin -- Python 3.6.0, pytest-3.2.2, py-1.4.34, pluggy-0.4.0
+rootdir: /Users/mh/Downloads/pybind11-master/tests, inifile: pytest.ini
+collected 285 items                                                                                                                                                                                                                         
+
+test_buffers.py ....
+test_builtin_casters.py ....s.........
+test_call_policies.py ........
+test_callbacks.py .......
+test_chrono.py .......
+test_class.py ..............
+test_constants_and_functions.py ....
+test_copy_move.py ....s..
+test_docstring_options.py .
+test_eigen.py ssssssssssssssssssssssss
+test_enum.py .....
+test_eval.py .
+test_exceptions.py .......
+test_factory_constructors.py .........
+test_iostream.py ...........
+test_kwargs_and_defaults.py ....
+test_local_bindings.py .........
+test_methods_and_attributes.py ....................
+test_modules.py .....
+test_multiple_inheritance.py ...........
+test_numpy_array.py ................................
+test_numpy_dtypes.py ............
+test_numpy_vectorize.py .......
+test_opaque_types.py ..
+test_operator_overloading.py ...
+test_pickling.py ....
+test_pytypes.py ...........
+test_sequences_and_iterators.py ......
+test_smart_ptr.py .........
+test_stl.py .......s.F..
+test_stl_binders.py ........
+test_virtual_functions.py .......
+========================================================================================================= short test summary info ==========================================================================================================
+SKIP [1] test_builtin_casters.py:109: no <string_view>
+SKIP [1] test_copy_move.py:68: no <optional>
+SKIP [1] test_eigen.py:25: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:34: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:43: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:72: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:99: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:122: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:131: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:154: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:197: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:208: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:226: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:354: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:375: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:444: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:491: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:533: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:578: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:592: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:610: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:625: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:646: eigen and/or scipy are not installed
+SKIP [1] test_eigen.py:656: eigen and/or scipy are not installed
+SKIP [1] test_eigen.py:666: eigen and/or numpy are not installed
+SKIP [1] test_eigen.py:675: eigen and/or numpy are not installed
+SKIP [1] test_stl.py:93: no <optional>
+
+================================================================================================================= FAILURES =================================================================================================================
+_______________________________________________________________________________________________________________ test_variant _______________________________________________________________________________________________________________
+
+doc = <conftest.SanitizedString object at 0x1074cc2b0>
+
+    @pytest.mark.skipif(not hasattr(m, "load_variant"), reason='no <variant>')
+    def test_variant(doc):
+>       assert m.load_variant(1) == "int"
+E       TypeError: load_variant(): incompatible function arguments. The following argument types are supported:
+E           1. (arg0: boost::variant<int, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, double, std::nullptr_t>) -> str
+E       
+E       Invoked with: 1
+
+test_stl.py:139: TypeError
+============================================================================================= 1 failed, 257 passed, 27 skipped in 3.65 seconds =============================================================================================
+make[3]: *** [tests/CMakeFiles/pytest] Error 1
+make[2]: *** [tests/CMakeFiles/pytest.dir/all] Error 2
+make[1]: *** [tests/CMakeFiles/check.dir/rule] Error 2
+make: *** [check] Error 2
+Ich:build mh$ make install -j 4
+[  5%] Built target pybind11_cross_module_tests
+[100%] Built target pybind11_tests
+Install the project...
+-- Install configuration: "MinSizeRel"
+-- Up-to-date: /usr/local/include/pybind11
+-- Up-to-date: /usr/local/include/pybind11/attr.h
+-- Up-to-date: /usr/local/include/pybind11/buffer_info.h
+-- Up-to-date: /usr/local/include/pybind11/cast.h
+-- Up-to-date: /usr/local/include/pybind11/chrono.h
+-- Up-to-date: /usr/local/include/pybind11/common.h
+-- Up-to-date: /usr/local/include/pybind11/complex.h
+-- Up-to-date: /usr/local/include/pybind11/detail
+-- Up-to-date: /usr/local/include/pybind11/detail/class.h
+-- Up-to-date: /usr/local/include/pybind11/detail/common.h
+-- Up-to-date: /usr/local/include/pybind11/detail/descr.h
+-- Up-to-date: /usr/local/include/pybind11/detail/init.h
+-- Up-to-date: /usr/local/include/pybind11/detail/internals.h
+-- Up-to-date: /usr/local/include/pybind11/detail/typeid.h
+-- Up-to-date: /usr/local/include/pybind11/eigen.h
+-- Up-to-date: /usr/local/include/pybind11/embed.h
+-- Up-to-date: /usr/local/include/pybind11/eval.h
+-- Up-to-date: /usr/local/include/pybind11/functional.h
+-- Up-to-date: /usr/local/include/pybind11/iostream.h
+-- Up-to-date: /usr/local/include/pybind11/numpy.h
+-- Up-to-date: /usr/local/include/pybind11/operators.h
+-- Up-to-date: /usr/local/include/pybind11/options.h
+-- Up-to-date: /usr/local/include/pybind11/pybind11.h
+-- Up-to-date: /usr/local/include/pybind11/pytypes.h
+-- Up-to-date: /usr/local/include/pybind11/stl.h
+-- Up-to-date: /usr/local/include/pybind11/stl_bind.h
+-- Up-to-date: /usr/local/share/cmake/pybind11/pybind11Config.cmake
+-- Up-to-date: /usr/local/share/cmake/pybind11/pybind11ConfigVersion.cmake
+-- Up-to-date: /usr/local/share/cmake/pybind11/FindPythonLibsNew.cmake
+-- Up-to-date: /usr/local/share/cmake/pybind11/pybind11Tools.cmake
+-- Up-to-date: /usr/local/share/cmake/pybind11/pybind11Targets.cmake
+Ich:build mh$ cd ~/d/python/onnx/
+Ich:onnx mh$ history
+   56  jstack -h
+   57  git status
+   58  mvn clean install
+   59  git status
+   60  git add -u
+   61  git commit -m"Better parse error messages for schema files, fixes #45"
+   62  git push
+   63  git push --set-upstream origin 3.2
+   64  git log
+   65  git checkout 3.1
+   66  git checkout master
+   67  git log
+   68  git push
+   69  git cherry-pick 3762493c8d94b3dd8fd2b7d51219a0eb1b4330a1
+   70  git status
+   71  mate src/main/kotlin/org/neo4j/graphql/CypherGenerator.kt
+   72  mvn install
+   73  git add -u
+   74  git cherry-pick --continue
+   75  git cherry-pick 17c293827abddcdaede24e5128b1effb6b631ad3
+   76  git push
+   77  git branch
+   78  cp target/neo4j-graphql-0.1-SNAPSHOT.jar ~/Dropbox/Public/
+   79  mvn clean install
+   80  ls target/
+   81  less /Users/mh/Downloads/cancer_treatment/test_text 
+   82  mvn install -DskipTests
+   83  cp target/neo4j-graphql-0.1-SNAPSHOT.jar ~/v/neo4j-enterprise-3.1.4/plugins/
+   84  ssh neo@mattis.malmo.neohq.net
+   85  ssh-add ~/.ssh/github_rsa.pub 
+   86  ssh-add ~/.ssh/github_rsa
+   87  ssh neo@mattis.malmo.neohq.net
+   88  jps
+   89  kill 994
+   90  grep 'java.lang.Thread.State' -A1~/Downloads/neo4j.log 
+   91  grep 'java.lang.Thread.State' -A 1~/Downloads/neo4j.log 
+   92  grep -A 1 'java.lang.Thread.State' ~/Downloads/neo4j.log 
+   93  ssh neo@mattis.malmo.neohq.net
+   94  ssh neo@mattis.malmo.neohq.net
+   95  ssh neo@mattis.malmo.neohq.net
+   96  ssh neo@mattis.malmo.neohq.net
+   97  ssh neo@mattis.malmo.neohq.net
+   98  ssh neo@mattis.malmo.neohq.net
+   99  ssh neo@mattis.malmo.neohq.net
+  100  ssh neo@mattis.malmo.neohq.net
+  101  ssh neo@mattis.malmo.neohq.net
+  102  ssh neo@mattis.malmo.neohq.net
+  103  ssh neo@mattis.malmo.neohq.net
+  104  ssh neo@mattis.malmo.neohq.net
+  105  ssh neo@mattis.malmo.neohq.net
+  106  ssh neo@mattis.malmo.neohq.net
+  107  ssh neo@mattis.malmo.neohq.net
+  108  ssh neo@mattis.malmo.neohq.net
+  109  ssh neo@mattis.malmo.neohq.net
+  110  traceroute mg.mud.de
+  111  traceroute 141.76.2.1
+  112  ssh neo@mattis.malmo.neohq.net
+  113  ssh neo@mattis.malmo.neohq.net
+  114  ssh neo@mattis.malmo.neohq.net
+  115  ssh neo@mattis.malmo.neohq.net
+  116  ssh neo@mattis.malmo.neohq.net
+  117  ssh neo@mattis.malmo.neohq.net
+  118  ssh neo@mattis.malmo.neohq.net
+  119  killall ssh
+  120  git log
+  121  git status
+  122  mvn clean install
+  123  git branch
+  124  git branch
+  125  mvn clean install
+  126  git branch
+  127  killall ssh
+  128  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --user-data-dir=/tmp/chrome
+  129  bg
+  130  ifconfig 
+  131  cd Dropbox/Public/
+  132  mkdir dl4j
+  133  cd dl4j
+  134  grep image ../javaspektrum-dl4j.adoc 
+  135  curl -OL http://www.kdnuggets.com/wp-content/uploads/neural-art.jpg
+  136  curl -OL https://upload.wikimedia.org/wikipedia/commons/c/c2/MultiLayerNeuralNetworkBigger_english.png
+  137  curl -OL https://dl.dropboxusercontent.com/u/14493611/activation-functions.jpg
+  138  curl -OL https://deeplearning4j.org/img/karpathy-convnet-labels.png
+  139  curl -OL https://deeplearning4j.org/img/convnet.png
+  140  curl -OL https://dl.dropboxusercontent.com/u/14493611/ml_xor.png
+  141  curl -OL https://dl.dropboxusercontent.com/u/14493611/ml_xor_11.png
+  142  curl -OL https://dl.dropboxusercontent.com/u/14493611/MNIST.png
+  143  ls
+  144  open .
+  145  cd /Library/LaunchAgents/
+  146  ag org.neo4j.server
+  147  ls
+  148  rm com.oracle.java.Java-Updater.plist com.teamviewer.teamviewer*
+  149  cd ../LaunchDaemons/
+  150  ls
+  151  cd support/
+  152  mkdir jonathan-datalake
+  153  cd jonathan-datalake/
+  154  curl -OL http://neo4j-lake.s3-website-us-east-1.amazonaws.com/1M_a.csv
+  155  cd
+  156  cd java/neo/neo4j
+  157  ag --xml licenses
+  158  cd d/dotnet/
+  159  git clone https://github.com/joakimskoog/AnApiOfIceAndFire
+  160  cp AnApiOfIceAndFire/data/*.json ~/data/got/
+  161  cd data/got/
+  162  grep -i danaerys characters.json 
+  163  grep -i daenerys characters.json 
+  164  cat got-import-api.cypher 
+  165  cat got-import.cypher 
+  166  open .
+  167  mate x/got-schema.graphql
+  168  mate got-schema.graphql 
+  169  cd x
+  170  history | grep graphql
+  171  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":"words", "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  172  mate ~/d/js/graphql-js/src/
+  173  cd d/ml/got
+  174  ls
+  175  cd d/data/got
+  176  cd data/got/
+  177  ls
+  178  pbcopy < got-graphql-schema.jpg 
+  179  pbcopy < got-schema.graphql 
+  180  less got-schema.graphql 
+  181  cd x
+  182  ls
+  183  ls
+  184  graphql get-schema
+  185  vi .graphqlconfig
+  186  graphql get-schema
+  187  graphql get-schema got-local
+  188  graphql get-schema -h
+  189  graphql get-schema got-local
+  190  cat .graphqlconfig
+  191  graphql get-schema "got-local"
+  192  export GRAPHQL_CONFIG_ENDPOINT_NAME="got-local"
+  193  graphql get-schema 
+  194  less  got-schema.graphql
+  195  pwd
+  196  head ../houses.json 
+  197  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":words, "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  198  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":words, "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  199  less ../houses.json 
+  200  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":words, "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  201  mate ../houses.json 
+  202  mate ../houses.json 
+  203  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":words, "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  204  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":"words", "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  205  cd ..
+  206  cp houses.json houses10.json 
+  207  mate houses10.json 
+  208  cd x
+  209  graphql load --json /Users/mh/data/got/houses10.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":"words", "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  210  graphql load --json /Users/mh/data/got/houses10.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":"words", "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  211  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":"words", "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  212  head ../houses.json 
+  213  head ../characters.json 
+  214  head -2 ../characters.json  ../houses.json 
+  215  grep create got-schema.graphql
+  216  grep add got-schema.graphql
+  217  graphql load --json /Users/mh/data/got/characters.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  218  cd ..
+  219  head characters.json > characters10.json 
+  220  mate characters10.json 
+  221  cd x
+  222  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  223  pbcopy < ../got-schema.graphql 
+  224  cd ..
+  225  ls
+  226  neo4j-graphql got-schema.graphql 
+  227  cd x
+  228  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  229  mate ..
+  230  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  231  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  232  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  233  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  234  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  235  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  236  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  237  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  238  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  239  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  240  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  241  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  242  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  243  graphql load --json /Users/mh/data/got/characters.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  244  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  245  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  246  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  247  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  248  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  249  graphql load --json /Users/mh/data/got/characters10.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  250  graphql load --json /Users/mh/data/got/characters.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  251  graphql load --json /Users/mh/data/got/characters.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  252  graphql load --json /Users/mh/data/got/characters.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  253  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation addHouseFounder  --mapping '{"Id":"id","Founder":"founder"}'
+  254  neo4j-graphql got-schema.graphql 
+  255  neo4j-graphql got-schema.graphql 
+  256  graphql init
+  257  mate .graphqlconfig 
+  258  mate x/.graphqlconfig
+  259  graphql ping
+  260  graphql ping got
+  261  graphql ping got
+  262  graphql ping got
+  263  graphql get-schema
+  264  graphql get-schema got
+  265  export GRAPHQL_CONFIG_ENDPOINT_NAME="got"
+  266  graphql get-schema got
+  267  less schema.graphql 
+  268  graphql voyager
+  269  cd x
+  270  graphql load --json /Users/mh/data/got/houses.json --endpoint "got-local" --mutation createHouse --mapping '{"Id":"id","Name":"name","Founded":"founded","Titles":"titles", "Words":"words", "AncestralWeapons":"ancestralWeapons","CoatOfArms":"coatOfArms"}'
+  271  graphql load --json /Users/mh/data/got/characters.json --endpoint "got-local" --mutation createPerson  --mapping '{"Id":"id","Name":"name","Aliases":"aliases","Books":"books", "TvSeries":"tvSeries", "PlayedBy":"playedBy","IsFemale":"isFemale","Culture":"culture","Died":"died","Titles":"titles"}'
+  272  graphql load --json /Users/mh/data/got/characters.json --endpoint "got-local" --mutation addPersonSpouse  --mapping '{"Id":"id","Spouse":"spouse"}'
+  273  cd support/ldbc
+  274  ls
+  275  du -sh sf010/
+  276  cd v/neo4j-enterprise-2.3.7/data/graph.db/
+  277  ls
+  278  docker pull chronograf:1.3.7.0
+  279  docker run chronograph
+  280  mate .
+  281  mvn clean install
+  282  cd
+  283  cd Downloads/
+  284  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  285  ssh-add ~/.ssh/github_rsa
+  286  ssh neo@mattis.malmo.neohq.net
+  287  ps auxww | grep Skitch
+  288  kill 271
+  289  sudo su -
+  290  cd java/neo/neo4j/community/cypher/
+  291  scp -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com:/db/logs/gc.log Dropbox/Public/
+  292  cd Downloads/
+  293  scp -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com:/db/logs/gc.log Dropbox/Public/
+  294  scp -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com:/db/logs/gc.log ~/Dropbox/Public/
+  295  scp -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com:/db/transfers.db/logs/gc.log ~/Dropbox/Public/
+  296  git help clone
+  297  cd 
+  298  htop
+  299  htop
+  300  mate ~/d/python/miguel/ca
+  301  cd v/
+  302  cd neo4j-enterprise-3.2.3
+  303  JAVA_OPTS="-Xmx4G -Xms4G" bin/neo4j-shell -path test.db
+  304  cp -r plugins test.db/
+  305  JAVA_OPTS="-Xmx4G -Xms4G" bin/neo4j-shell -path test.db
+  306  grep apoc conf/neo4j.conf 
+  307  echo 'dbms.security.procedures.unrestricted=apoc.*,algo.*' > neo4j.conf
+  308  JAVA_OPTS="-Xmx4G -Xms4G" bin/neo4j-shell -path test.db -config neo4j.conf 
+  309  JAVA_OPTS="-Xmx4G -Xms4G" bin/neo4j-shell -path test.db -config neo4j.conf 
+  310  JAVA_OPTS="-Xmx4G -Xms4G" bin/neo4j-shell -path test.db -config neo4j.conf -v
+  311  cat ~/_/iban 
+  312  cd java/neo/neo4j-elasticsearch/
+  313  git branch
+  314  git checkout 3.1
+  315  less pom.xml 
+  316  git checkout -b 3.2
+  317  mate pom.xml 
+  318  mvn clean install
+  319  git status
+  320  open target/
+  321  git add pom.xml 
+  322  git commit -m"Branch for Neo4j 3.2.3"
+  323  git push
+  324  git push --set-upstream origin 3.2
+  325  git tag 3.2.3
+  326  git push --tags
+  327  git checkout 3.1
+  328  git push
+  329  git pull --rebase
+  330  git push
+  331  git log 3.1
+  332  cd old/Downloads/elasticsearch-5.1.1
+  333  bin/elasticsearch
+  334  cd Library/Caches/Google/
+  335  ls
+  336  ag "Mietwohnung in Jena"
+  337  ls
+  338  cd Chrome/
+  339  ls
+  340  cd Default/
+  341  ls
+  342  cd Cache/
+  343  ag "Mietwohnung"
+  344  mate ~/_/release*
+  345  ssh ubuntu@ssh.build.neohq.net
+  346  vi ~/.ssh/known_hosts
+  347  ssh ubuntu@ssh.build.neohq.net
+  348  cd Dropbox/Public/
+  349  curl -OL https://upload.wikimedia.org/wikipedia/commons/c/c2/MultiLayerNeuralNetworkBigger_english.png
+  350  curl -OL http://www.kdnuggets.com/wp-content/uploads/neural-art.jpg
+  351  cd java/spring/spring-data-commons/
+  352  ag Flux
+  353  cd ../reactive-thymeleaf/
+  354  ag Flux
+  355  ag Flux
+  356  mate src/
+  357  cd
+  358  cd data/yelp/
+  359  ls
+  360  less yelp_academic_dataset_business.json 
+  361  cd data/yelp/
+  362  ls
+  363  hexdump -C < yelp_academic_dataset_tip.json | head
+  364  hexdump -C < yelp_academic_dataset_checkin.json | head 
+  365  hexdump -C < yelp_academic_dataset_checkin.json | head -50
+  366  hexdump -C < yelp_academic_dataset_checkin.json | head -50
+  367  hexdump -C < yelp_academic_dataset_checkin.json | less
+  368  npm i semiotic
+  369  cd d/js/
+  370  mkdir viz 
+  371  cd viz/
+  372  npm i semiotic
+  373  pwd
+  374  cd docs/developer
+  375  ls
+  376  less render_local.rb 
+  377  diff render.rb render_local.rb 
+  378  diff -u render.rb render_local.rb 
+  379  diff -u render.rb render_local.rb 
+  380  cd java/neo/neo4j-etl-components
+  381  git pull
+  382  git log
+  383  find . -name "*.zip"
+  384  find . -name "*.gz"
+  385  open ./neo4j-etl-release/
+  386  git pull
+  387  mvn clean install
+  388  whois manyedges.com
+  389  cd docs/
+  390  ls
+  391  cd kb
+  392  cd knowledge-base/
+  393  ls
+  394  cat key.sh 
+  395  ls *.sh
+  396  less zendesk_syncer.rb 
+  397  cd java/neo/neo4j
+  398  ag lock.manager
+  399  ag lock.manager | grep settings
+  400  ag lock.manager | grep Settings
+  401  less community/kernel/src/main/java/org/neo4j/kernel/impl/factory/GraphDatabaseFacadeFactory.java
+  402  ag lock_manager
+  403  ag lock_manager
+  404  less community/kernel/src/main/java/org/neo4j/kernel/impl/factory/CommunityEditionModule.java
+  405  ag Locks.Factory
+  406  ag Locks.Factory
+  407  less community/kernel/src/main/java/org/neo4j/kernel/impl/factory/CommunityEditionModule.java
+  408  cd ..
+  409  pwd
+  410  git clone git@github.com:neo-technology/quality-tasks.git
+  411  cd neo4j
+  412  cd community/cypher/
+  413  git branch
+  414  git checkout 3.3
+  415  git pull
+  416  ag deprecated
+  417  less cypher/src/main/scala/org/neo4j/cypher/internal/compatibility/v3_2/ExecutionResultWrapper.scala
+  418  cd java/neo/
+  419  ag neo4j.key 
+  420  less neo4j/community/kernel/src/main/java/org/neo4j/kernel/configuration/ssl/LegacySslPolicyConfig.java 
+  421  ag tls
+  422  ag --java tls
+  423  cd neo4j
+  424  ag --java tls
+  425  cd data/yelp/
+  426  ls
+  427  df -h
+  428  df -h
+  429  /Users/mh/d/java/graal/jdk1.8.0/product/bin/jmc ; exit;
+  430  cd java/neo/neo4j
+  431  git checkout 2.3
+  432  ag 'ACL structures in graphs'
+  433  git pull
+  434  ag 'ACL structures in graphs'
+  435  git checkout 3.3
+  436  git pull
+  437  cd ../neo4j-manual-modeling/
+  438  git pull
+  439  cd ../neo4j/community/lucene-index
+  440  ag "contains"
+  441  ag "contains" src/main/java/
+  442  ag "contains" src/main/java/
+  443  lesss src/main/java/org/neo4j/kernel/api/impl/schema/reader/SimpleIndexReader.java
+  444  less src/main/java/org/neo4j/kernel/api/impl/schem
+  445  ag LuceneDocumentStructure
+  446  ag LuceneDocumentStructure
+  447  ag LuceneDocumentStructure src/main/java/
+  448  ag LuceneDocumentStructure src/main/java/
+  449  less src/main/java/org/neo4j/kernel/api/impl/schema/LuceneDocumentStructure.java
+  450  cd d/java/software/
+  451  ls
+  452  cp /Volumes/Untitled/jqassistant-alexa_cleaned.rar .
+  453  jmc
+  454  export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_101.jdk/
+  455  jmc
+  456  export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_101.jdk
+  457  jvm
+  458  jmc
+  459  mdfind -name jmc
+  460  open /Users/mh/d/java/graal/jdk1.8.0/product/bin/jmc
+  461  /Library/Java/JavaVirtualMachines/jdk1.8.0_101.jdk/Contents/Home/bin/jmc
+  462  ssh neo@mattis.malmo.neohq.net
+  463  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  464  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  465  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  466  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  467  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  468  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  469  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  470  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  471  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  472  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  473  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  474  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  475  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  476  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  477  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  478  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  479  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  480  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  481  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  482  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  483  ssh -i "mh-2017-07.pem" ubuntu@ec2-54-152-120-29.compute-1.amazonaws.com
+  484  cd java/software/
+  485  git clone git@github.com:StephanPirnbaum/sar-framework.git
+  486  ls
+  487  unrar x jqassistant-alexa_cleaned.rar 
+  488  brew install unrar
+  489  unrar x jqassistant-alexa_cleaned.rar 
+  490  ls
+  491  cd
+  492  cd java/neo/neo4j/community/lucene-index
+  493  ag "stringContains" src/main/java/
+  494  less src/main/java/org/neo4j/kernel/api/impl/schema/reader/LuceneAllEntriesIndexAccessorReader.j
+  495  ag "wildcardQuery" src/main/java/
+  496  ag "wildcardquery" src/main/java/
+  497  less src/main/java/org/neo4j/kernel/api/impl/schema/LuceneDocumentStructure.java
+  498  ssh michael@neo.jexp.de
+  499  cd d/python/
+  500  git clone https://github.com/onnx/onnx.git
+  501  cd onnx/
+  502  ag load
+  503  less onnx/__init__.py 
+  504  pip install .
+  505  python setup.py 
+  506  brew install protoc
+  507  pip install -e .
+  508  brew tap homebrew/versions
+  509  brew install protobuf241
+  510  brew install protobuf
+  511  protoc
+  512  pip install -e .
+  513  brew install python3-dev
+  514  pip install onnx
+  515  find .
+  516  python
+  517  python2
+  518  python3
+  519  pip3 install onnx
+  520  python3
+  521  python -c 'import onnx'
+  522  python3 -c 'import onnx'
+  523  conda install -c ezyang onnx
+  524  brew install conda
+  525  pip install onnx
+  526  pip3 install onnx
+  527  python -c 'import onnx'
+  528  protoc
+  529  pip install -e .
+  530  ls
+  531  python setup.py 
+  532  python setup.py  isntall
+  533  python setup.py install
+  534  cd /Users/mh/Downloads/pybind11-master 
+  535  mkdir build
+  536  cd build
+  537  cmake ..
+  538  pip3 isntall pytest
+  539  pip3 install pytest
+  540  pip install pytest
+  541  mkdir build
+  542  cd build
+  543  cmake ..
+  544  make check -j 4
+  545  cd ..
+  546  cd ..
+  547  mkdir build
+  548  cd build
+  549  cmake ..
+  550  make check -j 4
+  551  make install
+  552  make check -j 4
+  553  make install -j 4
+  554  cd ~/d/python/onnx/
+  555  history
+Ich:onnx mh$ pip install -e .
+Obtaining file:///Users/mh/d/python/onnx
+Requirement already satisfied: six in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: numpy in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: protobuf in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from protobuf->onnx==0.1)
+Installing collected packages: onnx
+  Found existing installation: onnx 0.1
+    Uninstalling onnx-0.1:
+      Successfully uninstalled onnx-0.1
+  Running setup.py develop for onnx
+Successfully installed onnx
+Ich:onnx mh$ pip3 install -e .
+Obtaining file:///Users/mh/d/python/onnx
+Requirement already satisfied: protobuf in /usr/local/lib/python3.6/site-packages (from onnx==0.1)
+Requirement already satisfied: numpy in /usr/local/lib/python3.6/site-packages (from onnx==0.1)
+Requirement already satisfied: six in /usr/local/lib/python3.6/site-packages (from onnx==0.1)
+Requirement already satisfied: setuptools in /usr/local/lib/python3.6/site-packages (from protobuf->onnx==0.1)
+Installing collected packages: onnx
+  Found existing installation: onnx 0.1
+    Uninstalling onnx-0.1:
+      Successfully uninstalled onnx-0.1
+  Running setup.py develop for onnx
+Successfully installed onnx
+Ich:onnx mh$ python -c 'import onnx'
+Ich:onnx mh$ python
+Python 2.7.13 (default, Dec 18 2016, 07:03:34) 
+[GCC 4.2.1 Compatible Apple LLVM 7.0.2 (clang-700.1.81)] on darwin
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from onnx.onnx_pb2 import *
+>>> from onnx import checker, helper, registry
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+ImportError: cannot import name registry
+>>> from onnx import checker, helper
+>>> arg = helper.make_attribute("this_is_an_int", 1701)
+>>> print("\nInt attribute:\n")
+
+Int attribute:
+
+>>> print(str(arg))
+name: "this_is_an_int"
+i: 1701
+
+>>> arg = helper.make_attribute("this_is_a_float", 3.14)
+>>> print("\nFloat attribute:\n")
+
+Float attribute:
+
+>>> print(str(arg))
+name: "this_is_a_float"
+f: 3.14
+
+>>> 
+>>> arg = helper.make_attribute("this_is_a_string", "string_content")
+>>> print("\nString attribute:\n")
+
+String attribute:
+
+>>> print(str(arg))
+name: "this_is_a_string"
+s: "string_content"
+
+>>> 
+>>> arg = helper.make_attribute("this_is_a_repeated_int", [1, 2, 3, 4])
+>>> print("\nRepeated int attribute:\n")
+
+Repeated int attribute:
+
+>>> print(str(arg))
+name: "this_is_a_repeated_int"
+ints: 1
+ints: 2
+ints: 3
+ints: 4
+
+>>> node_proto = helper.make_node("Relu", ["X"], ["Y"])
+>>> 
+>>> print("\nNodeProto:\n")
+
+NodeProto:
+
+>>> print(str(node_proto))
+input: "X"
+output: "Y"
+op_type: "Relu"
+
+>>> node_proto = helper.make_node(
+...     "Conv", ["X", "W", "B"], ["Y"],
+...     kernel=3, stride=1, pad=1)
+>>> 
+>>> print("\nNodeProto:\n")
+
+NodeProto:
+
+>>> print(str(node_proto))
+input: "X"
+input: "W"
+input: "B"
+output: "Y"
+op_type: "Conv"
+attribute {
+  name: "kernel"
+  i: 3
+}
+attribute {
+  name: "pad"
+  i: 1
+}
+attribute {
+  name: "stride"
+  i: 1
+}
+
+>>> 
+>>> print("\nMore Readable NodeProto (no args yet):\n")
+
+More Readable NodeProto (no args yet):
+
+>>> print(helper.printable_node(node_proto))
+%Y = Conv[kernel = 3, pad = 1, stride = 1](%X, %W, %B)
+>>> graph_proto = helper.make_graph(
+...     [
+...         helper.make_node("FC", ["X", "W1", "B1"], ["H1"]),
+...         helper.make_node("Relu", ["H1"], ["R1"]),
+...         helper.make_node("FC", ["R1", "W2", "B2"], ["Y"]),
+...     ],
+...     "MLP",
+...     ["X", "W1", "B1", "W2", "B2"],
+...     ["Y"]
+... )
+>>> 
+>>> print("\ngraph proto:\n")
+
+graph proto:
+
+>>> print(str(graph_proto))
+node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+
+>>> 
+>>> print("\nMore Readable GraphProto:\n")
+
+More Readable GraphProto:
+
+>>> print(helper.printable_graph(graph_proto))
+graph MLP (%X, %W1, %B1, %W2, %B2) {
+  %H1 = FC(%X, %W1, %B1)
+  %R1 = Relu(%H1)
+  %Y = FC(%R1, %W2, %B2)
+  return %Y
+}
+>>> graph_proto
+node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+
+>>> graph_proto.node
+[input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+, input: "H1"
+output: "R1"
+op_type: "Relu"
+, input: "R1"
+input: "W2"
+input: "B2"
+output: "Y"
+op_type: "FC"
+]
+>>> graph_proto.nodes
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'GraphProto' object has no attribute 'nodes'
+>>> graph_proto.node[0]
+input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+
+>>> graph_proto.node[1]
+input: "H1"
+output: "R1"
+op_type: "Relu"
+
+>>> graph_proto.node[2]
+input: "R1"
+input: "W2"
+input: "B2"
+output: "Y"
+op_type: "FC"
+
+>>> graph_proto.node[3]
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python2.7/site-packages/google/protobuf/internal/containers.py", line 204, in __getitem__
+    return self._values[key]
+IndexError: list index out of range
+>>> graph_proto.node
+[input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+, input: "H1"
+output: "R1"
+op_type: "Relu"
+, input: "R1"
+input: "W2"
+input: "B2"
+output: "Y"
+op_type: "FC"
+]
+>>> graph_proto.node.length
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedCompositeFieldContainer' object has no attribute 'length'
+>>> graph_proto.node.size
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedCompositeFieldContainer' object has no attribute 'size'
+>>> graph_proto.node.count
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedCompositeFieldContainer' object has no attribute 'count'
+>>> graph_proto.node
+[input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+, input: "H1"
+output: "R1"
+op_type: "Relu"
+, input: "R1"
+input: "W2"
+input: "B2"
+output: "Y"
+op_type: "FC"
+]
+>>> len(graph_proto.node)
+3
+>>> # An node that is also a graph
+... graph_proto = helper.make_graph(
+...     [
+...         helper.make_node("FC", ["X", "W1", "B1"], ["H1"]),
+...         helper.make_node("Relu", ["H1"], ["R1"]),
+...         helper.make_node("FC", ["R1", "W2", "B2"], ["Y"]),
+...     ],
+...     "MLP",
+...     ["X", "W1", "B1", "W2", "B2"],
+...     ["Y"]
+... )
+>>> 
+>>> # output = ThisSpecificgraph([input, w1, b1, w2, b2])
+... node_proto = helper.make_node(
+...     "graph",
+...     ["Input", "W1", "B1", "W2", "B2"],
+...     ["Output"],
+...     graph=[graph_proto],
+... )
+>>> 
+>>> print("\nNodeProto that contains a graph:\n")
+
+NodeProto that contains a graph:
+
+>>> print(str(node_proto))
+input: "Input"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Output"
+op_type: "graph"
+attribute {
+  name: "graph"
+  graphs {
+    node {
+      input: "X"
+      input: "W1"
+      input: "B1"
+      output: "H1"
+      op_type: "FC"
+    }
+    node {
+      input: "H1"
+      output: "R1"
+      op_type: "Relu"
+    }
+    node {
+      input: "R1"
+      input: "W2"
+      input: "B2"
+      output: "Y"
+      op_type: "FC"
+    }
+    name: "MLP"
+    input: "X"
+    input: "W1"
+    input: "B1"
+    input: "W2"
+    input: "B2"
+    output: "Y"
+    ir_version: 1
+  }
+}
+
+>>> from neo4j.v1 import GraphDatabase, basic_auth
+>>> 
+>>>   driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+  File "<stdin>", line 1
+    driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+    ^
+IndentationError: unexpected indent
+>>> driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+>>> session = driver.session()
+>>> result = session.run("MATCH () RETURN count(*) as c")
+>>> result
+<neo4j.v1.result.BoltStatementResult object at 0x106377610>
+>>> str(result)
+'<neo4j.v1.result.BoltStatementResult object at 0x106377610>'
+>>> for record in result:
+...   println(record)
+... 
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+NameError: name 'println' is not defined
+>>> for record in result:
+...   print(record)
+... 
+>>> result = session.run("MATCH () RETURN count(*) as c")
+>>> for record in result:
+...   print(record)
+... 
+<Record c=281305>
+>>> graph_proto
+node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+
+>>> graph_proto.name
+u'MLP'
+>>> graph_proto.input
+[u'X', u'W1', u'B1', u'W2', u'B2']
+>>> graph_proto.output
+[u'Y']
+>>> graph.node
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+NameError: name 'graph' is not defined
+>>> graph_proto.node
+[input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+, input: "H1"
+output: "R1"
+op_type: "Relu"
+, input: "R1"
+input: "W2"
+input: "B2"
+output: "Y"
+op_type: "FC"
+]
+>>> graph_proto.node[0]
+input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+
+>>> import json
+>>> json.dumps(graph_proto)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/lib/python2.7/json/__init__.py", line 244, in dumps
+    return _default_encoder.encode(obj)
+  File "/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/lib/python2.7/json/encoder.py", line 207, in encode
+    chunks = self.iterencode(o, _one_shot=True)
+  File "/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/lib/python2.7/json/encoder.py", line 270, in iterencode
+    return _iterencode(o, 0)
+  File "/usr/local/Cellar/python/2.7.13/Frameworks/Python.framework/Versions/2.7/lib/python2.7/json/encoder.py", line 184, in default
+    raise TypeError(repr(o) + " is not JSON serializable")
+TypeError: node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+ is not JSON serializable
+>>> graph_proto
+node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+
+>>> graph=graph_proto
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,
+  File "<stdin>", line 1
+    params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,
+                                                                                                                  ^
+SyntaxError: invalid syntax
+>>>           "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.nodes)}}
+  File "<stdin>", line 1
+    "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.nodes)}}
+    ^
+IndentationError: unexpected indent
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,
+  File "<stdin>", line 1
+    params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,
+                                                                                                                  ^
+SyntaxError: invalid syntax
+>>> "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.nodes)}}
+  File "<stdin>", line 1
+    "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.nodes)}}
+           ^
+SyntaxError: invalid syntax
+>>> x = [2, 3, 4, 5, 6]
+>>> y = map(lambda v : v * 5, x)
+>>> y
+[10, 15, 20, 25, 30]
+>>> len(graph.nodes)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'GraphProto' object has no attribute 'nodes'
+>>> len(graph.node)
+3
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,
+  File "<stdin>", line 1
+    params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,
+                                                                                                                  ^
+SyntaxError: invalid syntax
+>>> "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.node)}}
+  File "<stdin>", line 1
+    "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.node)}}
+           ^
+SyntaxError: invalid syntax
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.node)}}
+  File "<stdin>", line 1
+    params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs",graph.outputs,"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.node)}}
+                                                                                                                  ^
+SyntaxError: invalid syntax
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.inputs, "outputs":graph.outputs,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.inputs,"outputs":n.outputs}, graph.node)}}
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'GraphProto' object has no attribute 'inputs'
+>>> graph.node
+[input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+, input: "H1"
+output: "R1"
+op_type: "Relu"
+, input: "R1"
+input: "W2"
+input: "B2"
+output: "Y"
+op_type: "FC"
+]
+>>> graph.node[0]
+input: "X"
+input: "W1"
+input: "B1"
+output: "H1"
+op_type: "FC"
+
+>>> graph
+node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+
+>>> graph.input
+[u'X', u'W1', u'B1', u'W2', u'B2']
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input, "outputs":graph.output,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input,"outputs":n.output}, graph.node)}}
+>>> params
+{'graph': {'inputs': [u'X', u'W1', u'B1', u'W2', u'B2'], 'nodes': [{'inputs': [u'X', u'W1', u'B1'], 'attr': {'op_type': u'FC'}, 'outputs': [u'H1']}, {'inputs': [u'H1'], 'attr': {'op_type': u'Relu'}, 'outputs': [u'R1']}, {'inputs': [u'R1', u'W2', u'B2'], 'attr': {'op_type': u'FC'}, 'outputs': [u'Y']}], 'name': u'MLP', 'outputs': [u'Y'], 'attr': {'ir_version': 1L}}}
+>>> statement = """     
+... MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+... FOREACH (name in $graph.inputs | MERGE (:Node:Input {name:name})-[:INPUT]->(g))
+... FOREACH (name in $graph.outputs | MERGE (g)-[:OUTPUT]->(:Node:Output {name:name}))
+... UNWIND $graph.nodes as node
+... CREATE (n:Node) SET n += node.attr
+... FOREACH (name in node.inputs | MERGE (i:Node:Input {name:name}) MERGE (i)-[:IN]->(n))
+... FOREACH (name in node.outputs | MERGE (o:Node:Output {name:name}) MERGE (o)-[:OUT]->(n));
+... """
+>>> session.run(statement,params)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/api.py", line 336, in run
+    result = self.__run__(fix_statement(statement), fix_parameters(parameters, **kwparameters))
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/session.py", line 53, in __run__
+    return self._run(statement, parameters)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/session.py", line 45, in _run
+    self._connection.append(RUN, (statement, parameters), response=run_response)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 220, in append
+    self.packer.pack_struct(signature, fields)
+  File "neo4j/packstream/_packer.pyx", line 293, in neo4j.packstream._packer.Packer.pack_struct (neo4j/packstream/_packer.c:7781)
+  File "neo4j/packstream/_packer.pyx", line 340, in neo4j.packstream._packer.Packer.pack_struct (neo4j/packstream/_packer.c:7670)
+  File "neo4j/packstream/_packer.pyx", line 118, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:3089)
+  File "neo4j/packstream/_packer.pyx", line 118, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:3089)
+  File "neo4j/packstream/_packer.pyx", line 131, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:3325)
+ValueError: Values of type <class 'google.protobuf.internal.containers.RepeatedScalarFieldContainer'> are not supported
+>>> params.dumps
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'dict' object has no attribute 'dumps'
+>>> params.inspect
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'dict' object has no attribute 'inspect'
+>>> debug(params)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+NameError: name 'debug' is not defined
+>>> str(params)
+"{'graph': {'inputs': [u'X', u'W1', u'B1', u'W2', u'B2'], 'nodes': [{'inputs': [u'X', u'W1', u'B1'], 'attr': {'op_type': u'FC'}, 'outputs': [u'H1']}, {'inputs': [u'H1'], 'attr': {'op_type': u'Relu'}, 'outputs': [u'R1']}, {'inputs': [u'R1', u'W2', u'B2'], 'attr': {'op_type': u'FC'}, 'outputs': [u'Y']}], 'name': u'MLP', 'outputs': [u'Y'], 'attr': {'ir_version': 1L}}}"
+>>> graph.input
+[u'X', u'W1', u'B1', u'W2', u'B2']
+>>> map(lambda x: str(x),graph.input)
+['X', 'W1', 'B1', 'W2', 'B2']
+>>> map(lambda x: x,graph.input)
+[u'X', u'W1', u'B1', u'W2', u'B2']
+>>> map(lambda x: x.type,graph.input)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "<stdin>", line 1, in <lambda>
+AttributeError: 'unicode' object has no attribute 'type'
+>>> map(lambda x: type(x),graph.input)
+[<type 'unicode'>, <type 'unicode'>, <type 'unicode'>, <type 'unicode'>, <type 'unicode'>]
+>>> type(graph.ir_version)
+<type 'long'>
+>>> type(params)
+<type 'dict'>
+>>> type(params.graph.inputs)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'dict' object has no attribute 'graph'
+>>> type(params['graph']['inputs'])
+<class 'google.protobuf.internal.containers.RepeatedScalarFieldContainer'>
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":map(lambda i: str(i),graph.input), "outputs":map(lambda o: str(o),graph.output),
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input,"outputs":n.output}, graph.node)}}
+>>> session.run(statement,params)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/api.py", line 336, in run
+    result = self.__run__(fix_statement(statement), fix_parameters(parameters, **kwparameters))
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/session.py", line 53, in __run__
+    return self._run(statement, parameters)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/session.py", line 45, in _run
+    self._connection.append(RUN, (statement, parameters), response=run_response)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 220, in append
+    self.packer.pack_struct(signature, fields)
+  File "neo4j/packstream/_packer.pyx", line 293, in neo4j.packstream._packer.Packer.pack_struct (neo4j/packstream/_packer.c:7781)
+  File "neo4j/packstream/_packer.pyx", line 340, in neo4j.packstream._packer.Packer.pack_struct (neo4j/packstream/_packer.c:7670)
+  File "neo4j/packstream/_packer.pyx", line 118, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:3089)
+  File "neo4j/packstream/_packer.pyx", line 118, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:3089)
+  File "neo4j/packstream/_packer.pyx", line 111, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:2902)
+  File "neo4j/packstream/_packer.pyx", line 118, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:3089)
+  File "neo4j/packstream/_packer.pyx", line 131, in neo4j.packstream._packer.Packer._pack (neo4j/packstream/_packer.c:3325)
+ValueError: Values of type <class 'google.protobuf.internal.containers.RepeatedScalarFieldContainer'> are not supported
+>>> params
+{'graph': {'inputs': ['X', 'W1', 'B1', 'W2', 'B2'], 'nodes': [{'inputs': [u'X', u'W1', u'B1'], 'attr': {'op_type': u'FC'}, 'outputs': [u'H1']}, {'inputs': [u'H1'], 'attr': {'op_type': u'Relu'}, 'outputs': [u'R1']}, {'inputs': [u'R1', u'W2', u'B2'], 'attr': {'op_type': u'FC'}, 'outputs': [u'Y']}], 'name': u'MLP', 'outputs': ['Y'], 'attr': {'ir_version': 1L}}}
+>>> graph.inputs
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'GraphProto' object has no attribute 'inputs'
+>>> graph.input
+[u'X', u'W1', u'B1', u'W2', u'B2']
+>>> graph.inputs.keys)(
+  File "<stdin>", line 1
+    graph.inputs.keys)(
+                     ^
+SyntaxError: invalid syntax
+>>> graph.inputs.keys()
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'GraphProto' object has no attribute 'inputs'
+>>> graph.input.keys()
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedScalarFieldContainer' object has no attribute 'keys'
+>>> graph.input.keys
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedScalarFieldContainer' object has no attribute 'keys'
+>>> graph.input.items
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedScalarFieldContainer' object has no attribute 'items'
+>>> graph.input.values
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedScalarFieldContainer' object has no attribute 'values'
+>>> graph.input.value
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+AttributeError: 'RepeatedScalarFieldContainer' object has no attribute 'value'
+>>> graph.input._values
+[u'X', u'W1', u'B1', u'W2', u'B2']
+>>> type(graph.input._values)
+<type 'list'>
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":output._values}, graph.node)}}
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+  File "<stdin>", line 2, in <lambda>
+NameError: global name 'output' is not defined
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+>>> params
+{'graph': {'inputs': [u'X', u'W1', u'B1', u'W2', u'B2'], 'nodes': [{'inputs': [u'X', u'W1', u'B1'], 'attr': {'op_type': u'FC'}, 'outputs': [u'H1']}, {'inputs': [u'H1'], 'attr': {'op_type': u'Relu'}, 'outputs': [u'R1']}, {'inputs': [u'R1', u'W2', u'B2'], 'attr': {'op_type': u'FC'}, 'outputs': [u'Y']}], 'name': u'MLP', 'outputs': [u'Y'], 'attr': {'ir_version': 1L}}}
+>>> session.run(statement,params)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/api.py", line 340, in run
+    self._connection.fetch()
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 264, in fetch
+    self._receive()
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 302, in _receive
+    raise self.Error("Failed to read from defunct connection {!r}".format(self.server.address))
+neo4j.exceptions.ServiceUnavailable: Failed to read from defunct connection Address(host='127.0.0.1', port=7687)
+>>> 
+>>> driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/api.py", line 124, in driver
+    return driver_class(uri, **config)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/direct.py", line 65, in __init__
+    pool.release(pool.acquire())
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/direct.py", line 39, in acquire
+    connection = self.acquire_direct(address)  # should always be a resolved address
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 398, in acquire_direct
+    connection = self.connector(address)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/direct.py", line 64, in <lambda>
+    pool = DirectConnectionPool(lambda a: connect(a, security_plan.ssl_context, **config), self.address)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 555, in connect
+    return Connection(s, der_encoded_server_certificate=der_encoded_server_certificate, **config)
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 184, in __init__
+    self.sync()
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 337, in sync
+    detail_delta, summary_delta = self.fetch()
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 287, in fetch
+    response.on_failure(summary_metadata or {})
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/response.py", line 61, in on_failure
+    raise AuthError(message)
+neo4j.exceptions.AuthError: The client is unauthorized due to authentication failure.
+>>> driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+>>> session = driver.session()
+>>> statement = """     
+... MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+... FOREACH (name in $graph.inputs | MERGE (:Node:Input {name:name})-[:INPUT]->(g))
+... FOREACH (name in $graph.outputs | MERGE (g)-[:OUTPUT]->(:Node:Output {name:name}))
+... UNWIND $graph.nodes as node
+... CREATE (n:Node) SET n += node.attr
+... FOREACH (name in node.inputs | MERGE (i:Node:Input {name:name}) MERGE (i)-[:IN]->(n))
+... FOREACH (name in node.outputs | MERGE (o:Node:Output {name:name}) MERGE (o)-[:OUT]->(n));
+... """
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+>>> 
+>>> session.run(statement,params)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/api.py", line 340, in run
+    self._connection.fetch()
+  File "/usr/local/lib/python2.7/site-packages/neo4j/bolt/connection.py", line 287, in fetch
+    response.on_failure(summary_metadata or {})
+  File "/usr/local/lib/python2.7/site-packages/neo4j/v1/result.py", line 69, in on_failure
+    raise CypherError.hydrate(**metadata)
+neo4j.exceptions.CypherSyntaxError: WITH is required between FOREACH and UNWIND (line 5, column 1 (offset: 221))
+"UNWIND $graph.nodes as node"
+ ^
+>>> statement = """     
+... MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+... FOREACH (name in $graph.inputs | MERGE (:Node:Input {name:name})-[:INPUT]->(g))
+... FOREACH (name in $graph.outputs | MERGE (g)-[:OUTPUT]->(:Node:Output {name:name}))
+... WITH *
+... UNWIND $graph.nodes as node
+... CREATE (n:Node) SET n += node.attr
+... FOREACH (name in node.inputs | MERGE (i:Node:Input {name:name}) MERGE (i)-[:IN]->(n))
+... FOREACH (name in node.outputs | MERGE (o:Node:Output {name:name}) MERGE (o)-[:OUT]->(n));
+... """
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+>>> 
+>>> session.run(statement,params)
+<neo4j.v1.result.BoltStatementResult object at 0x10639c350>
+>>> 
+>>> from neo4j.v1 import GraphDatabase, basic_auth
+>>> 
+>>> driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+>>> session = driver.session()
+>>> statement = """     
+... MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+... FOREACH (name in $graph.inputs | MERGE (:Node:Input {name:name})-[:INPUT]->(g))
+... FOREACH (name in $graph.outputs | MERGE (g)-[:OUTPUT]->(:Node:Output {name:name}))
+... WITH *
+... UNWIND $graph.nodes as node
+... CREATE (n:Node) SET n += node.attr
+... FOREACH (name in node.inputs | MERGE (i:Node:Input {name:name}) MERGE (i)-[:IN]->(n))
+... FOREACH (name in node.outputs | MERGE (o:Node:Output {name:name}) MERGE (o)-[:OUT]->(n));
+... """
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+>>> 
+>>> session.run(statement,params).summary
+<bound method BoltStatementResult.summary of <neo4j.v1.result.BoltStatementResult object at 0x10639c690>>
+>>> str(graph)
+'node {\n  input: "X"\n  input: "W1"\n  input: "B1"\n  output: "H1"\n  op_type: "FC"\n}\nnode {\n  input: "H1"\n  output: "R1"\n  op_type: "Relu"\n}\nnode {\n  input: "R1"\n  input: "W2"\n  input: "B2"\n  output: "Y"\n  op_type: "FC"\n}\nname: "MLP"\ninput: "X"\ninput: "W1"\ninput: "B1"\ninput: "W2"\ninput: "B2"\noutput: "Y"\nir_version: 1\n'
+>>> graph
+node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1
+
+>>> 
+>>> statement = """     
+... MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+... FOREACH (name in $graph.inputs | MERGE (i:Node {name:name})-[:INPUT]->(g) SET i:Input)
+... FOREACH (name in $graph.outputs | MERGE (g)-[:OUTPUT]->(o:Node {name:name}) SET o:Output)
+... WITH *
+... UNWIND $graph.nodes as node
+... CREATE (n:Node) SET n += node.attr
+... FOREACH (name in node.inputs | MERGE (i:Node {name:name}) SET i:Input MERGE (i)-[:IN]->(n))
+... FOREACH (name in node.outputs | MERGE (o:Node {name:name}) SET o:Output MERGE (o)-[:OUT]->(n));
+... """
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+>>> 
+>>> session.run(statement,params).summary
+<bound method BoltStatementResult.summary of <neo4j.v1.result.BoltStatementResult object at 0x10639c950>>
+>>> statement = """     
+... MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+... FOREACH (name in $graph.inputs | MERGE (i:Node {name:name})-[:INPUT]->(g) SET i:Input)
+... FOREACH (name in $graph.outputs | MERGE (g)<-[:OUTPUT]-(o:Node {name:name}) SET o:Output)
+... WITH *
+... UNWIND $graph.nodes as node
+... CREATE (n:Node) SET n += node.attr
+... FOREACH (name in node.inputs | MERGE (i:Node {name:name}) SET i:Input MERGE (i)-[:IN]->(n))
+... FOREACH (name in node.outputs | MERGE (o:Node {name:name}) SET o:Output MERGE (n)-[:OUT]->(o));
+... """
+>>> params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+... "nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+>>> 
+>>> session.run(statement,params).summary
+<bound method BoltStatementResult.summary of <neo4j.v1.result.BoltStatementResult object at 0x10639c990>>
+
+////

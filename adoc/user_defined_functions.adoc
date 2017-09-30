@@ -1,0 +1,142 @@
+= User Defined Functions in Neo4j 3.1.0-M10
+
+Neo4j 3.1 brings some really neat improvements in Cypher alongside other cool features
+
+I already demonstrated the - GraphQL inspired - map projections and pattern comprehensions in https://neo4j.com/blog/cypher-graphql-neo4j-3-1-preview/[my last blog post].
+
+== User Defined Procedures 
+
+In the 3.0 release my personal favorite was https://neo4j.com/docs/developer-manual/current/procedures/[user defined procedures] which can be implemented using Neo4j's Java API and called directly from Cypher.
+You can tell, because I wrote about half of the 270 procedures for the https://github.com/neo4j-contrib/neo4j-apoc-procedures[APOC procedure collection] ", with the remainder provided by other contributors.
+
+Remember the syntax: `... CALL namespace.procedure(arg1, arg2) YIELD col1, col2 AS alias ...`
+
+[source,cypher]
+----
+MATCH (from:Place {coords:{from}}), (to:Place {coords:{to}})
+
+CALL apoc.algo.dijkstra(from, to, "ROAD", "cost") YIELD path, weight
+
+RETURN nodes(path)
+ORDER BY weight LIMIT 10;
+----
+
+=== Procedures improvements in 3.1.
+
+As of 3.1, the named procedure parameters can now have default values.
+This means you can leave them off during the call (from right to left), e.g.
+
+----
+@Name(value="costProperty", defaultValue="cost") String prop
+----
+
+The annotations for the database mode were folded into the `@Procedure` annotation. 
+You can also now set `DBMS` as mode, which encompasses _Schema_ operations like creating indexes or constraints. `@Procedure(value="namespace.procedure",mode=READ|WRITE|DBMS)`.
+
+Based on the security work in Neo4j Enterprise, procedures can now get an additional set of roles configured in the `allowed` attribute of the @Procedure annotation, that also permit users with that role (or only that role) to execute the procedure.
+
+The last change is dropping the support for result objects without columns, which we sometimes used for changing the cardinality of a query (between 0 and 1) for boolean operations.
+But that's handled now much better by boolean functions (predicates) as discussed below.
+
+== User Defined Functions
+
+If you used or wrote procedures in the past, you most probably came across instances where it felt quite unwieldy to call a procedure just to compute something, convert a value or provide a boolean decision. 
+
+For example:
+
+[source,cypher]
+----
+CREATE (v:Value {id:{id}, data:{data}})
+WITH v
+CALL apoc.date.formatDefault(timestamp(), "ms") YIELD value as created
+SET v.created = created
+----
+
+You'd rather write it as a function:
+
+[source,cypher]
+----
+CREATE (v:Value {id:{id}, data:{data}, created: apoc.date.format(timestamp()) })
+----
+
+Now in 3.1 that's possible, and you can also leave off the `"ms"` and use a single function name, because the `unit` and `format` parameters have a default value.
+
+Functions are more limited than procedures: they can’t execute writes or schema operations and are expected to return a single value, not a stream of values.
+But this makes it also easier to write and use them.
+
+By having information about their types, the Cypher Compiler can also check for applicability.
+
+The signature of the procedure above changed from:
+
+[source,java]
+----
+@Procedure("apoc.date.format")
+public Stream<StringResult> formatDefault(@Name("time") long time, @Name("unit") String unit) {
+   return Stream.of(format(time, unit, DEFAULT_FORMAT));
+}
+----
+
+to the much simpler function signature (ignoring the parameter name and value annotations):
+
+[source,java]
+----
+@UserFunction("apoc.date.format")
+public String format(@Name("time") long time, 
+                     @Name(value="unit", defaultValue="ms") String unit, 
+                     @Name(value="format", defaultValue=DEFAULT_FORMAT) String format) {
+   return getFormatter().format(time, unit, format);
+}
+----
+
+This can then be called in the manner outlined above.
+
+In our APOC procedure library we already converted about https://github.com/neo4j-contrib/neo4j-apoc-procedures/issues/XXX[50 procedures into functions] from the following areas:
+
+[options="header",cols="2a,a,2m"]
+|===
+| package | # of functions | example function
+| date & time conversion
+| 3
+| apoc.date.parse("time",["unit"],["format"])
+
+| number conversion
+| 3
+| apoc.number.parse("number",["format"])
+
+| general type conversion
+| 8
+| apoc.convert.toMap(value)
+
+| type information and checking
+| 4
+| apoc.meta.type(value)
+
+| collection and map functions
+| 25
+| apoc.map.fromList(["k1",v1,"k2",v2,"k3",v3])
+
+| JSON conversion
+| 4
+| apoc.convert.toJson(value)
+
+| string functions
+| 7
+| apoc.text.join(["s1","s2","s3"],"delim")
+
+| hash functions
+| 2
+| apoc.util.md5(value)
+
+|===
+
+You can list user defined functions with `call dbms.functions()`
+
+image::https://dl.dropboxusercontent.com/u/14493611/dbms.functions.jpg[]
+
+We also started to add default values for parameters and deprecate procedures that required alternative names because of a wider parameter set.
+
+We also moved the `Description` annotation from APOC's own to the one now provided within Neo4j, so you'll see the descriptions for all functions and procedures in `dbms.procedures()`.
+
+All of this is available now, if you run Neo4j 3.1.0-M10 and use this latest https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases/latest[3.1.0.1 APOC release].
+
+You can follow the development of APOC for Neo4j 3.1 in the https://github.com/neo4j-contrib/neo4j-apoc-procedures/tree/3.1[3.1 branch].

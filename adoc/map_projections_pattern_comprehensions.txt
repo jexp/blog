@@ -1,0 +1,241 @@
+= Cypher Map Projections and Pattern Comprehensions in Neo4j 3.1
+:neo4j-version: 3.1
+:author: Michael Hunger
+:twitter: @mesirii
+:tags: graphql, cypher, patterns
+
+After GraphQL came around, it raised some interesting discussions.
+
+We haven't gotten around to write that GraphQL relay server.
+But some of the syntactic sugar that enables a similar Syntax in Cypher for result projections https://github.com/neo4j/neo4j/pull/7125[recently made it into Neo4j 3.1].
+
+The two features are *Map Projections* and *Pattern Comprehensions*. Let's look at them in detail.
+
+== Map Projections
+
+Map projections are mostly syntactic sugar for providing subsets of nodes, relationships and maps.
+
+The general syntax is `variable{selector(s)}`.
+
+Here are a few examples:
+
+//setup
+//hide
+[source,cypher]
+----
+TODO movies / northwind
+CREATE (p:Person {name:"Michael", age: 41})
+CREATE (p)<-[:FATHER]-(:Person {name:"Selma", age: 8})
+CREATE (p)<-[:FATHER]-(:Person {name:"Rana", age: 10})
+CREATE (p)<-[:FATHER]-(:Person {name:"Selina", age: 18})
+----
+
+[source,cypher]
+----
+----
+
+
+----
+test("should handle map projection with property selectors") {
+  createNode("foo" -> 1, "bar" -> "apa")
+
+  executeScalarWithAllPlanners[Any]("MATCH (n) RETURN n{.foo,.bar,.baz}") should equal(
+    Map("foo" -> 1, "bar" -> "apa", "baz" -> null))
+}
+
+test("should handle map projection with property selectors and identifier selector") {
+  createNode("foo" -> 1, "bar" -> "apa")
+
+  executeScalarWithAllPlanners[Any]("WITH 42 as x MATCH (n) RETURN n{.foo,.bar,x}") should equal(
+    Map("foo" -> 1, "bar" -> "apa", "x" -> 42))
+}
+
+test("should use the map identifier as the alias for return items") {
+  createNode("foo" -> 1, "bar" -> "apa")
+
+  executeWithAllPlanners("MATCH (n) RETURN n{.foo,.bar}").toList should equal(
+    List(Map("n" -> Map("foo" -> 1, "bar" -> "apa"))))
+}
+
+test("map projection with all-properties selector") {
+  createNode("foo" -> 1, "bar" -> "apa")
+
+  executeWithAllPlanners("MATCH (n) RETURN n{.*}").toList should equal(
+    List(Map("n" -> Map("foo" -> 1, "bar" -> "apa"))))
+}
+
+test("returning all properties of a node and adds other selectors") {
+  createNode("foo" -> 1, "bar" -> "apa")
+
+  executeWithAllPlanners("MATCH (n) RETURN n{.*, .baz}").toList should equal(
+    List(Map("n" -> Map("foo" -> 1, "bar" -> "apa", "baz" -> null))))
+}
+
+test("returning all properties of a node and overwrites some with other selectors") {
+  createNode("foo" -> 1, "bar" -> "apa")
+
+  executeWithAllPlanners("MATCH (n) RETURN n{.*, bar:'apatisk'}").toList should equal(
+    List(Map("n" -> Map("foo" -> 1, "bar" -> "apatisk"))))
+}
+
+test("projecting from a null identifier produces a null value") {
+  executeWithAllPlanners("OPTIONAL MATCH (n) RETURN n{.foo, .bar}").toList should equal(
+    List(Map("n" -> null)))
+}
+
+test("graph projections with aggregation") {
+
+  val actor = createLabeledNode(Map("name" -> "Actor 1"), "Actor")
+  relate(actor, createLabeledNode(Map("title" -> "Movie 1"), "Movie"))
+  relate(actor, createLabeledNode(Map("title" -> "Movie 2"), "Movie"))
+
+  executeWithAllPlanners(
+    """MATCH (actor:Actor)-->(movie:Movie)
+      |RETURN actor{ .name, movies: collect(movie{.title}) }""".stripMargin).toList should equal(
+    List(Map("actor" ->
+      Map("name" -> "Actor 1", "movies" -> Seq(
+        Map("title" -> "Movie 2"),
+        Map("title" -> "Movie 1"))))))
+}
+----
+
+== Pattern Comprehensions
+
+
+----
+class PatternComprehensionAcceptanceTest extends ExecutionEngineFunSuite with NewPlannerTestSupport {
+ test("one relationship out") {
+   val n1 = createLabeledNode(Map("x" -> 1), "START")
+   val n2 = createLabeledNode(Map("x" -> 2), "START")
+   val n3 = createNode("x" -> 3)
+   val n4 = createNode("x" -> 4)
+   val n5 = createNode("x" -> 5)
+
+   relate(n1, n3)
+   relate(n1, n4)
+   relate(n1, n5)
+   relate(n2, n4)
+   relate(n2, n5)
+
+   val result = executeWithCostPlannerOnly("match (n:START) return n.x, [(n)-->(other) | other.x] as coll")
+
+   result.toList should equal(List(
+     Map("n.x" -> 1, "coll" -> Seq(5, 4, 3)),
+     Map("n.x" -> 2, "coll" -> Seq(5, 4))
+   ))
+   result should use("RollUpApply")
+ }
+
+ test("one relationship out with filtering") {
+   val n1 = createLabeledNode(Map("x" -> 1), "START")
+   val n2 = createLabeledNode(Map("x" -> 2), "START")
+   val n3 = createNode("x" -> 3)
+   val n4 = createNode("x" -> 4)
+   val n5 = createNode("x" -> 5)
+   val n6 = createNode("x" -> 6)
+
+   relate(n1, n3)
+   relate(n1, n4)
+   relate(n1, n5)
+   relate(n1, n6)
+   relate(n2, n4)
+   relate(n2, n6)
+
+   val result = executeWithCostPlannerOnly("match (n:START) return n.x, [(n)-->(other) WHERE other.x % 2 = 0 | other.x] as coll")
+   result.toList should equal(List(
+     Map("n.x" -> 1, "coll" -> Seq(6, 4)),
+     Map("n.x" -> 2, "coll" -> Seq(6, 4))
+   ))
+   result should use("RollUpApply")
+ }
+
+ test("find self relationships") {
+   val n1 = createLabeledNode(Map("x" -> 1), "START")
+
+   relate(n1, n1, "x"->"A")
+   relate(n1, n1, "x"->"B")
+   val result = executeWithCostPlannerOnly("match (n:START) return n.x, [(n)-[r]->(n) | r.x] as coll")
+
+   result.toList should equal(List(
+     Map("n.x" -> 1, "coll" -> Seq("B", "A"))
+   ))
+   result should use("RollUpApply")
+ }
+
+ test("pattern comprehension built on a null yields null") {
+   val result = executeWithCostPlannerOnly("optional match (n:MISSING) return [(n)-->(n) | n.x] as coll")
+   result.toList should equal(List(
+     Map("coll" -> null)
+   ))
+   result should use("RollUpApply")
+ }
+
+ test("pattern comprehension used in a WHERE query should work") {
+
+   val a = createLabeledNode("START")
+   val b = createLabeledNode("START")
+
+   relate(a, createNode("x" -> 1))
+   relate(a, createNode("x" -> 2))
+   relate(a, createNode("x" -> 3))
+
+   relate(b, createNode("x" -> 2))
+   relate(b, createNode("x" -> 4))
+   relate(b, createNode("x" -> 6))
+
+
+   val result = executeWithCostPlannerOnly(
+     """match (n:START)
+       |where [(n)-->(other) | other.x] = [3,2,1]
+       |return n""".stripMargin)
+
+   result.toList should equal(List(
+     Map("n" -> a)
+   ))
+   result should use("RollUpApply")
+ }
+
+ test("using pattern comprehension as grouping key") {
+   val n1 = createLabeledNode("START")
+   val n2 = createLabeledNode("START")
+   val n3 = createNode("x" -> 3)
+   val n4 = createNode("x" -> 4)
+   val n5 = createNode("x" -> 5)
+
+   relate(n1, n3)
+   relate(n1, n4)
+   relate(n1, n5)
+
+   relate(n2, n3)
+   relate(n2, n4)
+   relate(n2, n5)
+
+   val result = executeWithCostPlannerOnly("match (n:START) return count(*), [(n)-->(other) | other.x] as coll")
+   result.toList should equal(List(
+     Map("count(*)" -> 2, "coll" -> Seq(5, 4, 3))
+   ))
+   result should use("RollUpApply")
+ }
+
+ test("aggregating pattern comprehensions") {
+   val n1 = createLabeledNode("START")
+   val n2 = createLabeledNode("START")
+   val n3 = createNode("x" -> 3)
+   val n4 = createNode("x" -> 4)
+   val n5 = createNode("x" -> 5)
+   val n6 = createNode("x" -> 6)
+
+   relate(n1, n3)
+   relate(n1, n4)
+   relate(n1, n5)
+
+   relate(n2, n3)
+   relate(n2, n4)
+   relate(n2, n6)
+
+   val result = executeWithCostPlannerOnly(
+     """match (n:START)
+       |return collect( [(n)-->(other) | other.x] ) as coll""".stripMargin)
+   result.toList should equal(List(
+     Map("coll" -> Seq(Seq(5, 4, 3), Seq(6, 4, 3)))
+----

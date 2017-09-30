@@ -1,0 +1,367 @@
+= Neo4j 3.0 Skalierbare Anwenderproduktivität
+:icons: font
+
+image::http://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/20160426001205/neo4j-3-0-square1.png[float=right,width=200]
+
+== Graphen und Graphdatenbanken
+
+Für alle, für die das Thema Graphdatenbanken Neuland ist, hier eine kurze Einführung.
+Zuerst einmal kann gesagt werden, dass man keinen Abschluss in Graphentheorie braucht, mit einer Graphdatenbank glücklich zu werden.
+
+Die meisten Vertreter der Gattung haben es sich zur Aufgabe gemacht, komplexe Domänen und Sachverhalte in einem überschaubaren Datenmodell effizient zu handhaben.
+Dass heißt, bei Graphdatenbanken hat Nutzerfreundlichkeit einen hohen Stellenwert.
+
+Auch wenn der Ursprung der Graphentheorie von Leonard Euler schon mehr als 300 Jahre zurückliegt und es schon in den 60'ern Netzwerkdatenbanken gab, haben Graphdatenbanken erst in den letzten 10 Jahren einen Boom erlebt.
+Dieser setzt sich aktuell fort, fast jede Woche wird irgendwo auf der Welt eine neue Graphdatenbank angekündigt, die natürlich besser als alles bisherige ist.
+
+.Ranking von Datenbank-Kategorien nach Popularitätswachstum (Quelle: DB-Engines.com)
+image::https://dl.dropboxusercontent.com/u/14493611/blog/adoc/articles/DB-Engines-Ranking-per-database-model-category.png[]
+
+Wie viele andere NoSQL Datenbanken haben sich auch Graphdatenbanken aus dem Bedürfnis entwickelt, Anwendungsfälle mit relationalen Datenbanken abzubilden für die sie nicht geeignet sind.
+Im Fall von Neo4j war das komplexe Rechteverwaltung und mehrsprachige, bedeutungsübergreifende Stichwortsuche in einem online Enterprise-Dokumentenmanagementsystem um 2000.
+
+Jeder der schon einmal komplexe Domänen mit vielen Beziehungen zwischen den Entitäten in einer relationalen Datenbank abgebildet und dann komplexe Abfragen gestellt hat, hat gemerkt das das eine ziemliche Herausforderung darstellt.
+
+Zum einen ist die Abbildung eines Modells, in dem Strukturen und Inhalte variabel und Informationsbeziehungen relevant sind, auf Tabellen und Join-Tabellen sehr mühsam. 
+Alle Projektbeteiligten die zwar Fachwissen, aber keine Datenbankerfahrung haben, sehen nur noch den "Wald aus Tabellen" und können schlechter Feedback zur Entwicklung geben.
+Schnelle Änderungen und Evolution des Datenbankschemas stellen ganz eigene, nicht nur technische, Herausforderungen dar.
+
+In einem Graph werden Entitäten als *Knoten* mit beliebigen Attribut-Wert Paaren als Eigenschaften und *Labels* (z.B. _Person, Angestellter, Entwickler, Manager_ für einen Tech-Lead) für die verschiedenen semantischen Rollen der Entität dargestellt. 
+Referenzen sind gerichtete und getypte *Beziehungen* zwischen den Knoten, die ebenso beliebige Eigenschaften enthalten können, meist sind das aber qualifizierende Attribute, wie _Entfernung, Gewicht, Kosten, Bewertung, Gültigkeitszeitraum_ usw.
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/adoc/articles/java_magazin_simple_graph_model.png[]
+
+Mit diesem einfachen Modell können auch komplexe Beziehungsnetzwerke aus allen möglichen Anwendungsbereichen leicht modelliert werden.
+Im einfachsten Falle erfolgt das als Graph-Diagramm auf einem Whiteboard oder Papier.
+Wenn dieses konkrete Grundmodell die relevanten, anfänglichen Anwendungsfälle beantworten kann, ist die Grundlage gegeben, um Daten aus den verschiedensten Quellen zu importieren.
+
+Der Verzicht auf ein fixes Schema macht den Import unterschiedlichster Formate unkompliziert.
+Sobald man einen einzigen Anknüpfungspunkt zwischen zwei Datenbeständen hat, kann man diese im Graphen zusammenbringen oder die Initialdaten mit neuen Zusatzinformationen anreichern bzw. verknüpfen.
+
+Seine Eigenschaften machen das Graphmodell auch flexibel für die Weiterentwicklung des Datenmodells, da keine Schemata angepasst werden müssen und mehrere Modellvarianten gleichzeitig gehalten werden können.
+Bedingt durch neue Anforderungen und Anwendungsfälle wird unser Graphmodell kontinuierlich weiterentwickelt, so dass es stets optimal an unsere Anforderungen angepasst ist.
+Tools wie LiquiGraph für Neo4j machen Migrationen konsistent und nachvollziehbar.
+
+
+Die Flexibilität des Datenmodells ist aber nur ein netter Aspekt von Graphdatenbanken.
+Diese stark verknüpften Daten dann auch mit komplexen Statements schnell abfragen zu können ist genauso wichtig.
+
+In relationalen Datenbanken wird die Performance der Abfragen vom vorhandenen Datenvolumen und Anzahl der Joins im Statement bestimmt. 
+Beide zusammen tragen zu einem exponentiellen Anstieg des CPU- und Speicherbedarfs bei.
+Die meisten Datenbanken berechnen Joins stets zum Abfragezeitpunkt über Index-Abfragen oder ähnliche Algorithmen. 
+
+Graphdatenbanken dagegen materialisieren die konkreten Beziehungen zu anderen Knoten beim Einfügen und speichern sie als Teil der Knoten ab.
+Das erlaubt es auch komplexe Abfragen in Echtzeit auszuführen, da den "Pointern" zu den referenzierten Entitäten sofort (in beiden Richtungen) gefolgt werden kann.
+
+Die Abfragen erfolgen über eine auf Graphmuster optimierte Abfragesprache namens "Cypher".
+Sie steht allen Anbietern über das "openCypher" Projekt zur freien Nutzung und Implementierung zur Verfügung.
+
+Hier ein Beispiel:
+
+[source,cypher]
+----
+MATCH (me:Person)-[like:LIKES]->(what:Tool:Database) // <1>
+
+WHERE me.name = "Michael" AND like.rating > 3 // <2>
+
+RETURN what.name, what.url; <3>
+----
+
+<1> Muster von Knoten mit Labels z.B. `:Person` und deren Beziehungen, Variablen wie `me` zum späteren Zugriff
+<2> Prädikate auf Attributen 
+<3> Rückgabe von Ergebnissen beliebig komplexe Ausdrücke, aber auch Knoten, Beziehungen, Pfade
+
+Neo4j ist die bekannteste Graphdatenbank und wurde ursprünglich entwickelt, um genau diese Probleme einer Anwendung mit relationalem Backend zu lösen.
+
+In den vergangenen 15 Jahren hat sich sehr viel getan und die einstige Java-Bibliothek zur Verwaltung von "Datennetzen", ist jetzt eine weltweit genutzte Datenbank.
+Wen Details zu Anwendungsfällen, Kunden und Produktinformationen interessieren, findet diese reichlich auf der Website von Neo4j.
+
+== Vorstellung des Neo4j 3.0 Releases
+
+Am 26. April wurde auf unserer "GraphConnect" Konferenz in London, die neueste Version 3.0 von Neo4j von meinem Freund Emil Eifrem, dem CEO und Gründer von Neo Technology der Öffentlichkeit vorgestellt.
+
+Knapp 6 Monate nach dem vorherigen Release 2.3, ist dieser Versionssprung gerechtfertigt, denn die 3-er Version von Neo4j bringt eine große Menge von neuen Features, Verbesserungen und Änderungen mit.
+
+Für die Verbesserung der Produktivität unserer Nutzer wurden alle Bereiche von Neo4j überarbeitet und erweitert - die Kernthemen sind:
+
+* Skalierbarkeit & Leistung
+* Anwenderfreundlichkeit & Produktivität
+* Infrastruktur & Betrieb
+
+image::https://dl.dropboxusercontent.com/u/14493611/blog/adoc/articles/neo4j-30-overview.jpg[]
+
+Das aktuellste Release ist auf http://neo4j.com/download zu finden, mit bequemen Installern für Windows und OSX und einem Binärdownload für alle anderen Betriebsysteme.
+Es ist auch über http://hub.docker.com/_/neo4j[Docker] (`docker run neo4j`), auch im neuen Docker Store (beta), und als http://debian.neo4j.org[Debian] und Homebrew Pakete verfügbar.
+
+== Skalierbarkeit & Leistung
+
+Obwohl Graphdaten nicht als Massendaten ausgelegt sind und unsere Anwender die bislang existierenden Limits nie erreicht haben, gab es schon seit längerem den Wunsch diese zu entfernen.
+
+Eigentlich möchte man in seinem Graphmodell nur qualitativ hochwertige Daten speichern, bei denen durch Vorverarbeitung schon Rauschen und Artefakte entfernt wurden (es seid denn, man ist auf der Suche nach solchen Artefakten).
+Durch den immer breiteren Einsatz besonders im Handel, Telekommunikations- und Netzwerkumfeld, sowie bei Industrie 4.0 (Internet of Things) wird die Menge der gespeicherten Graphdaten in den nächsten Jahren jedoch beträchtlich ansteigen, so dass wir schon jetzt dafür vorsorgen wollten.
+
+=== Ohne Limits
+
+Daher ist jetzt die Anzahl der Knoten, Kanten und Eigenschaften in einem Neo4j Graph nicht mehr künstlich limitiert.
+Die Größe der Dateisysteme, und die Schreibgeschwindigkeit von Festplatten sind damit die begrenzenden Faktoren.
+
+Um trotz der größeren Adressierbarkeit den Platzbedarf für die größeren Block-Offsets zu minimieren, nutzen wir komprimierte Pointer, die nur minimalen Speicher benötigen.
+
+Für unsere Lucene Integration, haben wir ein automatisches Sharding implementiert, da ein einzelner Lucene Index nur 2.4 Mrd Dokumente umfassen kann.
+
+Weiterhin wurde in vielen Integrations- und Clustertests sichergestellt, dass Neo4j auch auf großen Maschinen gut skaliert.
+Innerhalb unserer Partnerschaft mit IBM wird die Datenbank auf Maschinen mit bis zu 160 Kernen und bis zu 512 GB RAM auf Herz und Nieren Stresstests unterzogen.
+Für die Zukunft ist die Unterstützung von CAPI-Flash mit mehr als 50 Terabyte RAM in Arbeit.
+
+=== Höhere Schreibleistung von Cypher
+
+Unser effizienter, kostenbasierter Abfrageplaner für Cypher wird jetzt auch für Statements genutzt, die in die Datenbank schreiben.
+Bisher war das nur für reine Lese-Abfragen der Fall.
+Besonders bei komplexen, gemischten Lese-Schreib-Abfragen profitiert man jetzt vom höheren Durchsatz, da durch die transaktional aktuellen Statistiken bessere Entscheidungen für die Ermittlung eines Ausführungsplans gemacht werden.
+Mehr Details zum Abfrageplaner gibts auf dem Neo4j Blog.
+
+== Anwenderfreundlichkeit & Produktivität
+
+Wir bekommen viel positives Feedback von unseren Nutzern für unsere Abfragesprache Cypher, die webbasierte Datenbankoberfläche mit Visualisierungen und das flexible Datenmodell.
+Es gibt aber noch weitere Bereiche der Datenbank, die wir verbessern wollen. 
+Dazu gehören neben Installation und Betrieb auch die APIs mit denen man mit Neo4j interagiert.
+
+=== Neo4j Browser Sync
+
+Neo4j's nette Weboberfläche, eine Angular-Anwendung, macht die Ausführung, Entwicklung und Inspektion von Abfragen, sowie Visualisierung und Export ihrer Ergebnisse recht einfach.
+Bisher waren jedoch gespeicherte Skripte, Stile und Einstellungen auf den aktuellen Browser beschränkt.
+Jetzt können diese mittels eines Cloud Services bei der Nutzung mehrerer Rechner oder im Team geteilt werden.
+Neo4j Browser Sync erlaubt mit einer einfachen Anmeldung den Zugriff darauf von überall her.
+
+=== Binärprotokoll
+
+image::http://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/20160426001809/bolt-diagram.png[]
+
+Bisher konnte der Neo4j Server über HTTP APIs angesprochen werden, diese wurden sowohl von Datenbanktreibern als auch Webanwendungen wie unserer eigenen Oberfläche, dem "Neo4j-Browser" direkt genutzt.
+
+Für die Version 3.0 wurde eine neues Binärprotokoll namens "Bolt" entwickelt, das neben der kompakten und schnellen Datenübertragung auch Raum für zukünftige Entwicklungen lässt.
+Es ist ein versioniertes Protokoll, ein Server kann mehrere Client-Versionen unterstützen.
+Sicherheit ist mit zertifikatsbasierter Verschlüsselung der Transportschicht (TLS) und Authentifizierung garantiert.
+Der Transport erfolgt über TCP Sockets und über Websockets im Browser.
+Das Protokoll basiert auf eine Variante von MessagePack namens PackStream, die zusätzlich komplex geschachtelte Datentypen, Graph-Elemente wie Knoten, Beziehungen und Pfade, sowie generelle Erweiterbarkeit bereitstellt.
+
+Für die Nutzung des neuen Protokolls gibt es erstmals in der Geschichte von Neo4j http://neo4j.com/developer/language-guides[offiziell unterstützte Treiber von Neo4j].
+Bisher haben wir, wie für open-source Projekte häufig der Fall, Treiber genutzt die von Entwicklern in unserer Nutzergemeinschaft entwickelt wurden.
+
+Jetzt wollen wir unseren Kunden und Nutzern zumindest einen konsistenten Basistreiber für die meisten Programmiersprachen anbieten, für Java, JavaScript, .Net und Python ist das jetzt schon der Fall.
+Die C und PHP Treiber für das neue Protokoll wurden in unserer Partner-Community entwickelt. Bolt-Treiber für weitere Sprachen werden in der Zukunft folgen.
+
+Da alle Treiber dieselben Konzepte und APIs implementieren und das Cypher-Typsystem zur Anwendung bringen, sieht die API in fast jeder Sprache ähnlich aus.
+Wer Java kennt, wird Parallelen zu anderen Datenbank-APIs wie z.B: JDBC erkennen.
+
+Hier am Beispiel von Java:
+
+[source,java]
+----
+Driver driver = GraphDatabase.driver("bolt://localhost");
+try (Session session = driver.session()) {
+    StatementResult result = session.run(
+       "MATCH (p:Person) WHERE p.name CONTAINS {name} RETURN p", 
+                               Values.parameters("name","Sven"));
+    while (result.hasNext()) {
+        Record record = result.next();
+        record.get("name");
+        record.get("age");
+    }
+}
+----
+
+Diese neuen Treiber können leicht in eigene Anwendungen eingebunden werden, sie sind leichtgewichtig und stehen under der liberalen Apache 2 Lizenz.
+
+Zwei Projekte die schon Gebrauch davon machen, sind der http://github.com/neo4j-contrib/neo4j-jdbc[Neo4j JDBC Treiber] und der neue http://github.com/neo4j-contrib/neo4j-spark-connector[Apache Spark Connector].
+
+Demos wie die http://neo4j.com/blog/charting-neo4j-3-0/[Integration in Web-Anwendungen] und http://github.com/neo4j-examples[Beispiel-Anwendungen] sind auch verfügbar.
+
+=== Neo4j JDBC
+
+Zuerst einmal fragt man sich natürlich, wie denn eine Graphdatenbank, die gar kein SQL spricht und keine Tabellen kennt, mit JDBC klar kommt.
+Im Kern ist JDBC da flexibel, es werden textuelle, parametrisierbare Abfragen (Strings) an einen Treiber geschickt und tabellarische Ergebnisse zurückerwartet.
+Wie der Abfragetext aussieht - in unserem Fall Cypher - oder welches Datenmodell die Datenbank fährt - in Neo4j Graph - ist JDBC herzlich egal.
+Wenn die Datenbank dazu noch Transaktionen unterstützt, kann man ein grosses Featureset von JDBC direkt nutzen.
+
+Das zu implementieren war gar nicht schwer, wir hatten bisher schon eine JDBC Treiber der auf den HTTP-APIs aufgesetzt hat.
+Jetzt konnten wir eine sauberen Neuimplementierung basierend auf dem offiziellen Java-Bolt-Treiber vornehmen.
+Mittlerweile wurden auch HTTP und Java-Embedded als Protokolle nachgerüstet.
+
+Hier ein Beispiel für die Benutzung:
+
+[source,java]
+----
+Connection con = DriverManager.getConnection("jdbc:neo4j:bolt://localhost");
+
+String query = "MATCH (p:Person)-[:LIKES]->(b:Book) WHERE p.age < {1} "+
+               "RETURN b.title as title, count(*) as freq";
+try (PreparedStatement pstmt = con.prepareStatement(query)) {
+    pstmt.setInt(1,25);
+    ResultSet rs = pstmt.executeQuery();
+	while (rs.next()) {
+		System.out.println(rs.getString("title")+" "+rs.getInt("freq"));
+	}
+}
+con.close();
+----
+
+Mit der Verfügbarkeit eines JDBC Treibers stehen einem plötzlich alle Tools, Integrationsbibliotheken und -frameworks zu Verfügung.
+Besonders für Nichtentwickler ist die Nutzung von Daten in Neo4j mittels Reporting- (JasperReports, BIRT), BI- (QlikView, Tableau, Cognos), ETL- (Talend, Pentaho) und Analyse- (Mathlab) Tools plötzlich möglich.
+Für Entwickler stehen alle Frameworks offen, die eine JDBC Integration haben, zum Beispiel Spring, myBatis, Play.
+Das gilt auch für Datenbanktools wie SquirrelSQL, SQL-Explorer, IntelliJ, DataGrip usw.
+
+=== Apache Spark Connector
+
+Apache Spark ist als speicherbasierte, massiv-parallele Datenverarbeitungslösung in aller Munde und die meisten IT- und BI-Abteilungen machen ihre ersten oder zweiten Schritte damit.
+
+Für viele Datenquellen und -senken bietet Spark selbst schon Integrationen (zum Beispiel auch über JDBC) an, andere sind über das spark-packages.org Repository verfügbar.
+
+Für Neo4j ist besonders interessant, dass mit Spark auch massiv parallele Graph-Operationen unterstützt werden, so dass man z.B. eine Milliarde Beziehungen für einen Page-Rank-Algorithmus verarbeiten kann.
+
+Daher war mit der Verfügbarkeit des Bolt-Treibers die Möglichkeit gegeben, einen offiziellen Neo4j-Spark-Connector zu entwickeln.
+Dieser kann, basierend auf Cypher, parallele Lese- und Schreiboperationen (auch in transaktionalen Batches) ausführen und so den effizienten bidirektionalen Datentransfer sicherstellen.
+
+Nach Einarbeitung in die Konzepte von Spark, war es mir möglich Unterstützung für RDDs (resilient distributed dataset), DataFrames, GraphX und GraphFrames zu implementieren.
+
+Hier ein kleines Beispiel eines sozialen Netzwerks mittels der Spark-Shell und GraphX:
+
+.Erzeugung eines sozialen Netzwerkes mit 100.000 Personen und 1M Beziehungen
+[source,cypher]
+----
+CREATE CONSTRAINT ON (p:Person) ASSERT p.id IS UNIQUE;
+
+UNWIND range(1,100000) AS x 
+CREATE (n:Person {id:x, name:"name"+x, age:x%100})
+WITH n
+UNWIND range(1,10) as round
+MATCH (m:Person) WHERE m.id = toInt(rand()*100000)
+CREATE (n)-[:KNOWS]->(m);
+----
+
+`$SPARK_HOME/bin/spark-shell --packages neo4j-contrib:neo4j-spark-connector:1.0.0-RC1`
+
+.GraphX Beispiel
+[source,scala]
+----
+import org.neo4j.spark._
+
+val g = Neo4jGraph.loadGraph(sc, label1="Person", relTypes=Seq("KNOWS"), label2="Person")
+// g: org.apache.spark.graphx.Graph[Any,Int] = org.apache.spark.graphx.impl.GraphImpl@57498
+
+// Größe des Teilgraphen
+g.vertices.count          // res0: Long = 999937
+g.edges.count             // res1: Long = 999906
+
+// PageRank mit 5 Iterationen
+import org.apache.spark.graphx._
+import org.apache.spark.graphx.lib._
+
+val g2 = PageRank.run(g, numIter = 5)
+
+// Rang von 5 Knoten
+val v = g2.vertices.take(5)
+// v: Array[(org.apache.spark.graphx.VertexId, Double)] = 
+//    Array((185012,0.15), (612052,1.0153), (354796,0.15), (182316,0.15), (199516,0.385))
+
+// die Rang-Informationen werden als `rank` Attribut nach Neo4j zurückgeschrieben
+Neo4jGraph.saveGraph(sc, g2, nodeProp = "rank", relProp = null)
+// res2: (Long, Long) = (999937,0)                                                 
+----
+
+=== Benutzerdefinierte Prozeduren
+
+Wie auch in anderen Datenbanken wird es mit Neo4j 3.0 möglich, spezifische Erweiterungen der Abfragesprache als Prozeduren einzubringen.
+
+Die Prozeduren können in Java (und anderen JVM-Sprachen) mittels annotierter Methoden implementiert werden.
+
+Hier ein einfaches Beispiel zur Generierung von UUIDs.
+Die Prozedur ruft die UUID Klasse aus dem JDK auf, um die UUID zu generieren und verpackt sie dann in ein einfaches DTO das für die Spaltenzuordnungen der Prozedurergebnisse verantwortlich ist.
+
+Danach werden die Ergebnisse, je nach Kardinalität der Prozedur mit einem Java8 Stream an Neo4j zurückgegeben und von Cypher an den Aufrufer weitergereicht.
+
+Da Cypher eine Sprache ist, die ihre Ergegnisse incrementell bereitstellt, kann dieser Stream in geeigneten Fällen direkt bis zum Endnutzer "durchgereicht" werden.
+
+[source,java]
+----
+@Procedure("apoc.create.uuid")
+public Stream<UUIDResult> uuid() {
+    return Stream.of(new UUIDResult(UUID.randomUUID().toString()));
+}
+static class UUIDResult {
+   public final String uuid;
+   ...
+}
+----
+
+In Cypher werden Prozeduren mittels `CALL procedure(parameter) YIELD result` integriert.
+Es gibt auch einen "standalone" Modus, in dem der Prozeduraufruf das ganze Statement ausmacht.
+
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM {url} AS row
+CALL apoc.create.uuid() yield uuid
+CREATE (:Person {id:uuid, name: row.name, born: row.dob });
+----
+
+Natürlich ist in einer solchen Prozedur alles möglich, was das Java Backend zu bieten hat.
+So hat man viele Möglichkeiten, aber auch die Verantwortung dafür.
+
+image::https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/img/apoc-load-jdbc.jpg[]
+
+Nützliche Prozeduren sind zum Beispiel:
+
+* Komplexe Graph-Algorithmen, 
+* das zur Verfügungstellen von Neo4j-Java-APIs in Cypher, 
+* Datenkonvertierung, 
+* Import, Export, 
+* aber auch ausgefallenere Sachen, wie Datentransfer von und zu anderen Datenbanken und APIs
+* Generierung von Meta-Informationen
+
+image::https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/master/docs/img/apoc.meta.graph.jpg[]
+
+
+All das haben wir in unserem https://github.com/neo4j-contrib/neo4j-apoc-procedures[APOC (Awesome Procedures for Neo4j)] Projekt umgesetzt, in dem jetzt mittlerweile knapp 200 Prozeduren viele verschiedene Anwendungsbereiche abdecken.
+
+== Infrastruktur & Betrieb
+
+image::http://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/20160425191352/neo4j-3-0-deployment-options.png[width=300,float=right]
+
+Die Laufzeit-Infrastruktur von Neo4j ist über die Jahre gewachsen, dadurch hatten sich einige Inkonsistenzen manifestiert.
+Mit der aktuellen Version wurde dieser Teil der Datenbank, der mehr für Administratoren aber auch für Entwickler gedacht ist, generalüberholt.
+
+Die Start-Skripte, Konfigurationsdateien, Log-Dateien, Betriebssystemintegration und Installationspakte wurden überarbeitet und konsolidiert.
+Damit sollte auch die Integration in Unix-Systemlandschaften leichter werden.
+
+Wer bisher Neo4j genutzt hat, sollte sich auf jeden Fall die http://neo4j.com/guides/upgrade/#neo4j-3-0[Upgrade-Dokumentation] anschauen, da sich in diesem Bereich fast alle Namen, Verzeichnisse und Dateien geändert haben.
+
+Für die leichteren Wechsel auf die neue Version gibt es ein Konfigurations-Migrationstool und den direkten Import einer Datenbank und Konfiguration.
+
+----
+java -jar $NEO4J_HOME/bin/tools/config-migrator.jar pfad/zu/neo4j2.x pfad/zu/neo4j3.x
+
+$NEO4J_HOME/bin/neo4j-admin import --mode=database --database=graph.db --from=pfad/zu/neo4j2.x
+----
+
+In Neo4j 2.3 wurde die umfangreiche Powershell-Integration für Windows vorgenommen, diese wurde jetzt in einfachere Skripte gekapselt.
+
+Die Docker Images und Debian Pakete wurden ebenso aktualisiert.
+
+== Mehr Informationen
+
+Die Journalisten des ICIJ haben Neo4j als Kerndatenbank in ihrer Arbeit eingesetzt, mit der Veröffentlichung der Daten, ist auch ein https://offshoreleaks.icij.org/pages/database[Download einer angepassten Neo4j Installation] mit diesen Daten verfügbar.
+
+Mehr Informationen zum Release 3.0 gibt es auf Neo4j.com:
+
+* http://neo4j.com/blog/neo4j-3-0-massive-scale-developer-productivity/[Neo4j 3.0 Release Blog Post]
+* http://neo4j.com/release-notes/neo4j-3-0-0/[Neo4j 3.0 Release Notes]
+* http://neo4j.com/developer[Neo4j Developer Site]
+* http://neo4j.com/product[Neo4j Produktinfos]
+* http://neo4j.com/docs[Neue Neo4j Dokumentation]
+* http://neo4j.com/download[Neo4j Download]
+* https://github.com/neo4j-contrib/neo4j-apoc-procedures[APOC Procedures Projekt]
+* https://github.com/neo4j/neo4j[Neo4j auf GitHub]
+* https://neo4j.com/slack[Neo4j Slack]
+* https://neo4j.com/blog/introducing-new-cypher-query-optimizer/[Blog Post zum Abfrageplaner]
+* http://github.com/neo4j-contrib/neo4j-jdbc[Neo4j JDBC Treiber]
+* http://github.com/neo4j-contrib/neo4j-spark-connector[Integration mit Apache Spark]

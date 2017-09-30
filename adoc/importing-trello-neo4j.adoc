@@ -1,0 +1,211 @@
+== Importing Trello Into Neo4j
+// http://stackoverflow.com/questions/10952685/automate-export-backup-of-trello-boards
+
+* analysis
+* labels, verweilzeit, 
+* NLP?
+* can we find out what makes card being addressed 
+* fulltext-index, allow Dana to search the cards he created
+
+=== Actions
+
+WITH "https://api.trello.com/1/member/me/actions?filter=createCard&limit=1000&key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b" as url
+CALL apoc.load.json(url) YIELD value AS actions
+RETURN *;
+
+
+=== Boards
+
+WITH "https://api.trello.com/1/organizations/neo4j/boards?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b" as url
+CALL apoc.load.json(url) YIELD value AS board
+WITH board WHERE NOT board.closed 
+RETURN board.name, size(board.memberships) as members, board.starred, board.url, keys(board.prefs)
+ORDER BY board.dateLastActivity DESC;
+
+WITH "https://api.trello.com/1/organizations/neo4j/boards?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b" as url
+CALL apoc.load.json(url) YIELD value AS board
+return keys(board)  limit 1
+
+[labelNames, desc, name, descData, url, closed, invited, idOrganization, shortUrl, idTags, id, dateLastView, dateLastActivity, shortLink, invitations, powerUps, prefs, pinned, subscribed, starred, memberships]
+
+curl -s 'https://api.trello.com/1/organizations/neo4j/boards?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b' | jq .
+
+// prefs [backgroundColor, cardAging, background, backgroundImage, canInvite, canBeOrg, backgroundBrightness, calendarFeedEnabled, permissionLevel, selfJoin, canBePublic, invitations, voting, canBePrivate, backgroundTile, cardCovers, backgroundImageScaled, comments]
+
+
+WITH "https://api.trello.com/1/organizations/neo4j/boards?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b" as url
+CALL apoc.load.json(url) YIELD value AS board
+WITH board WHERE NOT board.closed 
+RETURN board.name, size(board.memberships) as members, board.starred, board.url, keys(board.prefs)
+ORDER BY board.dateLastActivity DESC;
+
+[
+  {
+    "name": "\"Auth rollout planning\"",
+    "desc": "",
+    "descData": null,
+    "closed": true,
+    "idOrganization": "4e6fe2dd22292e6a44000718",
+    "pinned": null,
+    "invitations": null,
+    "shortLink": "vzJvi69o",
+    "powerUps": [],
+    "dateLastActivity": "2014-11-05T17:12:02.448Z",
+    "idTags": [],
+    "id": "5432ea85bf0d4ab86a6e0732",
+    "invited": false,
+    "starred": false,
+    "url": "https://trello.com/b/vzJvi69o/auth-rollout-planning",
+    "prefs": {
+      "permissionLevel": "org",
+      "voting": "disabled",
+      "comments": "members",
+      "invitations": "members",
+      "selfJoin": false,
+      "cardCovers": true,
+      "cardAging": "regular",
+      "calendarFeedEnabled": false,
+      "background": "ocean",
+      "backgroundImage": "https://d2k1ftgv7pobq7.cloudfront.net/images/backgrounds/ocean/full.jpg",
+      "backgroundImageScaled": [
+        {
+          "width": 2400,
+          "height": 1600,
+          "url": "https://d2k1ftgv7pobq7.cloudfront.net/images/backgrounds/ocean/large.jpg"
+        },
+        {
+          "width": 1024,
+          "height": 683,
+          "url": "https://d2k1ftgv7pobq7.cloudfront.net/images/backgrounds/ocean/medium.jpg"
+        },
+        {
+          "width": 320,
+          "height": 213,
+          "url": "https://d2k1ftgv7pobq7.cloudfront.net/images/backgrounds/ocean/small.jpg"
+        }
+      ],
+      "backgroundTile": false,
+      "backgroundBrightness": "dark",
+      "backgroundColor": null,
+      "canBePublic": false,
+      "canBeOrg": false,
+      "canBePrivate": false,
+      "canInvite": true
+    },
+    "memberships": [
+      {
+        "id": "5432ea85bf0d4ab86a6e0733",
+        "idMember": "4f481061518dae7670e2191f",
+        "memberType": "admin",
+        "unconfirmed": false,
+        "deactivated": true,
+        "orgMemberType": "admin"
+      },
+      {
+        "id": "5432eb90a7d5d2be49648d5c",
+        "idMember": "4f7958e4554c5d054c2c0355",
+        "memberType": "normal",
+        "unconfirmed": false,
+        "deactivated": false,
+        "orgMemberType": "normal"
+      },
+      {
+        "id": "5438115400b019494eba8f0e",
+        "idMember": "4eb1837029601968c243808f",
+        "memberType": "normal",
+        "unconfirmed": false,
+        "deactivated": true,
+        "orgMemberType": "normal"
+      },
+      {
+        "id": "543c1a9c70dcaec2aec178e6",
+        "idMember": "51655e18cad225e422003897",
+        "memberType": "normal",
+        "unconfirmed": false,
+        "deactivated": false,
+        "orgMemberType": "normal"
+      },
+      {
+        "id": "545a44358eb174bae56d7231",
+        "idMember": "4fabed816257aab21911394d",
+        "memberType": "normal",
+        "unconfirmed": false,
+        "deactivated": false,
+        "orgMemberType": "admin"
+      },
+      {
+        "id": "570b5606196ae9c0e9886da0",
+        "idMember": "4f70a2e3aa077bfc5c029dd7",
+        "memberType": "admin",
+        "unconfirmed": false,
+        "deactivated": false,
+
+
+curl -s 'https://api.trello.com/1/boards/4f795e252e5e91ed2128fcab/actions?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b' |  \
+jq -r '.[] | select(.memberCreator.username == "danacanzano" and .type=="createCard").data.card | [.name,.shortLink] | @csv'
+
+"requesting rewording to details on when logical logs are rotated.","qgA0jjQ4"
+"requesting details on neo4j-backups consistency checker.","avr2g8Sb"
+"requesting clarification on keep_logical_logs parameter","Gki3c0td"
+
+
+curl 'https://api.trello.com/1/boards/5440cf9390ed6ec6f5dedc4e/actions?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b' |  jq -r '.[]  | select(.type=="createCard").data.card '
+
+ | .[]
+
+curl 'https://api.trello.com/1/boards/5440cf9390ed6ec6f5dedc4e/actions?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b' |  \
+> jq -r '.[] | select(.memberCreator.username == "danacanzano" and .type=="createCard").data.card | [.name,.shortLink] | @csv'
+
+
+"how to implement primary keys","GJQZ90QK"
+"Get Inventory of Nodes in the Graph","wGoIehRW"
+"Explanation of error ""Unrecognized transaction id. Transaction may have timed out and been rolled back""","DP6MsXYT"
+"How to allow REST Status Endpoints for HA to not require authentication even when set system wide","3dFTCXxz"
+"Explanation","RHfVhygh"
+
+curl -s 'https://api.trello.com/1/members/danacanzano?key=aeca16e9f6deeedeebcb0240b0eab2f8&token=fc53cab847b3ecb62eb80c5905565f64b48beda5569143f61ae790710e98af2b'
+{
+  "id": "5637836872deaba954947610",
+  "avatarHash": "1f5a1bc9710166186f6fdd8c8b806c58",
+  "bio": "",
+  "bioData": null,
+  "confirmed": true,
+  "fullName": "Dana Canzano",
+  "idPremOrgsAdmin": [],
+  "initials": "DC",
+  "memberType": "normal",
+  "products": [],
+  "status": "disconnected",
+  "url": "https://trello.com/danacanzano",
+  "username": "danacanzano",
+  "avatarSource": null,
+  "email": null,
+  "gravatarHash": null,
+  "idBoards": [
+    "56b9ee5f96c5e911bf73d302",
+    "50fda858292712104b000772",
+    "559ac15c75a118a26d844f37",
+    "55156aa704171e9d4cc63162",
+    "52d80823a67afa2e6fecf7e2",
+    "4f795e252e5e91ed2128fcab",
+    "4f79f66e49be84e04103ba36",
+    "52e0da56644174180bcfd07a",
+    "5440cf9390ed6ec6f5dedc4e",
+    "51c00faa3accb7194b002cf2",
+    "55f7f0d4aa7fd28cca21e347",
+    "563a9d052f7e0e11d0b90101",
+    "55d076c46df07514e6f71ff3",
+    "5463b21857e6499f241de5c6",
+    "56b868e26ef1e84bb70d9c32"
+  ],
+  "idOrganizations": [
+    "4e6fe2dd22292e6a44000718"
+  ],
+  "loginTypes": null,
+  "oneTimeMessagesDismissed": null,
+  "prefs": null,
+  "trophies": [],
+  "uploadedAvatarHash": null,
+  "premiumFeatures": [],
+  "idBoardsPinned": null
+}
