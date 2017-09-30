@@ -5,16 +5,23 @@ Here is a list of the https://github.com/jexp/blog/tree/gh-pages/adoc[AsciiDoc s
 
 You find the posts on http://jexp.github.io/blog
 
-:toc:
+== Latest (2017)
 
-== Latest
-
+* link:{base}/html/compiled-runtime-32.html[Queries covered by the Cypher Compiled Runtime in Neo4j 3.2]
+* link:{base}/html/twitter-women-graphql-gender-graph.html[Finding Awesome Women Tweeting about GraphQL using Gender-API]
+* link:{base}/html/onnx2graph-store-and-visualize-machine-learning-models.html[onnx2graph - Store and Visualize Machine Learning Models]
+* link:{base}/html/better-data-import-with-graphql-introducing-graphql-load.html[Better Data Import with GraphQL: Introducing graphql load ]
+* link:{base}/html/mapping-metaphor-neo4j.html[Importing Mapping Metaphor into Neo4j]
+* link:{base}/html/memegraph.html[The Meme Graph]
+* link:{base}/html/neo4j-script-procedures-allow-running-javascript-from-cypher.html[Fullstack JavaScript - Neo4j Script Procedures]
+* link:{base}/html/user_defined_functions.html[User Defined Functions in Neo4j 3.1.0-M10]
+* link:{base}/html/neo4j-charts.html[Charting Neo4j 3.0]
 * link:{base}/html/efficient-graph-updates-with-cypher.html[5 Tips & Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher]
+
+== Previous - 2016
+
 * link:{base}/html/index_lookup_performance_map.html[Property Lookup Performance, and what we can do about it]
 * link:{base}/html/fast-node-by-label-counts-in-neo4j.html[Quick Node by Label Counts in Neo4j 2.x and 3.x]
-
-== Previous (2016)
-
 * link:{base}/html/apoc_data_integration_import_export.html[Export and Import Procedures in APOC]
 * link:{base}/html/cypher_map_projections_pattern_comprehensions.html[GraphQL inspired Map Projecitons and Pattern Comprehensions]
 * link:{base}/html/fast-node-by-label-counts-in-neo4j.html[Fast Node by Label Counts in Neo4j]
