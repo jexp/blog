@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.5">
-<title>Latest (2017)</title>
+<title>Importing Mapping Metaphor into Neo4j</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -420,243 +420,350 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>Importing Mapping Metaphor into Neo4j</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>I came across <a href="https://twitter.com/MappingMetaphor/status/911131199246143488">this tweet</a>, which sounded really interesting.</p>
+</div>
+<div class="quoteblock">
+<blockquote>
+<div class="paragraph">
+<p><a href="https://twitter.com/MappingMetaphor">@MappingMetaphor</a>: Metaphor Map now complete! Remaining data now up, and showing nearly 12,000 metaphorical connections: <a href="http://mappingmetaphor.arts.gla.ac.uk/" class="bare">http://mappingmetaphor.arts.gla.ac.uk/</a></p>
+</div>
+</blockquote>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_mapping_metaphor">Mapping Metaphor</h2>
+<div class="sectionbody">
+<div class="quoteblock">
+<div class="title"><a href="http://mappingmetaphor.arts.gla.ac.uk/about-the-project/">About the project</a></div>
+<blockquote>
+<div class="paragraph">
+<p>The Metaphor Map of English shows the metaphorical links which have been identified between different areas of meaning. These links can be from the Anglo-Saxon period right up to the present day so the map covers 1300 years of the English language. This allows us the opportunity to track metaphorical ways of thinking and expressing ourselves over more than a millennium; see the Metaphor in English section for more information.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>The Metaphor Map was built as part of the Mapping Metaphor with the Historical Thesaurus project. This was completed by a team in English Language at the University of Glasgow and funded by the Arts and Humanities Research Council from 2012 to early 2015. The Metaphor Map is based on the Historical Thesaurus of English, which was published in 2009 by Oxford University Press as the Historical Thesaurus of the Oxford English Dictionary.</p>
+</div>
+</blockquote>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>The site is really nice and fun to explore, with an interesting data visualization of the metaphoric connections between areas of language and thought:</p>
 </div>
-<div class="sect1">
-<h2 id="_latest_2017">Latest (2017)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/compiled-runtime-32.html">Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/twitter-women-graphql-gender-graph.html">Finding Awesome Women Tweeting about GraphQL using Gender-API</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/onnx2graph-store-and-visualize-machine-learning-models.html">onnx2graph - Store and Visualize Machine Learning Models</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/better-data-import-with-graphql-introducing-graphql-load.html">Better Data Import with GraphQL: Introducing graphql load </a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/mapping-metaphor-neo4j.html">Importing Mapping Metaphor into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/memegraph.html">The Meme Graph</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-script-procedures-allow-running-javascript-from-cypher.html">Fullstack JavaScript - Neo4j Script Procedures</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/user_defined_functions.html">User Defined Functions in Neo4j 3.1.0-M10</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-charts.html">Charting Neo4j 3.0</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
-</li>
-</ul>
+<div class="imageblock">
+<div class="content">
+<img src="../img/metaphors.svg" alt="metaphors" width="600">
+</div>
+</div>
+<div class="quoteblock">
+<div class="title"><a href="http://mappingmetaphor.arts.gla.ac.uk/metaphor-in-english/">Metaphor in English</a></div>
+<blockquote>
+<div class="paragraph">
+<p>When most people think of metaphor, they cast their minds back to school and remember examples from poetry and drama, such as Shakespeare’s “Juliet is the sun”. This is unsurprising; metaphor is usually described as a literary phenomenon used to create arresting images in the mind of the reader. However, linguists would argue that metaphor is far more pervasive within our language and indeed within thought itself.</p>
+</div>
+</blockquote>
+</div>
+<div class="paragraph">
+<p>Useful natural language correlation network are always fun to work with, so let&#8217;s have a look at it in a graph database.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_previous_2016">Previous - 2016</h2>
+<h2 id="_install_neo4j_apoc">Install Neo4j &amp; APOC</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
+<div class="olist arabic">
+<ol class="arabic">
 <li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
+<p>Download and install Neo4j-Desktop from <a href="http://neo4j.com/download/other-releases" class="bare">http://neo4j.com/download/other-releases</a></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
+<p>Create a database and add the <a href="https://github.com/neo4j-contrib/neo4j-apoc-procedures">APOC procedure library</a>.</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
+<p>I also installed <a href="https://github.com/neo4j-contrib/neo4j-graph-algorithms">Neo4j Graph Algorithms</a> to use later.</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
+<p>Start the database.</p>
 </li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+</ol>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
+<h2 id="_download_data">Download Data</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<div class="title">Note</div>
+</td>
+<td class="content">
+All the data is available from:
+Mapping Metaphor with the Historical Thesaurus. 2015. Metaphor Map of English Glasgow: University of Glasgow. <a href="http://mappingmetaphor.arts.gla.ac.uk" class="bare">http://mappingmetaphor.arts.gla.ac.uk</a>.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p><a href="http://mappingmetaphor.arts.gla.ac.uk/search/">Download CSV from here</a></p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
 <li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
+<p>select "Advanced Search",</p>
 </li>
-</ul>
+<li>
+<p>select all categories (you&#8217;re interested in)</p>
+</li>
+<li>
+<p>select "Connections between selected sections and all other sections"</p>
+</li>
+<li>
+<p>Metaphor Strength: "Both"</p>
+</li>
+<li>
+<p>Click "Search"</p>
+</li>
+<li>
+<p>Select "View results as a table"</p>
+</li>
+<li>
+<p>Click the "Download" icon in the left box</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p>The downloaded file "metaphor.csv" should contain almost 12k lines of metaphors:</p>
+</div>
+<div class="paragraph">
+<p>Copy <code>metaphor.csv</code> into the <code>import</code> folder of your database ("Open Folder") or in an http-accessible location to load via an http-url.</p>
+</div>
+<iframe width="560" height="315" src="https://www.youtube.com/embed/eY1qp26ooy0" frameborder="0" allowfullscreen></iframe>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_run_import">Run Import</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Our data model is really simple, we have</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p><code>:Category</code> nodes with <code>id</code> and <code>name</code>.</p>
+</li>
+<li>
+<p><code>:Strong</code> or <code>:Weak</code> relationships between them with the <code>start</code> property for the start era and <code>examples</code> for the example words.</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p>A more elaborate model could model the Metaphor as node, with the Words too and Era too and connect them.
+I was just not sure, what to name the metaphor, that information was missing in the data.
+But for this demonstration the simpler model is good enough.</p>
+</div>
+<div class="paragraph">
+<p>For good measure.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">create constraint on (c:Category) assert c.id is unique;</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Run this Cypher statement to import in a few seconds</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">// load csv as individual lines keyed with header names
+LOAD CSV WITH HEADERS FROM "file:///metaphor.csv" AS line
+
+// get-or-create first category (note typo in name header)
+merge (c1:Category {id:line.`Category 1 ID`}) ON CREATE SET c1.name=line.`Categroy 1 Name`
+// get-or-create second category
+merge (c2:Category {id:line.`Category 2 ID`}) ON CREATE SET c2.name=line.`Category 2 Name`
+
+// depending on direction flip order of c1,c2
+with line, case line.Direction when '&gt;' then [c1,c2] else [c2,c1] end as cat,
+
+// split words on ';' and remove last empty entry
+     apoc.coll.toSet(split(line.`Examples of metaphor`,';'))[0..-1] as words
+
+// create relatiosnship with dynamic type, set era &amp; words as relatiosnship properties
+call apoc.create.relationship(cat[0],line.Strength,{start:line.`Start Era`, examples:words},cat[1]) yield rel
+
+// return rows processed
+return count(*)</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>I rendered the category nodes pretty large so that you can read the names, and have the "Strong" links display their "words" instead.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/metaphors.png" alt="metaphors">
+</div>
+</div>
+<div class="paragraph">
+<p>For finding categories quickly</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">create index on :Category(name);</code></pre>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
+<h2 id="_run_graph_algorithms">Run graph algorithms.</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Degree distribution</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>╒════════╤═══════════╤═══════╤═════╤═════╤═════╤═════╤═════╤══════╤═════╤═════╤═════════════════╕
+│"type"  │"direction"│"total"│"p50"│"p75"│"p90"│"p95"│"p99"│"p999"│"max"│"min"│"mean"           │
+╞════════╪═══════════╪═══════╪═════╪═════╪═════╪═════╪═════╪══════╪═════╪═════╪═════════════════╡
+│"Weak"  │"OUTGOING" │7908   │11   │31   │48   │61   │84   │100   │100  │0    │19.10144927536232│
+│"Strong"│"OUTGOING" │3974   │3    │12   │28   │37   │86   │107   │107  │0    │9.599033816425122│
+└────────┴───────────┴───────┴─────┴─────┴─────┴─────┴─────┴──────┴─────┴─────┴─────────────────┘</pre>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_top_10_categories_by_in_degree">Top 10 Categories by in-degree:</h3>
+<div class="listingblock">
+<div class="content">
+<pre>MATCH (c:Category)
+WITH c,size( (c)--&gt;()) as out,size( (c)&lt;--()) as in
+RETURN c.id, c.name,in, out
+ORDER BY in DESC LIMIT 10;
+
+╒══════╤═════════════════════════╤════╤═════╕
+│"c.id"│"c.name"                 │"in"│"out"│
+╞══════╪═════════════════════════╪════╪═════╡
+│"2D06"│"Emotional suffering"    │119 │7    │
+├──────┼─────────────────────────┼────┼─────┤
+│"2C02"│"Bad"                    │119 │7    │
+├──────┼─────────────────────────┼────┼─────┤
+│"3M06"│"Literature"             │116 │29   │
+├──────┼─────────────────────────┼────┼─────┤
+│"1O22"│"Behaviour and conduct"  │109 │10   │
+├──────┼─────────────────────────┼────┼─────┤
+│"3L02"│"Money"                  │106 │44   │
+├──────┼─────────────────────────┼────┼─────┤
+│"2C01"│"Good"                   │105 │2    │
+├──────┼─────────────────────────┼────┼─────┤
+│"1P28"│"Greatness and intensity"│104 │2    │
+├──────┼─────────────────────────┼────┼─────┤
+│"2A22"│"Truth and falsity"      │104 │5    │
+├──────┼─────────────────────────┼────┼─────┤
+│"2D08"│"Love and friendship"    │100 │17   │
+├──────┼─────────────────────────┼────┼─────┤
+│"2A18"│"Intelligibility"        │99  │5    │
+└──────┴─────────────────────────┴────┴─────┘</pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_outgoing_page_rank_of_categories">Outgoing Page-Rank of Categories</h3>
+<div class="listingblock">
+<div class="content">
+<pre>call algo.pageRank.stream(null,null) yield node, score
+with node, toInt(score*10) as score order by score desc limit 10
+return node.name, score/10.0 as score;
+
+╒══════════════════════════════════════╤═══════╕
+│"node.name"                           │"score"│
+╞══════════════════════════════════════╪═══════╡
+│"Greatness and intensity"             │5.6    │
+├──────────────────────────────────────┼───────┤
+│"Colour "                             │3.5    │
+├──────────────────────────────────────┼───────┤
+│"Unimportance"                        │3.5    │
+├──────────────────────────────────────┼───────┤
+│"Importance"                          │3.4    │
+├──────────────────────────────────────┼───────┤
+│"Hatred and hostility"                │3.4    │
+├──────────────────────────────────────┼───────┤
+│"Plants"                              │2.9    │
+├──────────────────────────────────────┼───────┤
+│"Good"                                │2.9    │
+├──────────────────────────────────────┼───────┤
+│"Age"                                 │2.8    │
+├──────────────────────────────────────┼───────┤
+│"Love and friendship"                 │2.7    │
+├──────────────────────────────────────┼───────┤
+│"Memory, commemoration and revocation"│2.6    │
+└──────────────────────────────────────┴───────┘</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Funny that both <strong>importance</strong> and <strong>unimportance</strong> have such a high rank.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>call algo.pageRank.stream(null,null,{direction:'INCOMNG'}) yield node, score
+with node, toInt(score*10) as score order by score desc limit 10
+return node.name, score/10.0 as score;</pre>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="sect2">
+<h3 id="_betweeness_centrality">Betweeness Centrality</h3>
+<div class="paragraph">
+<p>Which categories connect others:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>call algo.betweenness.stream('Category','Strong') yield nodeId, centrality as score
+match (node) where id(node) = nodeId
+with node, toInt(score) as score order by score desc limit 10
+return node.id, node.name, score;
+
+╒═════════╤═══════════════════════════════════════════╤═══════╕
+│"node.id"│"node.name"                                │"score"│
+╞═════════╪═══════════════════════════════════════════╪═══════╡
+│"2C01"   │"Good"                                     │165912 │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"1E02"   │"Animal categories, habitats and behaviour"│131109 │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"3D05"   │"Authority, rebellion and freedom"         │108292 │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"2D06"   │"Emotional suffering"                      │87551  │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"1J34"   │"Colour "                                  │83595  │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"1E05"   │"Insects and other invertebrates"          │77171  │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"3D01"   │"Command and control"                      │71873  │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"1O20"   │"Vigorous action and degrees of violence"  │65028  │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"1C03"   │"Mental health"                            │64567  │
+├─────────┼───────────────────────────────────────────┼───────┤
+│"1F01"   │"Plants"                                   │59444  │
+└─────────┴───────────────────────────────────────────┴───────┘</pre>
 </div>
 </div>
+<div class="paragraph">
+<p>There are many other explorative queries and insights we can draw from this.</p>
 </div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Let me know in the comments what you&#8217;d be interested in.</p>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-09-30 19:54:03 CEST
+Last updated 2017-09-25 01:13:21 CEST
 </div>
 </div>
 </body>

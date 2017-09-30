@@ -4,19 +4,20 @@
 <meta charset="UTF-8">
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="generator" content="Asciidoctor 1.5.5">
-<title>Latest (2017)</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
+<meta name="generator" content="Asciidoctor 1.5.2">
+<title>Charting Neo4j 3.0</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
-/* Remove comment around @import statement below when using as a custom stylesheet */
-/*@import "https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700";*/
+/* Remove the comments around the @import statement below when using this as a custom stylesheet */
+/*@import "https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400";*/
 article,aside,details,figcaption,figure,footer,header,hgroup,main,nav,section,summary{display:block}
 audio,canvas,video{display:inline-block}
 audio:not([controls]){display:none;height:0}
 [hidden],template{display:none}
 script{display:none!important}
 html{font-family:sans-serif;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%}
+body{margin:0}
 a{background:transparent}
 a:focus{outline:thin dotted}
 a:active,a:hover{outline:0}
@@ -51,11 +52,12 @@ textarea{overflow:auto;vertical-align:top}
 table{border-collapse:collapse;border-spacing:0}
 *,*:before,*:after{-moz-box-sizing:border-box;-webkit-box-sizing:border-box;box-sizing:border-box}
 html,body{font-size:100%}
-body{background:#fff;color:rgba(0,0,0,.8);padding:0;margin:0;font-family:"Noto Serif","DejaVu Serif",serif;font-weight:400;font-style:normal;line-height:1;position:relative;cursor:auto;tab-size:4;-moz-osx-font-smoothing:grayscale;-webkit-font-smoothing:antialiased}
+body{background:#fff;color:rgba(0,0,0,.8);padding:0;margin:0;font-family:"Noto Serif","DejaVu Serif",serif;font-weight:400;font-style:normal;line-height:1;position:relative;cursor:auto}
 a:hover{cursor:pointer}
 img,object,embed{max-width:100%;height:auto}
 object,embed{height:100%}
 img{-ms-interpolation-mode:bicubic}
+#map_canvas img,#map_canvas embed,#map_canvas object,.map_canvas img,.map_canvas embed,.map_canvas object{max-width:none!important}
 .left{float:left!important}
 .right{float:right!important}
 .text-left{text-align:left!important}
@@ -63,11 +65,10 @@ img{-ms-interpolation-mode:bicubic}
 .text-center{text-align:center!important}
 .text-justify{text-align:justify!important}
 .hide{display:none}
-img,object,svg{display:inline-block;vertical-align:middle}
+.antialiased,body{-webkit-font-smoothing:antialiased}
+img{display:inline-block;vertical-align:middle}
 textarea{height:auto;min-height:50px}
 select{width:100%}
-.center{margin-left:auto;margin-right:auto}
-.spread{width:100%}
 p.lead,.paragraph.lead>p,#preamble>.sectionbody>.paragraph:first-of-type p{font-size:1.21875em;line-height:1.6}
 .subheader,.admonitionblock td.content>.title,.audioblock>.title,.exampleblock>.title,.imageblock>.title,.listingblock>.title,.literalblock>.title,.stemblock>.title,.openblock>.title,.paragraph>.title,.quoteblock>.title,table.tableblock>.title,.verseblock>.title,.videoblock>.title,.dlist>.title,.olist>.title,.ulist>.title,.qlist>.title,.hdlist>.title{line-height:1.45;color:#7a2518;font-weight:400;margin-top:0;margin-bottom:.25em}
 div,dl,dt,dd,ul,ol,li,h1,h2,h3,#toctitle,.sidebarblock>.content>.title,h4,h5,h6,pre,form,p,blockquote,th,td{margin:0;padding:0;direction:ltr}
@@ -110,8 +111,7 @@ blockquote,blockquote p{line-height:1.6;color:rgba(0,0,0,.85)}
 h1{font-size:2.75em}
 h2{font-size:2.3125em}
 h3,#toctitle,.sidebarblock>.content>.title{font-size:1.6875em}
-h4{font-size:1.4375em}}
-table{background:#fff;margin-bottom:1.25em;border:solid 1px #dedede}
+h4{font-size:1.4375em}}table{background:#fff;margin-bottom:1.25em;border:solid 1px #dedede}
 table thead,table tfoot{background:#f7f8f7;font-weight:bold}
 table thead tr th,table thead tr td,table tfoot tr th,table tfoot tr td{padding:.5em .625em .625em;font-size:inherit;color:rgba(0,0,0,.8);text-align:left}
 table tr th,table tr td{padding:.5625em .625em;font-size:inherit;color:rgba(0,0,0,.8)}
@@ -121,14 +121,10 @@ h1,h2,h3,#toctitle,.sidebarblock>.content>.title,h4,h5,h6{line-height:1.2;word-s
 h1 strong,h2 strong,h3 strong,#toctitle strong,.sidebarblock>.content>.title strong,h4 strong,h5 strong,h6 strong{font-weight:400}
 .clearfix:before,.clearfix:after,.float-group:before,.float-group:after{content:" ";display:table}
 .clearfix:after,.float-group:after{clear:both}
-*:not(pre)>code{font-size:.9375em;font-style:normal!important;letter-spacing:0;padding:.1em .5ex;word-spacing:-.15em;background-color:#f7f7f8;-webkit-border-radius:4px;border-radius:4px;line-height:1.45;text-rendering:optimizeSpeed;word-wrap:break-word}
-*:not(pre)>code.nobreak{word-wrap:normal}
-*:not(pre)>code.nowrap{white-space:nowrap}
+*:not(pre)>code{font-size:.9375em;font-style:normal!important;letter-spacing:0;padding:.1em .5ex;word-spacing:-.15em;background-color:#f7f7f8;-webkit-border-radius:4px;border-radius:4px;line-height:1.45;text-rendering:optimizeSpeed}
 pre,pre>code{line-height:1.45;color:rgba(0,0,0,.9);font-family:"Droid Sans Mono","DejaVu Sans Mono",monospace;font-weight:400;text-rendering:optimizeSpeed}
-em em{font-style:normal}
-strong strong{font-weight:400}
 .keyseq{color:rgba(51,51,51,.8)}
-kbd{font-family:"Droid Sans Mono","DejaVu Sans Mono",monospace;display:inline-block;color:rgba(0,0,0,.8);font-size:.65em;line-height:1.45;background-color:#f7f7f7;border:1px solid #ccc;-webkit-border-radius:3px;border-radius:3px;-webkit-box-shadow:0 1px 0 rgba(0,0,0,.2),0 0 0 .1em white inset;box-shadow:0 1px 0 rgba(0,0,0,.2),0 0 0 .1em #fff inset;margin:0 .15em;padding:.2em .5em;vertical-align:middle;position:relative;top:-.1em;white-space:nowrap}
+kbd{display:inline-block;color:rgba(0,0,0,.8);font-size:.75em;line-height:1.4;background-color:#f7f7f7;border:1px solid #ccc;-webkit-border-radius:3px;border-radius:3px;-webkit-box-shadow:0 1px 0 rgba(0,0,0,.2),0 0 0 .1em white inset;box-shadow:0 1px 0 rgba(0,0,0,.2),0 0 0 .1em #fff inset;margin:-.15em .15em 0 .15em;padding:.2em .6em .2em .5em;vertical-align:middle;white-space:nowrap}
 .keyseq kbd:first-child{margin-left:0}
 .keyseq kbd:last-child{margin-right:0}
 .menuseq,.menu{color:rgba(0,0,0,.8)}
@@ -159,33 +155,29 @@ p a>code:hover{color:rgba(0,0,0,.9)}
 #toc ul.sectlevel0>li>a{font-style:italic}
 #toc ul.sectlevel0 ul.sectlevel1{margin:.5em 0}
 #toc ul{font-family:"Open Sans","DejaVu Sans",sans-serif;list-style-type:none}
-#toc li{line-height:1.3334;margin-top:.3334em}
 #toc a{text-decoration:none}
 #toc a:active{text-decoration:underline}
 #toctitle{color:#7a2518;font-size:1.2em}
 @media only screen and (min-width:768px){#toctitle{font-size:1.375em}
 body.toc2{padding-left:15em;padding-right:0}
 #toc.toc2{margin-top:0!important;background-color:#f8f8f7;position:fixed;width:15em;left:0;top:0;border-right:1px solid #efefed;border-top-width:0!important;border-bottom-width:0!important;z-index:1000;padding:1.25em 1em;height:100%;overflow:auto}
-#toc.toc2 #toctitle{margin-top:0;margin-bottom:.8rem;font-size:1.2em}
+#toc.toc2 #toctitle{margin-top:0;font-size:1.2em}
 #toc.toc2>ul{font-size:.9em;margin-bottom:0}
 #toc.toc2 ul ul{margin-left:0;padding-left:1em}
 #toc.toc2 ul.sectlevel0 ul.sectlevel1{padding-left:0;margin-top:.5em;margin-bottom:.5em}
 body.toc2.toc-right{padding-left:0;padding-right:15em}
-body.toc2.toc-right #toc.toc2{border-right-width:0;border-left:1px solid #efefed;left:auto;right:0}}
-@media only screen and (min-width:1280px){body.toc2{padding-left:20em;padding-right:0}
+body.toc2.toc-right #toc.toc2{border-right-width:0;border-left:1px solid #efefed;left:auto;right:0}}@media only screen and (min-width:1280px){body.toc2{padding-left:20em;padding-right:0}
 #toc.toc2{width:20em}
 #toc.toc2 #toctitle{font-size:1.375em}
 #toc.toc2>ul{font-size:.95em}
 #toc.toc2 ul ul{padding-left:1.25em}
-body.toc2.toc-right{padding-left:0;padding-right:20em}}
-#content #toc{border-style:solid;border-width:1px;border-color:#e0e0dc;margin-bottom:1.25em;padding:1.25em;background:#f8f8f7;-webkit-border-radius:4px;border-radius:4px}
+body.toc2.toc-right{padding-left:0;padding-right:20em}}#content #toc{border-style:solid;border-width:1px;border-color:#e0e0dc;margin-bottom:1.25em;padding:1.25em;background:#f8f8f7;-webkit-border-radius:4px;border-radius:4px}
 #content #toc>:first-child{margin-top:0}
 #content #toc>:last-child{margin-bottom:0}
 #footer{max-width:100%;background-color:rgba(0,0,0,.8);padding:1.25em}
 #footer-text{color:rgba(255,255,255,.8);line-height:1.44}
 .sect1{padding-bottom:.625em}
-@media only screen and (min-width:768px){.sect1{padding-bottom:1.25em}}
-.sect1+.sect1{border-top:1px solid #efefed}
+@media only screen and (min-width:768px){.sect1{padding-bottom:1.25em}}.sect1+.sect1{border-top:1px solid #efefed}
 #content h1>a.anchor,h2>a.anchor,h3>a.anchor,#toctitle>a.anchor,.sidebarblock>.content>.title>a.anchor,h4>a.anchor,h5>a.anchor,h6>a.anchor{position:absolute;z-index:1001;width:1.5ex;margin-left:-1.5ex;display:block;text-decoration:none!important;visibility:hidden;text-align:center;font-weight:400}
 #content h1>a.anchor:before,h2>a.anchor:before,h3>a.anchor:before,#toctitle>a.anchor:before,.sidebarblock>.content>.title>a.anchor:before,h4>a.anchor:before,h5>a.anchor:before,h6>a.anchor:before{content:"\00A7";font-size:.85em;display:block;padding-top:.1em}
 #content h1:hover>a.anchor,#content h1>a.anchor:hover,h2:hover>a.anchor,h2>a.anchor:hover,h3:hover>a.anchor,#toctitle:hover>a.anchor,.sidebarblock>.content>.title:hover>a.anchor,h3>a.anchor:hover,#toctitle>a.anchor:hover,.sidebarblock>.content>.title>a.anchor:hover,h4:hover>a.anchor,h4>a.anchor:hover,h5:hover>a.anchor,h5>a.anchor:hover,h6:hover>a.anchor,h6>a.anchor:hover{visibility:visible}
@@ -214,9 +206,7 @@ table.tableblock #preamble>.sectionbody>.paragraph:first-of-type p{font-size:inh
 .sidebarblock .literalblock pre,.sidebarblock .listingblock pre:not(.highlight),.sidebarblock .listingblock pre[class="highlight"],.sidebarblock .listingblock pre[class^="highlight "],.sidebarblock .listingblock pre.CodeRay,.sidebarblock .listingblock pre.prettyprint{background:#f2f1f1}
 .literalblock pre,.literalblock pre[class],.listingblock pre,.listingblock pre[class]{-webkit-border-radius:4px;border-radius:4px;word-wrap:break-word;padding:1em;font-size:.8125em}
 .literalblock pre.nowrap,.literalblock pre[class].nowrap,.listingblock pre.nowrap,.listingblock pre[class].nowrap{overflow-x:auto;white-space:pre;word-wrap:normal}
-@media only screen and (min-width:768px){.literalblock pre,.literalblock pre[class],.listingblock pre,.listingblock pre[class]{font-size:.90625em}}
-@media only screen and (min-width:1280px){.literalblock pre,.literalblock pre[class],.listingblock pre,.listingblock pre[class]{font-size:1em}}
-.literalblock.output pre{color:#f7f7f8;background-color:rgba(0,0,0,.9)}
+@media only screen and (min-width:768px){.literalblock pre,.literalblock pre[class],.listingblock pre,.listingblock pre[class]{font-size:.90625em}}@media only screen and (min-width:1280px){.literalblock pre,.literalblock pre[class],.listingblock pre,.listingblock pre[class]{font-size:1em}}.literalblock.output pre{color:#f7f7f8;background-color:rgba(0,0,0,.9)}
 .listingblock pre.highlightjs{padding:0}
 .listingblock pre.highlightjs>code{padding:1em;-webkit-border-radius:4px;border-radius:4px}
 .listingblock pre.prettyprint{border-width:0}
@@ -226,7 +216,7 @@ table.tableblock #preamble>.sectionbody>.paragraph:first-of-type p{font-size:inh
 .listingblock.terminal pre .command:before{content:attr(data-prompt);padding-right:.5em;color:#999}
 .listingblock.terminal pre .command:not([data-prompt]):before{content:"$"}
 table.pyhltable{border-collapse:separate;border:0;margin-bottom:0;background:none}
-table.pyhltable td{vertical-align:top;padding-top:0;padding-bottom:0;line-height:1.45}
+table.pyhltable td{vertical-align:top;padding-top:0;padding-bottom:0}
 table.pyhltable td.code{padding-left:.75em;padding-right:0}
 pre.pygments .lineno,table.pyhltable td:not(.code){color:#999;padding-left:0;padding-right:.5em;border-right:1px solid #ddddd8}
 pre.pygments .lineno{display:inline-block;margin-right:.25em}
@@ -247,12 +237,13 @@ table.pyhltable .linenodiv{background:none!important;padding-right:0!important}
 .verseblock .attribution{margin-top:1.25rem;margin-left:.5ex}
 .quoteblock .attribution,.verseblock .attribution{font-size:.9375em;line-height:1.45;font-style:italic}
 .quoteblock .attribution br,.verseblock .attribution br{display:none}
-.quoteblock .attribution cite,.verseblock .attribution cite{display:block;letter-spacing:-.025em;color:rgba(0,0,0,.6)}
+.quoteblock .attribution cite,.verseblock .attribution cite{display:block;letter-spacing:-.05em;color:rgba(0,0,0,.6)}
 .quoteblock.abstract{margin:0 0 1.25em 0;display:block}
 .quoteblock.abstract blockquote,.quoteblock.abstract blockquote p{text-align:left;word-spacing:0}
 .quoteblock.abstract blockquote:before,.quoteblock.abstract blockquote p:first-of-type:before{display:none}
 table.tableblock{max-width:100%;border-collapse:separate}
 table.tableblock td>.paragraph:last-child p>p:last-child,table.tableblock th>p:last-child,table.tableblock td>p:last-child{margin-bottom:0}
+table.spread{width:100%}
 table.tableblock,th.tableblock,td.tableblock{border:0 solid #dedede}
 table.grid-all th.tableblock,table.grid-all td.tableblock{border-width:0 1px 1px 0}
 table.grid-all tfoot>tr>th.tableblock,table.grid-all tfoot>tr>td.tableblock{border-width:1px 1px 0 0}
@@ -298,8 +289,8 @@ ol.upperroman{list-style-type:upper-roman}
 ol.lowergreek{list-style-type:lower-greek}
 .hdlist>table,.colist>table{border:0;background:none}
 .hdlist>table>tbody>tr,.colist>table>tbody>tr{background:none}
-td.hdlist1,td.hdlist2{vertical-align:top;padding:0 .625em}
-td.hdlist1{font-weight:bold;padding-bottom:1.25em}
+td.hdlist1{padding-right:.75em;font-weight:bold}
+td.hdlist1,td.hdlist2{vertical-align:top}
 .literalblock+.colist,.listingblock+.colist{margin-top:-.5em}
 .colist>table tr>td:first-of-type{padding:0 .75em;line-height:1}
 .colist>table tr>td:last-of-type{padding:.25em 0}
@@ -312,14 +303,13 @@ td.hdlist1{font-weight:bold;padding-bottom:1.25em}
 .image.left,.image.right{margin-top:.25em;margin-bottom:.25em;display:inline-block;line-height:0}
 .image.left{margin-right:.625em}
 .image.right{margin-left:.625em}
-a.image{text-decoration:none;display:inline-block}
-a.image object{pointer-events:none}
-sup.footnote,sup.footnoteref{font-size:.875em;position:static;vertical-align:super}
-sup.footnote a,sup.footnoteref a{text-decoration:none}
-sup.footnote a:active,sup.footnoteref a:active{text-decoration:underline}
+a.image{text-decoration:none}
+span.footnote,span.footnoteref{vertical-align:super;font-size:.875em}
+span.footnote a,span.footnoteref a{text-decoration:none}
+span.footnote a:active,span.footnoteref a:active{text-decoration:underline}
 #footnotes{padding-top:.75em;padding-bottom:.75em;margin-bottom:.625em}
 #footnotes hr{width:20%;min-width:6.25em;margin:-.25em 0 .75em 0;border-width:1px 0 0 0}
-#footnotes .footnote{padding:0 .375em 0 .225em;line-height:1.3334;font-size:.875em;margin-left:1.2em;text-indent:-1.05em;margin-bottom:.2em}
+#footnotes .footnote{padding:0 .375em;line-height:1.3;font-size:.875em;margin-left:1.2em;text-indent:-1.2em;margin-bottom:.2em}
 #footnotes .footnote a:first-of-type{font-weight:bold;text-decoration:none}
 #footnotes .footnote:last-of-type{margin-bottom:0}
 #content #footnotes{margin-top:-.625em;margin-bottom:0;padding:.75em 0}
@@ -377,10 +367,11 @@ span.icon>.fa{cursor:default}
 pre .conum[data-value]{position:relative;top:-.125em}
 b.conum *{color:inherit!important}
 .conum:not([data-value]):empty{display:none}
-dt,th.tableblock,td.content,div.footnote{text-rendering:optimizeLegibility}
-h1,h2,p,td.content,span.alt{letter-spacing:-.01em}
-p strong,td.content strong,div.footnote strong{letter-spacing:-.005em}
-p,blockquote,dt,td.content,span.alt{font-size:1.0625rem}
+h1,h2{letter-spacing:-.01em}
+dt,th.tableblock,td.content{text-rendering:optimizeLegibility}
+p,td.content{letter-spacing:-.01em}
+p strong,td.content strong{letter-spacing:-.005em}
+p,blockquote,dt,td.content{font-size:1.0625rem}
 p{margin-bottom:1.25rem}
 .sidebarblock p,.sidebarblock dt,.sidebarblock td.content,p.tableblock{font-size:1em}
 .exampleblock>.content{background-color:#fffef7;border-color:#e0e0dc;-webkit-box-shadow:0 1px 4px #e0e0dc;box-shadow:0 1px 4px #e0e0dc}
@@ -391,9 +382,9 @@ a{color:inherit!important;text-decoration:underline!important}
 a.bare,a[href^="#"],a[href^="mailto:"]{text-decoration:none!important}
 a[href^="http:"]:not(.bare):after,a[href^="https:"]:not(.bare):after{content:"(" attr(href) ")";display:inline-block;font-size:.875em;padding-left:.25em}
 abbr[title]:after{content:" (" attr(title) ")"}
-pre,blockquote,tr,img,object,svg{page-break-inside:avoid}
+pre,blockquote,tr,img{page-break-inside:avoid}
 thead{display:table-header-group}
-svg{max-width:100%}
+img{max-width:100%!important}
 p,blockquote,dt,td.content{font-size:1em;orphans:3;widows:3}
 h2,h3,#toctitle,.sidebarblock>.content>.title{page-break-after:avoid}
 #toc,.sidebarblock,.exampleblock>.content{background:none!important}
@@ -420,243 +411,356 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>Charting Neo4j 3.0</h1>
 </div>
 <div id="content">
+<div class="sect1">
+<h2 id="_chart_not_graph">Chart not Graph</h2>
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>As you probably know, we people at Neo4j really want to discern graphs from charts.
+It&#8217;s too easy to mix the two up in spoken language and "graph paper" doesn&#8217;t help.
+If it&#8217;s a chart like a bar-, pie- or line-chart then it&#8217;s not a graph but a visualisation of data across multiple axes (mostly 2 - x and y).</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="https://dl.dropboxusercontent.com/u/14493611/blog/img/charts-vs-graphs.png" alt="charts vs graphs">
+</div>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>Fortunately the creators of <a href="http://chartjs.org/">chart.js</a> didn&#8217;t call their impressive Javascript not graph.js :)</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_how_did_we_get_here">How did we get here</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Some of you might still remember webadmin our first web based Neo4j interface which was pretty cool for its time and had a number of cool features.
+One feature many people loved but left everyone confused was the chart at the beginning showing the growth of data volume (nodes, relationships and properties) in your graph over time.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>That&#8217;s especially nice, to see progress when your importing data or have your production app running.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="http://fooo.fr/~vjeux/github/github-recommandation/db/doc/manual/html/images/operations/webadmin-charts.png" alt="webadmin charts">
+</div>
+</div>
+<div class="paragraph">
+<p>But it was also confusing because it didn&#8217;t actually show the counts of entites but the total storage file size, which can contain empty segments if you delete data.
+So people were wondering, why does this thing grow or not go down, when I actually delete data.
+Or why doesn&#8217;t it grow when I create data.</p>
+</div>
+<div class="paragraph">
+<p>With Neo4j 3.0 we finally removed webadmin (RIP) but there are still a few things missing in Neo4j browser.</p>
+</div>
+</div>
 </div>
 <div class="sect1">
-<h2 id="_latest_2017">Latest (2017)</h2>
+<h2 id="_new_features">New Features</h2>
 <div class="sectionbody">
+<div class="paragraph">
+<p>As there are some cool new features which come together, I thought it would be nice to give people the charting of graph data volume back while also combining those nice new features.</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/compiled-runtime-32.html">Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</a></p>
+<p>Fast Entity Counts</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/twitter-women-graphql-gender-graph.html">Finding Awesome Women Tweeting about GraphQL using Gender-API</a></p>
+<p>User Defined and Built-In Procedures</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/onnx2graph-store-and-visualize-machine-learning-models.html">onnx2graph - Store and Visualize Machine Learning Models</a></p>
+<p>Binary Protocol</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/better-data-import-with-graphql-introducing-graphql-load.html">Better Data Import with GraphQL: Introducing graphql load </a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/mapping-metaphor-neo4j.html">Importing Mapping Metaphor into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/memegraph.html">The Meme Graph</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-script-procedures-allow-running-javascript-from-cypher.html">Fullstack JavaScript - Neo4j Script Procedures</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/user_defined_functions.html">User Defined Functions in Neo4j 3.1.0-M10</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-charts.html">Charting Neo4j 3.0</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
+<p>Official Drivers (incl. JavaScript)</p>
 </li>
 </ul>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_previous_2016">Previous - 2016</h2>
+<h2 id="_fast_counting_of_entities">Fast counting of entities</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>With Neo4j 3.0 we provide counts of entites from Cypher no longer by actually counting them but by inspecting our transactional database statistics.
+Many databases have database statistics, but few keep them transactionally up to date, to have always accurate and reliable counts.</p>
+</div>
+<div class="paragraph">
+<p>So now when you issue Cypher statements like the following, you&#8217;ll get the results back in milliseconds.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">MATCH () RETURN count(*);
+MATCH (n) RETURN count(*);
+MATCH (:Person) RETURN count(*);
+
+MATCH ()--&gt;() RETURN count(*);
+MATCH ()-[:FOLLOWS]-&gt;() RETURN count(*);
+MATCH (n)-[:LIKES]-&gt;(m) RETURN count(*);</code></pre>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
+<h2 id="_built_in_and_user_defined_procedures">Built-in and User Defined Procedures</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Calling procedures from Cypher is another really cool feature in 3.0.
+You can use the built in procedures to get information about procedures (how meta), indexes, constraints, and entity meta information like lablels, relationship types and property-keys.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CALL db.relationshipTypes();
+
+// integrated call
+CALL db.labels() YIELD label
+RETURN label ORDER BY label;
+
+CALL dbms.procedures();
+
+// complex call, list procedures by package
+CALL dbms.procedures() YIELD name
+WITH split(name,".") as parts
+RETURN parts[0..-1] as package, count(*), collect(parts[-1]) as procedures
+ORDER BY count(*) DESC;</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>It&#8217;s much more fun to write your own procedures or actually to contribute to the large collection of procedures we created in the <a href="https://github.com/neo4j-contrib/neo4j-apoc-procedures">APOC procedures community project</a>.</p>
+</div>
+<div class="paragraph">
+<p>But I digress.
+So we can use the built in procedures to get information about labels and relationship types. Nice!
+Combined with the counting queries, we can not only get total counts but also fast counts by label and relationship type.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
+<h2 id="_binary_protocol_and_official_drivers">Binary Protocol and Official Drivers</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>The next big thing with Neo4j 3.0 is our binary protocol "bolt", which is based on PackStream a extension of MessagePack.</p>
+</div>
+<div class="paragraph">
+<p>With the binary protocol, we also provide officially supported drivers for <a href="http://neo4j.com/developer/language-guides#bolt-drivers">.Net, Python, Java and JavaScript</a> (<a href="http://neo4j.com/docs/developer-manual/current/#driver">detailed documentation</a>) which are all Apache v2 licensed and can be found on <a href="https://github.com/neo4j?query=driver">GitHub</a>.</p>
+</div>
+<div class="paragraph">
+<p>Our awesome contributor community also provided bolt drivers for PHP (thanks <a href="http://twitter.com/ikwattro">Christophe</a>) and is working on versions for Ruby and Go.</p>
+</div>
+<div class="paragraph">
+<p>To integrate with chart.js, I just needed the JavaScript driver, which works both with node.js and in the browser, it&#8217;s available via Bower and <a href="https://npmjs.org/package/neo4j-driver">NPM</a>.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_goals">Goals</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>I want to provide an auto-updating chart of all the nodes in total and by label as well as the relationships in total and by relationship type.</p>
+</div>
+<div class="paragraph">
+<p>Also the user should be able to run free form queries to be charted.</p>
+</div>
+<div class="paragraph">
+<p>The <a href="https://gist.github.com/jexp/f4ae19be0e06d8a19867f294e09f0759">source code is available</a> under the MIT license.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
+<h2 id="_implementation_database_statistics">Implementation Database Statistics</h2>
 <div class="sectionbody">
+<div class="paragraph">
+<p>I haven&#8217;t used chart.js before and my JS skills are pretty bad, so bear with me. Here are the basics of what I did.</p>
+</div>
+<div class="paragraph">
+<p>I pulled all Javascript libraries and CSS files from their CDNs.
+For the Neo4j Javascript Driver I used the CDN of rawgit.
+So I actually don&#8217;t need Bower or any other Hipster JavaScript build setup that downloads a Gigabyte of stuff onto my disk.</p>
+</div>
+<div class="paragraph">
+<p>These are my dependencies:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
+<p>neo4j-driver</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
+<p>Chart.js</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
+<p>JQuery</p>
+</li>
+<li>
+<p>Bootstrap</p>
 </li>
 </ul>
+</div>
+<div class="paragraph">
+<p>I started with a basic bootstrap template and added a bunch of form fields and a button for the database connection, refresh frequency and to toggle the auto-updating.</p>
+</div>
+<div class="paragraph">
+<p>I just followed the tutorial for chart.js starting with a <code>&lt;canvas&gt;</code> element that&#8217;s turned into a line-chart.
+For the statistics-view I wanted to use a logarithmic scale for the counts and a time scale for the measurements.</p>
+</div>
+<div class="paragraph">
+<p>Here are the steps that I do:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>button is pressed</p>
+</li>
+<li>
+<p>get the URL and password from the form fields</p>
+</li>
+<li>
+<p>instantiate a driver with those credentials and get a session</p>
+</li>
+<li>
+<p>use the session to query for the total counts with <code>MATCH () RETURN count(*)</code> and use a promise to receive the results and update the chart with the new information</p>
+</li>
+<li>
+<p>the chart updater is a separate function which I reuse for all the named updates of information that happens at the same time</p>
+</li>
+<li>
+<p>query for all label names via the <code>db.labels()</code> procedure</p>
+</li>
+<li>
+<p>create a second session and get the count for each label</p>
+</li>
+<li>
+<p>do the same for relationships</p>
+</li>
+<li>
+<p>the chart update also includes picking a color and making sure we only display 25 results in total, moving them to the left</p>
+</li>
+</ol>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="https://dl.dropboxusercontent.com/u/14493611/blog/img/neo-charts-components.png" alt="neo charts components">
+</div>
+</div>
+<div class="paragraph">
+<p>Here is the code:</p>
+</div>
+<div class="listingblock">
+<div class="title">Statistics Queries</div>
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">        function stats() {
+            var neo = neo4j.v1;
+            var driver = neo.driver($("#url").val(), neo.auth.basic("neo4j", $("#password").val()));
+            var session = driver.session();
+            var session2 = driver.session();
+            var d = Date.now();
+            session2.run("MATCH () RETURN count(*)").then(function (result) {
+                update(d, "nodes", result.records[0]._fields[0].toNumber());
+            });
+            session2.run("MATCH ()--&gt;() RETURN count(*)").then(function (result) {
+                update(d, "rels", result.records[0]._fields[0].toNumber());
+            });
+
+            session.run("CALL db.labels()").then(function (result) {
+                result.records.forEach(function (r) {
+                    var l = r._fields[0];
+                    var stmt = "MATCH (:`" + l + "`) RETURN count(*)";
+                    session2.run(stmt).then(function (result2) {
+                        update(d, l, result2.records[0]._fields[0].toNumber());
+                    });
+                });
+            });
+
+            session.run("CALL db.relationshipTypes()").then(function (result) {
+                result.records.forEach(function (r) {
+                    var l = r._fields[0];
+                    var stmt = "MATCH ()-[:`" + l + "`]-&gt;() RETURN count(*)";
+                    session2.run(stmt).then(function (result2) {
+                        update(d, l, result2.records[0]._fields[0].toNumber());
+                    });
+                });
+            });
+        }</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">Chart Update</div>
+<div class="content">
+<pre class="highlight"><code class="language-javascript" data-lang="javascript">        // from http://colorbrewer2.org/ via http://www.zingchart.com/blog/2015/12/09/color-charts/
+        var colors = ['#d53e4f', '#f46d43', '#fdae61', '#fee08b', '#ffffbf', '#e6f598', '#abdda4', '#66c2a5', '#3288bd'];
+        function update(time, label, value) {
+            var labels = statsChart.data.labels;
+            var datasets = statsChart.data.datasets;
+
+            var title = "# of " + label;
+            var insert = labels.indexOf(time);
+            // new timestamp
+            if (insert == -1) {
+                // too many samples, remove first entry
+                if (labels.length &gt; samples) {
+                    labels.shift();
+                    datasets.forEach(function (ds) { ds.data.shift(); });
+                }
+                insert = labels.length;
+                labels[insert] = time;
+            }
+            // find dataset
+            var idx = datasets.findIndex(function(ds) { return ds.label == title});
+            // add new dataset
+            if (idx == -1) {
+                idx = datasets.length;
+                datasets.push({ label: title, data: labels.map(function(){return 1;}), borderColor: colors[idx % colors.length], fill: false});
+            }
+            datasets[idx].data[insert] = value;
+
+            statsChart.update();
+        }</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The chart update code is a bit awkward because of the datastructures chart.js uses and the way it handles updates.
+I spent 2 days figuring out a bug, that was caused by initializing a new data array with zeros. (1&#8217;s work).</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_cypher">Cypher</h2>
+<h2 id="_implementation_free_query">Implementation Free Query</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>As a bonus feature I wanted to allow free querying, i.e. you enter a Cypher query that returns a stream of values where the first column is the X-Axis value and all subsequent columns are Y-axis values.</p>
+</div>
+<div class="paragraph">
+<p>So I added that in a similar fashion.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
+<h2 id="_result">Result</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>As it is only a single html page, I was not sure it was worth a repository, so just put it in a <a href="https://gist.github.com/jexp/f4ae19be0e06d8a19867f294e09f0759">GitHub Gist</a>, which I can host with rawgit.com which is a pretty neat service to host html/css/js/json files with their correct mime-types. They even have a CDN.</p>
 </div>
+<div class="paragraph">
+<p>As the driver connects via websockets, there are also no CORS issues. Just provide the password and URL of the Neo4j installation you want to query and you&#8217;re ready to go.</p>
 </div>
+<div class="paragraph">
+<p>Visit <a href="http://bit.ly/neo-charts" class="bare">http://bit.ly/neo-charts</a> to see it live and in action.
+The results below stem from importing a subset of the <a href="http://neo4j.com/blog/analyzing-panama-papers-neo4j/">Panama Papers</a> :)</p>
 </div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="imageblock">
+<div class="content">
+<img src="https://dl.dropboxusercontent.com/u/14493611/blog/img/neo4j-charts.png" alt="neo4j charts">
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-09-30 19:54:03 CEST
+Last updated 2016-06-01 01:17:13 CEST
 </div>
 </div>
 </body>

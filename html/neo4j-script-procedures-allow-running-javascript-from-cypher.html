@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="generator" content="Asciidoctor 1.5.5">
-<title>Latest (2017)</title>
+<meta name="generator" content="Asciidoctor 1.5.4">
+<title>Fullstack JavaScript - Neo4j Script Procedures</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -17,6 +17,7 @@ audio:not([controls]){display:none;height:0}
 [hidden],template{display:none}
 script{display:none!important}
 html{font-family:sans-serif;-ms-text-size-adjust:100%;-webkit-text-size-adjust:100%}
+body{margin:0}
 a{background:transparent}
 a:focus{outline:thin dotted}
 a:active,a:hover{outline:0}
@@ -51,7 +52,7 @@ textarea{overflow:auto;vertical-align:top}
 table{border-collapse:collapse;border-spacing:0}
 *,*:before,*:after{-moz-box-sizing:border-box;-webkit-box-sizing:border-box;box-sizing:border-box}
 html,body{font-size:100%}
-body{background:#fff;color:rgba(0,0,0,.8);padding:0;margin:0;font-family:"Noto Serif","DejaVu Serif",serif;font-weight:400;font-style:normal;line-height:1;position:relative;cursor:auto;tab-size:4;-moz-osx-font-smoothing:grayscale;-webkit-font-smoothing:antialiased}
+body{background:#fff;color:rgba(0,0,0,.8);padding:0;margin:0;font-family:"Noto Serif","DejaVu Serif",serif;font-weight:400;font-style:normal;line-height:1;position:relative;cursor:auto}
 a:hover{cursor:pointer}
 img,object,embed{max-width:100%;height:auto}
 object,embed{height:100%}
@@ -63,6 +64,7 @@ img{-ms-interpolation-mode:bicubic}
 .text-center{text-align:center!important}
 .text-justify{text-align:justify!important}
 .hide{display:none}
+body{-webkit-font-smoothing:antialiased}
 img,object,svg{display:inline-block;vertical-align:middle}
 textarea{height:auto;min-height:50px}
 select{width:100%}
@@ -117,16 +119,13 @@ table thead tr th,table thead tr td,table tfoot tr th,table tfoot tr td{padding:
 table tr th,table tr td{padding:.5625em .625em;font-size:inherit;color:rgba(0,0,0,.8)}
 table tr.even,table tr.alt,table tr:nth-of-type(even){background:#f8f8f7}
 table thead tr th,table tfoot tr th,table tbody tr td,table tr td,table tfoot tr td{display:table-cell;line-height:1.6}
+body{tab-size:4}
 h1,h2,h3,#toctitle,.sidebarblock>.content>.title,h4,h5,h6{line-height:1.2;word-spacing:-.05em}
 h1 strong,h2 strong,h3 strong,#toctitle strong,.sidebarblock>.content>.title strong,h4 strong,h5 strong,h6 strong{font-weight:400}
 .clearfix:before,.clearfix:after,.float-group:before,.float-group:after{content:" ";display:table}
 .clearfix:after,.float-group:after{clear:both}
-*:not(pre)>code{font-size:.9375em;font-style:normal!important;letter-spacing:0;padding:.1em .5ex;word-spacing:-.15em;background-color:#f7f7f8;-webkit-border-radius:4px;border-radius:4px;line-height:1.45;text-rendering:optimizeSpeed;word-wrap:break-word}
-*:not(pre)>code.nobreak{word-wrap:normal}
-*:not(pre)>code.nowrap{white-space:nowrap}
+*:not(pre)>code{font-size:.9375em;font-style:normal!important;letter-spacing:0;padding:.1em .5ex;word-spacing:-.15em;background-color:#f7f7f8;-webkit-border-radius:4px;border-radius:4px;line-height:1.45;text-rendering:optimizeSpeed}
 pre,pre>code{line-height:1.45;color:rgba(0,0,0,.9);font-family:"Droid Sans Mono","DejaVu Sans Mono",monospace;font-weight:400;text-rendering:optimizeSpeed}
-em em{font-style:normal}
-strong strong{font-weight:400}
 .keyseq{color:rgba(51,51,51,.8)}
 kbd{font-family:"Droid Sans Mono","DejaVu Sans Mono",monospace;display:inline-block;color:rgba(0,0,0,.8);font-size:.65em;line-height:1.45;background-color:#f7f7f7;border:1px solid #ccc;-webkit-border-radius:3px;border-radius:3px;-webkit-box-shadow:0 1px 0 rgba(0,0,0,.2),0 0 0 .1em white inset;box-shadow:0 1px 0 rgba(0,0,0,.2),0 0 0 .1em #fff inset;margin:0 .15em;padding:.2em .5em;vertical-align:middle;position:relative;top:-.1em;white-space:nowrap}
 .keyseq kbd:first-child{margin-left:0}
@@ -420,243 +419,78 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>Fullstack JavaScript - Neo4j Script Procedures</h1>
 </div>
 <div id="content">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>Imagine, being a fullstack JavaScript developer and not just using the language in the frontend, middleware or backend but also to create your user-defined procedures and functions in the database.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>Several other databases support a similar approach for views and user defined extensions, and now you can do it with Neo4j too.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>Already early last year, <a href="https://neo4j.com/developer/procedures-functions/">Neo4j&#8217;s user defined procedures</a> were still in their infancy.
+I had just written an article about the Javas JavaScript engine "Nashorn".</p>
 </div>
-<div class="sect1">
-<h2 id="_latest_2017">Latest (2017)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/compiled-runtime-32.html">Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/twitter-women-graphql-gender-graph.html">Finding Awesome Women Tweeting about GraphQL using Gender-API</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/onnx2graph-store-and-visualize-machine-learning-models.html">onnx2graph - Store and Visualize Machine Learning Models</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/better-data-import-with-graphql-introducing-graphql-load.html">Better Data Import with GraphQL: Introducing graphql load </a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/mapping-metaphor-neo4j.html">Importing Mapping Metaphor into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/memegraph.html">The Meme Graph</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-script-procedures-allow-running-javascript-from-cypher.html">Fullstack JavaScript - Neo4j Script Procedures</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/user_defined_functions.html">User Defined Functions in Neo4j 3.1.0-M10</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-charts.html">Charting Neo4j 3.0</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>So naturally I experimented with using procedures to dynamically create and run JavaScript functions.</p>
+</div>
+<div class="paragraph">
+<p>The function mapping is stored in Neo4j&#8217;s graph properties.</p>
+</div>
+<div class="paragraph">
+<p>You could create JavaScript functions with a name and body and then later call them by name and passing parameters along.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">CALL scripts.function('users', '
+function users(name) {
+  return collection(db.findNodes(label("User"),'lastname',name));
+}')
+
+CALL scripts.run('users','Anderson') YIELD value as user;
+
+// or call as function, returns a list
+RETURN scripts.run('users','Smith');</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>That worked all quite well, but I didn&#8217;t find the time to turn that into a proper project.</p>
 </div>
-<div class="sect1">
-<h2 id="_previous_2016">Previous - 2016</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Later in the year I got some feature and pull requests on the <a href="https://github.com/neo4j-contrib/neo4j-apoc-procedures">APOC procedure library</a> to add such functions.</p>
 </div>
+<div class="paragraph">
+<p>As there are some concerns esp. from corporate users about scripting support, I pulled my work into a separate project: <a href="https://github.com/neo4j-contrib/neo4j-script-procedures">Neo4j Script Procedures</a></p>
 </div>
+<div class="paragraph">
+<p>So, when I came across this tweet, it reminded me of wanting to update the project.</p>
 </div>
-<div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr"><a href="https://twitter.com/rektide">@rektide</a> Neo4j. I was just toying with it, so perhaps I&#39;m not being fair. But deploying jars for sprocs is a nonstarter.</p>&mdash; Jason Weiler (@jasonweiler) <a href="https://twitter.com/jasonweiler/status/846581871286767616">March 28, 2017</a></blockquote>
+<script async src="//platform.twitter.com/widgets.js" charset="utf-8"></script>
+<div class="paragraph">
+<p>I thought it was a good opportunity to upgrade and release the project.</p>
 </div>
+<div class="paragraph">
+<p>So, now you can try to run JavaScript functions from Neo4j&#8217;s Cypher by grabbing the jar-file from the <a href="https://github.com/neo4j-contrib/neo4j-script-procedures">latest release</a>.</p>
 </div>
+<div class="paragraph">
+<p>Just put it into <code>$NEO4J_HOME/plugins</code> and restart your server.</p>
 </div>
-<div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Note: In Neo4j Community Desktop, there is a directory chooser on the "Options" for the plugins directory)</p>
 </div>
+<div class="paragraph">
+<p>The 3.1.0.1 of neo4j-script-procedures release does not support Neo4j 3.1.2 as there are some incompatibilities with procedures creating new property-names.
+<strong>It should work with 3.1.0, 3.1.1 or 3.1.3 though.</strong></p>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_import">Import</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
-</div>
-</div>
+<div class="paragraph">
+<p>Let me know what you think and how we can improve this little useful library, please raise <a href="https://github.com/neo4j-contrib/neo4j-script-procedures">issues on the repository</a> for feedback and problems.</p>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-09-30 19:54:03 CEST
+Last updated 2017-04-01 11:38:52 CEST
 </div>
 </div>
 </body>

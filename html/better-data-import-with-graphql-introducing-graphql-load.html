@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.5">
-<title>Latest (2017)</title>
+<title>Better Data Import with GraphQL: Introducing graphql load</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -420,243 +420,278 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>Better Data Import with GraphQL: Introducing graphql load</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>Most systems have no problems growing their data volume through their APIs once they acquired users.
+But until then, especially in development and testing it is very helpful to have some tools available to load data, e.g. from JSON or CSV files.
+Especially in new projects where you don&#8217;t have existing databases and backends that are already filled to the brim with existing data.
+Of course you can use your existing tooling for populating your databases, but how much fun is that?</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>I faced the same challeng when working on our own GraphQL backend.
+I had a nice schema, with queries and mutations, but no data served.
+Initially I entered a bit of data through the mutations in GraphiQL.
+The ability to use multiple mutations in the same request comes in quite handy.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-graphql" data-lang="graphql">mutation createData {
+  fg: createMovie(id: "11", title:"Forrest Gump", year:1994)
+  ap: createMovie(id: "13", title:"Apollo 13", year:1995)
+
+  th: createActor(id: "121", name:"Tom Hanks", born: 1956)
+  kb: createActor(id: "6", name:"Kevin Bacon", born: 1958)
+
+  fgActors: addMovieActors(id: "11", movies:["121"])
+  apActors: addMovieActors(id: "13", movies:["121","6"])
+}</code></pre>
+</div>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>I really wanted to have a tool that allows me to drive data loading through these mutations, also to demonstrate that they work and perform well.</p>
 </div>
-<div class="sect1">
-<h2 id="_latest_2017">Latest (2017)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/compiled-runtime-32.html">Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/twitter-women-graphql-gender-graph.html">Finding Awesome Women Tweeting about GraphQL using Gender-API</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/onnx2graph-store-and-visualize-machine-learning-models.html">onnx2graph - Store and Visualize Machine Learning Models</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/better-data-import-with-graphql-introducing-graphql-load.html">Better Data Import with GraphQL: Introducing graphql load </a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/mapping-metaphor-neo4j.html">Importing Mapping Metaphor into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/memegraph.html">The Meme Graph</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-script-procedures-allow-running-javascript-from-cypher.html">Fullstack JavaScript - Neo4j Script Procedures</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/user_defined_functions.html">User Defined Functions in Neo4j 3.1.0-M10</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-charts.html">Charting Neo4j 3.0</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Having worked with and liking graphcool&#8217;s <a href="https://github.com/graphcool/graphql-cli"><code>graphql-cli</code></a> tools, I felt this would be a nice addition as a plugin.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_previous_2016">Previous - 2016</h2>
+<h2 id="_tl_dr_usage_instructions">TL;DR: Usage instructions</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>If you&#8217;re not interested in the nitty gritty details, here is how you get started with <a href="https://github.com/neo4j-graphql/graphql-cli-load"><code>graphql-cli-load</code></a></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>npm install -g graphql-cli graphql-cli-load
+# configure your graphql endpoint (don't forget to https://medium.com/@mesirii/first-steps-with-graphcools-graphql-command-line-tools-3aa137271420[add auth-headers as needed])
+graphql init
+
+graphql ping
+graphql get-schema
+
+# load data
+graphql load -m createMovie --json movies.json
+graphql load -m createActor --json people.json
+graphql load -m addMovieActors --csv actors.csv --mapping '{"movieId":"id"}' --delim ','</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Here is our minimal GraphQL schema.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-graphql" data-lang="graphql">type Movie {
+  id: ID!
+  title: String
+  year: Int
+  actors: [Actor] @relation(name: "ACTED_IN", direction: IN)
+}
+type Actor {
+  id: ID!
+  name: String
+}</code></pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>graphql load [--json=file.json] [--csv=file.csv] [--endpoint=name] [--mutation=createType] [--mapping='{"title":"name"}']
+
+Optionen:
+  --help          show help
+  --mapping, -p   name mapping of input to mutation (json)
+  --mutation, -m  mutation to call
+  --endpoint, -e  endpoint name to use
+  --json, -j      json file to load
+  --csv, -c       csv file to load</pre>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
+<h2 id="_introducing_graphql_cli_load">Introducing: graphql-cli-load</h2>
 <div class="sectionbody">
+<div class="paragraph">
+<p>The goal for this plugin is to <strong>feed existing mutations with data from CSV or JSON files</strong> with the following features:</p>
+</div>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
+<p>utilize schema provided by graphql-config</p>
+</li>
+<li>
+<p>determine existing mutations, allow the user to select one</p>
+</li>
+<li>
+<p>read existing CSV and JSON files</p>
+</li>
+<li>
+<p>map input data (column-, key-names) to the input arguments of the mutation</p>
+</li>
+<li>
+<p>execute mutations in batches, e.g. 100 at a time until the whole file is processed</p>
 </li>
 </ul>
+</div>
+<div class="paragraph">
+<p>The biggest challenge for me was that I wrote this plugin on the plane without internet access, that made finding the relevant APIs a bit tricky, and mostly consisted of looking at the sources.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
+<h2 id="_how_does_it_work">How does it work?</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
+<div class="olist arabic">
+<ol class="arabic">
 <li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
+<p>First of all, I have to integrate with graphql-cli and esp. graphql-config to get access to the configuration and schema file.</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
+<p>With that I can use the AST parser from graphql.js to parse the schema to get access to all mutations.</p>
 </li>
-</ul>
+<li>
+<p>Then I check the data files, CSV files are loaded via <a href="http://papaparse.com/" target="_blank">PapaParse</a> and JSON files currently via <code>fs</code> and JSON.parse (that can def. be improved).</p>
+</li>
+<li>
+<p>At last we iterate over the loaded data and create and execute batches of mutation calls (currently 100)</p>
+</li>
+</ol>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_obligatory_example_the_movie_database">Obligatory Example: The movie database</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>I quickly spin up the default movie database with neo4j-graphql-cli to demonstrate the loader.</p>
+</div>
+<div class="listingblock">
+<div class="title">movies.json</div>
+<div class="content">
+<pre>[
+{
+  "id": 0,
+  "title": "The Matrix",
+  "year": 1999
+},
+{
+  "id": 11,
+  "title": "The Devil's Advocate",
+  "year": 1997
+}
+...</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">people.json</div>
+<div class="content">
+<pre>[
+{
+  "id": 4,
+  "name": "Hugo Weaving"
+},
+{
+  "id": 2,
+  "name": "Carrie-Anne Moss"
+}
+...</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="title">actors.csv</div>
+<div class="content">
+<pre>movieId,actors
+56,"57,22,60,59,58"
+29,"34,33,30,16,32,31"
+...</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>npm install -g neo4j-graphql graphql-cli graphql-cli-load
+mkdir movies; cd movies
+graphql init
+neo4j-graphql movies-schema.graphql
+graphql fetch-schema
+grep -e "\(create\|add\)" schema.graphql
+# addMovieActors(id: ID!, actors: [ID!]!): String
+# createMovie(id: ID!, title: String, year: Long): String
+# createActor(id: ID!, name: String): String
+
+graphql load -m createMovie -file movies.json
+graphql load -m createPerson -file people.json
+graphql load -m addMovieActors -file actors.csv -mapping '{movieId:movie, roleName: role}'</pre>
+</div>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/graphql-load-output.jpg" alt="graphql load output" width="800">
+</div>
+</div>
+<div class="paragraph">
+<p>And voila, if we look into our database, we see it populated with our example data:</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/graphql-load-result-graph.jpg" alt="graphql load result graph">
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
+<h2 id="_please_give_it_a_try">Please give it a try</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>As it is often the case building such a tool is about scratching your own itch.
+But I really think and hope that the tool is useful for you too.</p>
+</div>
+<div class="paragraph">
+<p>So, <strong>please</strong> give it a try and let me know what you think in the comments.
+Even better, help improve it, by creating an <a href="https://github.com/neo4j-graphql/graphql-cli-load/issues" target="_blank">issue</a> or sending a pull request to the <a href="https://github.com/neo4j-graphql/graphql-cli-load">repository</a>.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_cypher">Cypher</h2>
+<h2 id="_planned_improvements">Planned improvements</h2>
 <div class="sectionbody">
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
+<p>I want to be able to run multiple mutations and files in a single call.</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
+<p>Supporting http(s) sources for the files should be easy</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
+<p>It could also be helpful, instead of calling the APIs to just generate the GraphQL files.</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
+<p>Supporting streaming JSON would be nice too.</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
+<p>I also want to support GraphQL parameters, esp. to avoid injections and improve performance, but have to figure out how to do it well with the batched mutations</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
+<p>Other file formats like XML, YAML or even pulling from source databases would be useful too.</p>
+</li>
+<li>
+<p>Better data conversion to the expected data types of the mutation arguments.</p>
 </li>
 </ul>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p><strong>What else are YOU missing?</strong></p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-09-30 19:54:03 CEST
+Last updated 2017-09-23 11:57:17 CEST
 </div>
 </div>
 </body>

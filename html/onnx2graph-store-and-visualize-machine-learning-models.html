@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.5">
-<title>Latest (2017)</title>
+<title>onnx2graph - Store and Visualize Machine Learning Models</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -420,243 +420,456 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>onnx2graph - Store and Visualize Machine Learning Models</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>I&#8217;ve been dabbling with <a href="https://github.com/neo4j-contrib/neo4j-ml-procedures" target="_blank">Machine Learning Procedures for Neo4j</a> for a little bit now.
+Besides providing machine learning capabilities for your graph data, <strong>one goal was to support storage, visualization and querying of machine learning models (neural network configurations) in the graph database</strong>.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>I tried to import TensorFlow models via their protobuf serialization, but unfortunately, the examples protobuf files I found, were incompatible with their Java TensorFlow Protobuf library (<a href="https://mvnrepository.com/artifact/org.tensorflow/proto/1.3.0" target="_blank">maven</a>). If any of you has any insights there I would be supper happy to make that work.</p>
+</div>
+<div class="imageblock" style="float: right">
+<div class="content">
+<img src="https://www.graphcore.ai/hubfs/images/alexnet_label%20logo.jpg" alt="alexnet label%20logo" width="300">
+</div>
+<div class="title">Figure 1. AlexNet from Tensorflow (c) GraphCore</div>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>I was inspired to look into putting neural network models into the graph by <a href="https://www.graphcore.ai/posts/what-does-machine-learning-look-like">this amazing article from graphcore.ai</a> which features impressive visualizations of compute networks and a really interesting discussion of the topic.</p>
 </div>
-<div class="sect1">
-<h2 id="_latest_2017">Latest (2017)</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/compiled-runtime-32.html">Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/twitter-women-graphql-gender-graph.html">Finding Awesome Women Tweeting about GraphQL using Gender-API</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/onnx2graph-store-and-visualize-machine-learning-models.html">onnx2graph - Store and Visualize Machine Learning Models</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/better-data-import-with-graphql-introducing-graphql-load.html">Better Data Import with GraphQL: Introducing graphql load </a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/mapping-metaphor-neo4j.html">Importing Mapping Metaphor into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/memegraph.html">The Meme Graph</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-script-procedures-allow-running-javascript-from-cypher.html">Fullstack JavaScript - Neo4j Script Procedures</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/user_defined_functions.html">User Defined Functions in Neo4j 3.1.0-M10</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-charts.html">Charting Neo4j 3.0</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Last week, my colleague <a href="http://twitter.com/akollegger" target="_blank">Andreas</a> pointed me to <a href="https://venturebeat.com/2017/09/07/microsoft-and-facebook-launch-open-source-project-to-make-neural-networks-portable/" target="_blank">the recent announcment of Facebook and Microsoft</a> to open-source the ONNX "Open Neural Network Exchange" project for an interoperable AI/ML/DeepLearning format.</p>
+</div>
+<div class="quoteblock">
+<blockquote>
+<div class="paragraph">
+<p>Microsoft and Facebook have announced a new open source project today that’s aimed at creating a shared model representation for neural networks across different programming frameworks. Called the Open Neural Network Exchange (ONNX), the new project will make it possible to share models across the Cognitive Toolkit, PyTorch, and Caffe2.</p>
+</div>
+</blockquote>
+</div>
+<div class="paragraph">
+<p>I found the <a href="https://github.com/onnx/onnx" target="_blank">ONNX project on GitHub</a> and while it was quite sparsely documented, I saw a Juypter notebook, containing a few examples for small network descriptions.
+So I thought, this could be a worthwhile candidate for my stated goal. Let&#8217;s spend our Saturday morning getting this to work.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_previous_2016">Previous - 2016</h2>
+<h2 id="_installing_onnx">Installing ONNX</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Unfortunately there was some serious Yak-shaving involved for me, to install ONNX.
+So perhaps reading about my mishaps is helpful for others.</p>
+</div>
+<div class="paragraph">
+<p>I tried to follow the instructions in the README but they didn&#8217;t really work.</p>
+</div>
+<div class="paragraph">
+<p>First of all you have to have a <code>protoc</code> compiler on your system, otherwise it complains during installation.
+So I figured out where to get it from and ran <code>brew install protobuf</code> which worked.</p>
+</div>
+<div class="paragraph">
+<p>Then I tried to install ONNX via <code>pip</code> but that failed.</p>
+</div>
+<div class="paragraph">
+<p><em>Someone later commented that one shouldn&#8217;t do that in the root of the checked out repository.</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>mh$ pip install onnx
+
+Collecting onnx
+  Downloading onnx-0.1.tar.gz (588kB)
+    100% |████████████████████████████████| 593kB 1.3MB/s
+...
+Successfully built onnx
+Installing collected packages: onnx
+Successfully installed onnx-0.1
+
+python -c 'import onnx'
+Traceback (most recent call last):
+  File "&lt;string&gt;", line 1, in &lt;module&gt;
+  File "onnx/__init__.py", line 7, in &lt;module&gt;
+    from . import checker, helper
+  File "onnx/checker.py", line 14, in &lt;module&gt;
+    from onnx import defs
+  File "onnx/defs/__init__.py", line 6, in &lt;module&gt;
+    import onnx.onnx_cpp2py_export as C</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Back then I couldn&#8217;t figure out why and created an <a href="https://github.com/onnx/onnx/issues/6" target="_blank">issue on their repository</a> though, which gathered some discussion since.</p>
+</div>
+<div class="paragraph">
+<p>Then I tried to install it from source, which also failed and made me install first <code>pytest</code> and then <code>pybind11</code> from source.
+That also didn&#8217;t work that well (failing in some tests) but I somehow could get it installed and then the manual install of ONNX succeeded.</p>
+</div>
+<div class="paragraph">
+<p><strong>Later, in the issue I createdm I was pointed to the recursive submodule for <code>pybind11</code></strong></p>
+</div>
+<div class="paragraph">
+<p>So you have to get the ONNX source, either with <strong><code>git clone --recursive <a href="https://github.com/onnx/onnx" class="bare">https://github.com/onnx/onnx</a></code> or do a <code>git submodule update --init</code></strong> after cloning.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>brew install protobuf
+git clone https://github.com/onnx/onnx
+cd onnx
+
+git submodule update --init
+  Submodule 'third_party/pybind11' (https://github.com/pybind/pybind11.git) registered for path 'third_party/pybind11'
+  Cloning into '/Users/mh/d/python/onnx/third_party/pybind11'...
+  Submodule path 'third_party/pybind11': checked out 'a1041190c8b8ff0cd9e2f0752248ad5e3789ea0c'
+
+pip install -e .
+  Obtaining file:///Users/mh/d/python/onnx
+  Requirement already satisfied: six in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+  Requirement already satisfied: numpy in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+  Requirement already satisfied: protobuf in /usr/local/lib/python2.7/site-packages (from onnx==0.1)
+  Requirement already satisfied: setuptools in /usr/local/lib/python2.7/site-packages (from protobuf-&gt;onnx==0.1)
+  Installing collected packages: onnx
+    Found existing installation: onnx 0.1
+      Uninstalling onnx-0.1:
+        Successfully uninstalled onnx-0.1
+    Running setup.py develop for onnx
+  Successfully installed onnx
+
+python -c 'import onnx'</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Phew, that worked (for me on Saturday, it was 2 hours later).</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
+<h2 id="_onnx_examples">ONNX Examples</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Now let&#8217;s look at the examples in the <a href="https://github.com/onnx/onnx/blob/master/onnx/examples/Protobufs.ipynb" target="_blank">Juypter Notebook</a>.</p>
+</div>
+<div class="paragraph">
+<p>They are pretty straightforward, so I only looked at the last one, which set up a complete graph.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-python" data-lang="python">from onnx.onnx_pb2 import *
+from onnx import checker, helper
+
+# An node that is also a graph
+graph = helper.make_graph(
+    [
+        helper.make_node("FC", ["X", "W1", "B1"], ["H1"]),
+        helper.make_node("Relu", ["H1"], ["R1"]),
+        helper.make_node("FC", ["R1", "W2", "B2"], ["Y"]),
+    ],
+    "MLP",
+    ["X", "W1", "B1", "W2", "B2"],
+    ["Y"]
+)
+
+print(str(graph))</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p><em>(It didn&#8217;t find the <code>registry</code> import for me, so I left it off.)</em></p>
+</div>
+<div class="paragraph">
+<p>Here is the structure.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>node {
+  input: "X"
+  input: "W1"
+  input: "B1"
+  output: "H1"
+  op_type: "FC"
+}
+node {
+  input: "H1"
+  output: "R1"
+  op_type: "Relu"
+}
+node {
+  input: "R1"
+  input: "W2"
+  input: "B2"
+  output: "Y"
+  op_type: "FC"
+}
+name: "MLP"
+input: "X"
+input: "W1"
+input: "B1"
+input: "W2"
+input: "B2"
+output: "Y"
+ir_version: 1</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Please note that these repeated <code>input</code>, <code>output</code> and <code>node</code> attributes (note, singular!) are actually a kind of collection, we get back to that soon.</p>
+</div>
+<div class="paragraph">
+<p>So we have a graph with a bunch of nodes, which have inputs and outputs pointing from or to other nodes.
+Sounds perfect for our needs.</p>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
+<h2 id="_quick_neo4j_intro">Quick Neo4j Intro</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>In a graph database like Neo4j you store your connected data as <em>Nodes</em> and <em>Relationships</em>, both with labels and arbitrary attributes.
+In that way our conceptional model is the same as your object model, is the same as your graph model, and your visualization.</p>
+</div>
+<div class="paragraph">
+<p>The core essence of that graph model is <em>patterns</em> where nodes are connected to each other via relationships.
+You can use these patterns on a whiteboard, diagram, or visualization but also as ascii-art to find and create them in the graph query language Cypher (think "SQL for graphs").</p>
+</div>
+<div class="paragraph">
+<p>Each node is surrounded by parentheses like a circle <code>(:Person {name:Michael})</code> and<br>
+relationships form ascii-art arrows: <code>(me)-[:LOVES]-&gt;(you)</code>.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/cypher-match.jpg" alt="cypher match">
+</div>
+</div>
+<div class="paragraph">
+<p>You would send data from ONNX to Neo4j by using the <a href="https://neo4j.com/developer/python/" target="_blank">Python driver</a> and sending parameterized Cypher statements to the database.
+You can find the <a href="http://neo4j.com/docs/api/python-driver/current/" target="_blank">full driver API docs here</a>.</p>
+</div>
+<div class="exampleblock">
+<div class="content">
+<div class="paragraph">
+<p>You can run Neo4j via <a href="http://hub.docker.com/_/neo4j" target="_blank">Docker</a> (<code>docker run -p 7474:7474 -p 7687:7687 neo4j</code>) on the <a href="http://neo4j.com/sandbox" target="_blank">Neo4j Sandbox</a> or on any <a href="http://neo4j.com/developer/guide-cloud-deployment" target="_blank">cloud platform</a>.
+Just grab the relevant auth information (after setting the initial password) and database URL from your installation.</p>
+</div>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>pip install neo4j-driver</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-python" data-lang="python">from neo4j.v1 import GraphDatabase, basic_auth
+
+driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+session = driver.session()
+
+# create a pattern, 2 nodes one relationship
+statement = """
+CREATE (p:Person {name:$name})-[:USES]-&gt;(d:Database {name:$what})
+"""
+# parameters to avoid injection
+params = {"name":"Michael","what":"Neo4j"}
+
+session.run(statement,params).consume
+
+# query for a pattern, "what does a person use"
+result = session.run(
+  "MATCH (who:Person)-[:USES]-&gt;(tech) RETURN who.name as name, tech.name as what")
+
+# output result columns
+for record in result:
+  print("%s %s" % (record["name"], record["what"]))
+
+session.close()</code></pre>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_onnx2graph">Onnx2Graph</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>Ok, it shouldn&#8217;t be so hard to import that graph object into neo4j, we just need to turn this data into a property graph model.</p>
+</div>
+<div class="paragraph">
+<p>We have a node representing the <em>compute graph</em>, labeled <code>:Graph</code> and pointing with INPUT/OUTPUT relationships to the <em>inputs and outputs</em> of the computation.</p>
+</div>
+<div class="paragraph">
+<p>Then inside the computation we have <code>:Node</code> labeled <em>neurons</em>, which get and send information via IN and OUT relationships to their respective inputs and outputs.</p>
+</div>
+<div class="paragraph">
+<p>An example model is here:</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/onnx2graph-model.jpg" alt="onnx2graph model">
 </div>
 </div>
+<div class="paragraph">
+<p>To turn the Python object from ONNX into a Neo4j datastructure, we need a small Cypher statement that takes the whole object, iterates over ites parts and turns it into our graph model.</p>
 </div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>That annotated statement looks like this (<code>$graph</code> is the parameter we pass in):</p>
 </div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">// create the :Graph node
+MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+
+// create input nodes in the context of this graph and connect them
+FOREACH (name in $graph.inputs | MERGE (i:Node {name:name})-[:INPUT]-&gt;(g) SET i:Input)
+
+// create output nodes in the context of this graph and connect them
+FOREACH (name in $graph.outputs | MERGE (g)&lt;-[:OUTPUT]-(o:Node {name:name}) SET o:Output)
+
+WITH *
+
+// iterate over all nodes of the graph
+UNWIND $graph.nodes as node
+
+// create the compute node, set it's attributes (attributes can vary widely)
+CREATE (n:Node) SET n += node.attr
+
+// find-or-create input nodes to our node and connect them, mark them as input nodes
+FOREACH (name in node.inputs | MERGE (i:Node {name:name}) SET i:Input MERGE (i)-[:IN]-&gt;(n))
+
+// find-or-create output nodes to our node and connect them, mark them as output nodes
+FOREACH (name in node.outputs | MERGE (o:Node {name:name}) SET o:Output MERGE (n)-[:OUT]-&gt;(o));</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>Now we only have to turn the ONNX object in a proper nested dictionary, that represented the graph structured we wanted to pass into our statement.</p>
 </div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
-</li>
-</ul>
+<div class="paragraph">
+<p>I didn&#8217;t realize first, that I have to convert the nested protobuf collections manually.</p>
 </div>
+<div class="paragraph">
+<p>My initial attempt looked like this, and "succeeded", and looked ok in Python.</p>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-python" data-lang="python">params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input, "outputs":graph.output,
+"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input,"outputs":n.output}, graph.node)}}
+
+{'graph': {'inputs': [u'X', u'W1', u'B1', u'W2', u'B2'],
+           'nodes': [{'inputs': [u'X', u'W1', u'B1'], 'attr': {'op_type': u'FC'}, 'outputs': [u'H1']},
+                     {'inputs': [u'H1'], 'attr': {'op_type': u'Relu'}, 'outputs': [u'R1']},
+                     {'inputs': [u'R1', u'W2', u'B2'], 'attr': {'op_type': u'FC'}, 'outputs': [u'Y']}],
+                      'name': u'MLP', 'outputs': [u'Y'], 'attr': {'ir_version': 1L}}}</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>When I tried to insert that data into my Neo4j instance, though it failed with error:</p>
 </div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="content">
+<pre>ValueError: Values of type &lt;class 'google.protobuf.internal.containers.RepeatedScalarFieldContainer'&gt; are not supported</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>So initially I transferred all 4 of those sneaky <code>RepeatedScalarFieldContainer&#8217;s manually with lambdas `map(lambda x: str(x), graph.input)</code> which was not really pretty.</p>
+</div>
+<div class="paragraph">
+<p>Googling for <code>RepeatedScalarFieldContainer</code> I found some <a href="https://fossies.org/dox/XtreemFS-1.5.1/classgoogle_1_1protobuf_1_1internal_1_1containers_1_1RepeatedScalarFieldContainer.html" target="_blank">API docs</a>, which pointed me to the <a href="https://fossies.org/dox/XtreemFS-1.5.1/containers_8py_source.html#l00050" target="_blank"><code>_values</code> field in the superclass</a>, which I could use instead.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-python" data-lang="python">params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>So, now we could put it all together.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-python" data-lang="python">from neo4j.v1 import GraphDatabase, basic_auth
+
+driver = GraphDatabase.driver("bolt://localhost:7687", auth=basic_auth("neo4j", "test"))
+session = driver.session()
+
+statement = """
+MERGE (g:Graph {name:$graph.name}) SET g += $graph.attr
+FOREACH (name in $graph.inputs | MERGE (i:Node {name:name})-[:INPUT]-&gt;(g) SET i:Input)
+FOREACH (name in $graph.outputs | MERGE (g)&lt;-[:OUTPUT]-(o:Node {name:name}) SET o:Output)
+WITH *
+UNWIND $graph.nodes as node
+CREATE (n:Node) SET n += node.attr
+FOREACH (name in node.inputs | MERGE (i:Node {name:name}) SET i:Input MERGE (i)-[:IN]-&gt;(n))
+FOREACH (name in node.outputs | MERGE (o:Node {name:name}) SET o:Output MERGE (n)-[:OUT]-&gt;(o));
+"""
+
+params = {"graph":{"name":graph.name, "attr":{"ir_version":graph.ir_version}, "inputs":graph.input._values, "outputs":graph.output._values,
+"nodes": map(lambda n : {"attr":{"op_type":n.op_type},"inputs":n.input._values,"outputs":n.output._values}, graph.node)}}
+
+session.run(statement,params).consume
+session.close()</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>I put all the code also into this [Jupyter Notebook: onnx2graph^].</p>
+</div>
+<div class="paragraph">
+<p>After running this statement, we can visit the Neo4j browser and see our tiny compute graph in its full beauty.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/onnx2graph.jpg" alt="onnx2graph">
+</div>
+</div>
+<div class="paragraph">
+<p>We can also inspect the schema, which is what we expected.</p>
+</div>
+<div class="imageblock">
+<div class="content">
+<img src="../img/onnx2graph-schema.jpg" alt="onnx2graph schema">
+</div>
+</div>
+<div class="paragraph">
+<p>After this initial achievement, at the end of the weekend, I looked at the <a href="http://pytorch.org/docs/master/onnx.html" target="_blank">ONNX support for torch</a></p>
+</div>
+<div class="quoteblock">
+<blockquote>
+<div class="paragraph">
+<p>The torch.onnx module contains functions to export models into the ONNX IR format. These models can be loaded with the ONNX library and then converted to models which run on other deep learning frameworks.</p>
+</div>
+</blockquote>
+</div>
+<div class="paragraph">
+<p>With this example, which sounded exciting, starting from my original graphcore.ai inspiration:</p>
+</div>
+<div class="quoteblock">
+<blockquote>
+<div class="paragraph">
+<p>Example: End-to-end AlexNet from PyTorch to Caffe2
+Here is a simple script which exports a pretrained AlexNet as defined in torchvision into ONNX. It runs a single round of inference and then saves the resulting traced model to alexnet.proto</p>
+</div>
+</blockquote>
+</div>
+<div class="paragraph">
+<p>Let&#8217;s import the full AlexNet ONNX file:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-python" data-lang="python"></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>If you like this approach, please let me know and I can turn this into a proper library.</p>
+</div>
+<div class="paragraph">
+<p>As soon as there are Java bindings for ONNX I can add support for this to the <a href="https://github.com/neo4j-contrib/neo4j-ml-procedures" target="_blank">neo4j-ml-procedures</a></p>
+</div>
+<div class="paragraph">
+<p>Have fun</p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-09-30 19:54:03 CEST
+Last updated 2017-09-12 11:04:42 CEST
 </div>
 </div>
 </body>
