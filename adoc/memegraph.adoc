@@ -14,11 +14,12 @@ They definitely look like a meme graph.
 
 We can do that too
 
-{img}/neo4j-memes.gif[Animated GIF (15M)]
+link:{img}/neo4j-memes.gif[Animated GIF (15M)]
 
 == Find us some memes
 
-http://lmgtfy.com/?q=csv+meme+github
+image:https://lmgtfy.com/assets/sticker-b222a421fb6cf257985abfab188be7d6746866850efe2a800a3e57052e1a2411.png[link=http://lmgtfy.com/?q=csv+meme+github]
+
 
 There is this really nice CSV from Reddit of the top memes around:
 
