@@ -5,7 +5,7 @@
 <!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="generator" content="Asciidoctor 1.5.5">
-<title>Latest (2017)</title>
+<title>Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300,300italic,400,400italic,600,600italic%7CNoto+Serif:400,400italic,700,700italic%7CDroid+Sans+Mono:400,700">
 <style>
 /* Asciidoctor default stylesheet | MIT License | http://asciidoctor.org */
@@ -420,243 +420,384 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 </head>
 <body class="article">
 <div id="header">
+<h1>Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</h1>
 </div>
 <div id="content">
+<div id="preamble">
+<div class="sectionbody">
 <div class="paragraph">
-<p>These are simple blog posts by me, Michael Hunger <a href="http://twitter.com/mesirii">@mesirii</a> about all things <a href="http://neo4j.org">Neo4j</a></p>
+<p>Neo4j extends the previously introduced compiled runtime for Cypher with more capabilities.
+As not all possible queries are covered yet, this article should help determine if your queries can benefit from the compiled runtime and what you could tweak to make it cover more cases.</p>
 </div>
 <div class="paragraph">
-<p>Here is a list of the <a href="https://github.com/jexp/blog/tree/gh-pages/adoc">AsciiDoc source files</a>.</p>
+<p>The following Clauses and operations are covered by the compiled runtime, leading to much more efficient execution and higher performance.</p>
 </div>
 <div class="paragraph">
-<p>You find the posts on <a href="http://jexp.github.io/blog" class="bare">http://jexp.github.io/blog</a></p>
+<p>This is especially effective if you return large result volumes from the graph or with sorting and aggregation.</p>
+</div>
+<div class="paragraph">
+<p>You can determine if a query uses the compiled or interpreted runtime by prefixing it with <code>EXPLAIN</code> or <code>PROFILE</code>.</p>
+</div>
+<div class="paragraph">
+<p>You can also force a certain runtime by using <code>CYPHER RUNTIME=COMPILED/INTERPRETED MATCH &#8230;&#8203;.</code>
+If the compiled runtime cannot handle your query, it will fall-back to the interpreted runtime for execution.</p>
+</div>
+<div class="paragraph">
+<p>It might be worthwhile to examine if any of your core, critical queries can be adapted to use the compiled runtime and perhaps move some work (like aggregation) into pre- or post-processing.</p>
+</div>
+</div>
 </div>
 <div class="sect1">
-<h2 id="_latest_2017">Latest (2017)</h2>
+<h2 id="_compiled_clauses_and_operations">Compiled Clauses and Operations</h2>
 <div class="sectionbody">
+<div class="sect2">
+<h3 id="_clauses">Clauses</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/compiled-runtime-32.html">Queries covered by the Cypher Compiled Runtime in Neo4j 3.2</a></p>
+<p><code>WITH</code></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/twitter-women-graphql-gender-graph.html">Finding Awesome Women Tweeting about GraphQL using Gender-API</a></p>
+<p><code>UNWIND</code> (also with parameters)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/onnx2graph-store-and-visualize-machine-learning-models.html">onnx2graph - Store and Visualize Machine Learning Models</a></p>
+<p><code>ORDER BY</code> (only for <code>RETURN</code>, not <code>WITH</code>)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/better-data-import-with-graphql-introducing-graphql-load.html">Better Data Import with GraphQL: Introducing graphql load </a></p>
+<p>SKIP LIMIT (also with parameters)</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_node_lookups">Node Lookups</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>by label</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/mapping-metaphor-neo4j.html">Importing Mapping Metaphor into Neo4j</a></p>
+<p>by label and property (also via index lookup)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/memegraph.html">The Meme Graph</a></p>
+<p>by id (but <strong>not by</strong> parameter)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-script-procedures-allow-running-javascript-from-cypher.html">Fullstack JavaScript - Neo4j Script Procedures</a></p>
+<p>by label property IN list (also parameters)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/user_defined_functions.html">User Defined Functions in Neo4j 3.1.0-M10</a></p>
+<p>INDEX hints</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_pattern_matches">Pattern Matches</h3>
+<div class="paragraph">
+<p>match of simple patterns with</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>typed relationships</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/neo4j-charts.html">Charting Neo4j 3.0</a></p>
+<p>multiple relationships</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/efficient-graph-updates-with-cypher.html">5 Tips &amp; Tricks for Fast Batched Updates of Graph Structures with Neo4j and Cypher</a></p>
+<p>untyped relationships</p>
+</li>
+<li>
+<p>directed, undirected</p>
+</li>
+<li>
+<p>anonymous nodes</p>
+</li>
+<li>
+<p><code>OPTIONAL MATCH</code></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_predicates">Predicates</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Equality check</p>
+</li>
+<li>
+<p><code>NOT</code></p>
+</li>
+<li>
+<p>label predicate <code>n:Person</code></p>
+</li>
+<li>
+<p><code>AND</code> operator for property predicates</p>
+</li>
+<li>
+<p><code>OR</code> operator on same property that&#8217;s rewritten into a <code>IN list</code></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_expressions">Expressions</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Property access like <code>m.title</code> and <code>m["title"]</code></p>
+</li>
+<li>
+<p>Property comparison with index</p>
+</li>
+<li>
+<p>backticked identifiers</p>
+</li>
+<li>
+<p>list and map literals</p>
+</li>
+<li>
+<p>math operators <code>&lt;, &gt;, &lt;&gt;, &#8230;&#8203;</code> <strong>in expressions only</strong>, not in predicates!!</p>
+</li>
+<li>
+<p>math computation in expressions</p>
+</li>
+<li>
+<p>list concatenation <code>[1]+[2]</code></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_projection_aggregation">Projection/Aggregation</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Aggregation, but only <strong><code>count(n)</code></strong> and <strong><code>count(distinct n)</code></strong></p>
+</li>
+<li>
+<p>DISTINCT</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_functions">Functions</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>Functions like <code>id(n)</code>, <code>type(rel)</code></p>
 </li>
 </ul>
 </div>
 </div>
 </div>
-<div class="sect1">
-<h2 id="_previous_2016">Previous - 2016</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/index_lookup_performance_map.html">Property Lookup Performance, and what we can do about it</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Quick Node by Label Counts in Neo4j 2.x and 3.x</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
-</li>
-</ul>
-</div>
-</div>
 </div>
 <div class="sect1">
-<h2 id="_learning_teaching">Learning &amp; Teaching</h2>
+<h2 id="_example_queries_covered_by_the_compiled_runtime">Example Queries covered by the compiled runtime</h2>
 <div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/teaching_skills.html">Teaching Skills inspired by "Badass", Kathy Sierra</a></p>
-</li>
-</ul>
+<div class="listingblock">
+<div class="title">Simple query</div>
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">EXPLAIN
+MATCH (p:Person)
+WHERE p.name IN $names
+WITH p ORDER BY p.name
+MATCH (p)-[:ACTED_IN]-&gt;(m:Movie)
+RETURN p.name, count(m)
+SKIP 10 LIMIT 100</code></pre>
 </div>
 </div>
+<div class="listingblock">
+<div class="title">Recommendation</div>
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">EXPLAIN
+MATCH (user:User)-[:BOUGHT]-&gt;(product)&lt;-[:BOUGHT]-(peer)-[:BOUGHT]-&gt;(reco)
+WHERE user.name = $userName AND user &lt;&gt; peer
+RETURN reco,count(peer) as freq
+ORDER BY freq DESC LIMIT 10</code></pre>
 </div>
-<div class="sect1">
-<h2 id="_procedures_functions">Procedures &amp; Functions</h2>
-<div class="sectionbody">
-<div class="ulist">
-<ul>
-<li>
-<p><a href="http://jexp.github.io/blog/html/apoc_data_integration_import_export.html">Export and Import Procedures in APOC</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_stored_procedures.html">Neo4j 3.0 Stored Procedures</a></p>
-</li>
-</ul>
+</div>
+<div class="listingblock">
+<div class="title">Data Transfer (e.g. 1bn relationships)</div>
+<div class="content">
+<pre class="highlight"><code class="language-cypher" data-lang="cypher">EXPLAIN
+MATCH (sender:User)-[:SENT]-&gt;(t:MoneyTransfer)-[:RECEIVED]-(receiver:User)
+RETURN id(sender) as source, t.value, id(receiver) as target</code></pre>
+</div>
 </div>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_import">Import</h2>
+<h2 id="_non_compiled_clauses_and_operations">NON-Compiled Clauses and Operations</h2>
 <div class="sectionbody">
+<div class="sect2">
+<h3 id="_clauses_2">Clauses</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/simple_csv_export_import.html">Quick Neo4j Export - Import Roundtrip via CSV (WIP)</a></p>
+<p>mutation / update queries</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_json.html">LOAD JSON with Cypher</a></p>
+<p>UNION (ALL)</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/relational_to_neo4j_import_tool_weekend.html">Import Relational Database directly into Neo4j</a></p>
+<p>LOAD CSV</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/simplest_import_example.html">Simplest LOAD CSV Import Example</a></p>
+<p>FOREACH</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_with_success.html">Load CSV with Success</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/flexible-batch-import.html">Flexible Neo4j Batch Import with Groovy</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_tips.html">LOAD CSV into Neo4j quickly and successfully</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/load_csv_git.html">Importing Git History into Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/timetree.html">Importing Forests into Neo4j</a></p>
+<p>Procedure calls</p>
 </li>
 </ul>
 </div>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_data_generation">Data Generation</h2>
-<div class="sectionbody">
+<div class="sect2">
+<h3 id="_node_lookups_2">Node Lookups</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/the_story_of_graphgen.html">The Story of GraphGen</a></p>
+<p>property comparison when there is no index !</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/create_random_data.html">Quickly create a 100k Neo4j graph data model with Cypher only</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sampling_a_graph.html">Sampling A Neo4j Database</a></p>
+<p><code>MATCH (n) WHERE id(n) IN list</code></p>
 </li>
 </ul>
 </div>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_cypher">Cypher</h2>
-<div class="sectionbody">
+<div class="sect2">
+<h3 id="_pattern_matches_2">Pattern Matches</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/fast-node-by-label-counts-in-neo4j.html">Fast Node by Label Counts in Neo4j</a></p>
+<p>variable length patterns</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/full-text-and-spatial-search-in-neo4j-3.html">Full Text &amp; Range Search with Schema Indexes and Spatial Functions in Neo4j 3.0 (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cypher_map_projections_pattern_comprehensions.html">GraphQL inspired Map Projecitons and Pattern Comprehensions</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/java_security_vulnerability_graph.html">Finding Security Vulnerabilities with Cypher and Neo4j (WIP)</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/simple_nlp_with_graphs.html">Natural Language Analytics made simple and visual with Neo4j</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/cleaning_up_cypher.html">Cleaning Out Your Graph</a></p>
+<p>path assignment</p>
 </li>
 </ul>
 </div>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_neo4j">Neo4j</h2>
-<div class="sectionbody">
+<div class="sect2">
+<h3 id="_predicates_2">Predicates</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/store_copy.html">Neo4j Store Copy &amp; Cleanup Tool</a></p>
+<p>math operators <code>&lt;, &gt;, &lt;&gt;, &#8230;&#8203;</code> in predicates!!</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_indexes_match_and_merge.html">On Neo4j Indexes, MATCH and MERGE</a></p>
+<p><code>OR</code> predicates</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/xrebel_with_neo4j.html">Using XRebel 2 with Neo4j</a></p>
+<p>pattern predicates</p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/styling_neo4j_server_visualisation.html">Styling Neo4j Server Visualisation</a></p>
+<p>string operators: <code>CONTAINS, STARTS WITH, ENDS WITH</code></p>
+</li>
+<li>
+<p>regular expressions</p>
+</li>
+<li>
+<p>exists</p>
+</li>
+<li>
+<p><code>IS NULL</code></p>
+</li>
+<li>
+<p>list predicates `all(), none(), single(), none() `</p>
 </li>
 </ul>
 </div>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_visualization">Visualization</h2>
-<div class="sectionbody">
+<div class="sect2">
+<h3 id="_expressions_2">Expressions</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/neo4j_web_extension.html">Neo4j Server Extension to serve small Web-UI</a></p>
+<p><code>CASE</code></p>
 </li>
 <li>
-<p><a href="http://jexp.github.io/blog/html/ubigraph.html">Rendering a Neo4j Database in UbiGraph</a></p>
+<p>list slices <code>list[0]</code> or <code>list[0..10]</code></p>
+</li>
+<li>
+<p>list comprehensions, extract, reduce, filter</p>
+</li>
+<li>
+<p>pattern comprehensions</p>
+</li>
+<li>
+<p>get-degree: <code>sizen)-&#8594;(</code></p>
 </li>
 </ul>
 </div>
 </div>
-</div>
-<div class="sect1">
-<h2 id="_spring_data_neo4j">Spring Data Neo4j</h2>
-<div class="sectionbody">
+<div class="sect2">
+<h3 id="_projection_aggregation_2">Projection/Aggregation</h3>
 <div class="ulist">
 <ul>
 <li>
-<p><a href="http://jexp.github.io/blog/html/improving_remote_spring_data_neo4j_performance.html">Spring Data Neo4j 3.3.0 - Improving Remoting Performance</a></p>
-</li>
-<li>
-<p><a href="http://jexp.github.io/blog/html/sdn_config.html">Spring Data Neo4j 3.0 - Configuration Changes</a></p>
+<p>other aggregation functions than <code>count(n)</code></p>
 </li>
 </ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_functions_2">Functions</h3>
+<div class="ulist">
+<ul>
+<li>
+<p><code>coalesce</code></p>
+</li>
+<li>
+<p><code>size()</code></p>
+</li>
+<li>
+<p><code>substring</code></p>
+</li>
+<li>
+<p><code>range</code></p>
+</li>
+<li>
+<p>math functions</p>
+</li>
+<li>
+<p>head, tail</p>
+</li>
+<li>
+<p><code>nodes(path), rels(path), length(path)</code></p>
+</li>
+<li>
+<p>properties(n), labels(n)</p>
+</li>
+<li>
+<p>startNode(r), endNode(r)</p>
+</li>
+<li>
+<p>toInt(), toString(), toBoolean()</p>
+</li>
+<li>
+<p>timestamp()</p>
+</li>
+<li>
+<p>keys(m)</p>
+</li>
+<li>
+<p>string functions, like <code>split, length, trim</code> etc.</p>
+</li>
+<li>
+<p><code>point(), distance()</code></p>
+</li>
+</ul>
+</div>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2017-09-30 19:54:03 CEST
+Last updated 2017-05-07 23:47:22 CEST
 </div>
 </div>
 </body>
