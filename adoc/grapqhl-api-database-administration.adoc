@@ -1,0 +1,152 @@
+= Using a GraphQL API for Database Administration
+// :img: ../img
+:img: https://github.com/neo4j-graphql/neo4j-graphql/raw/3.3/docs/img
+
+
+image::https://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/20170524234854/graph-ql-graph-database-neo4j-integration.png[float=right,width=450]
+
+A discussion with my colleagues Andreas and Will at graphql-europe made me realize, that GraphQL would make for an *amazing API for database administration*.
+
+You know that plenthora of functions and options to control details from security, indexing, metadata, to clustering and other operations.
+
+So I used the trip on the train home to build a GraphQL admin endpoint for Neo4j, exposing all available procedures either as queries or mutations.
+Using Kotlin this was fortunately a matter of only a few lines (200) of code and worked suprisingly well.
+
+====
+If you know of any other database that exposes its admin-API via GraphQL, please let me know in the comments, I'd love to have a look.
+
+And if you get inspired and base some of your work on this idea, I'd be honored, even more so with attribution :)
+====
+
+== TL;DR
+
+You can get your Neo4j Admin API served at `/graphql/admin` by installing https://github.com/neo4j-graphql/neo4j-graphql/releases[the lastest version of the `neo4j-graphql` extension].
+In Neo4j Desktop just click "Install GraphQL" in the Plugins section of your database.
+// The exposed procedures have to be enabled in the config via `graphql.admin.procedures=*`, you can select comma-separated subsets of procedures via `glob` matching.
+You might need to configure a basic auth header for your database user's credentials.
+Then you're ready to query your new and shiny Admin API via GraphiQL or GraphQL Playground.
+
+image::{img}/neo4j-graphql-admin-simple.png[]
+
+The endpoint is not limited to built-in procedures, also external libraries like APOC, graph-algorithms or neo4j-spatial are automatically exposed.
+
+== Benefits
+
+The biggest benefit is in my book the *self documenting nature* of GraphQL APIs based on the strict schema provided.
+
+// todo image
+
+The strong typing, documentation and defaults for both input and output types increase the *clarity* and reduce the number of trial-and-error attempts.
+The custom selection of output fields and optional deeper traversal of result structures allows for quick customizations of what you want to retrieve.
+
+With the clear separation into read queries and write mutations it is easy to reason about the impact of a call.
+
+And of course the amazing auto-complete with inline help and the automatically available documentation in GraphiQL and GraphQL-Playground make interacting with such an API a joy.
+
+Parameterizing all inputs and limiting result sizes is just icing on the cake.
+
+// todo image graphql cake
+
+Another advantage is that you can combine multiple queries into a single call, so that all relevant information for a full screen is retrieved in a single request.
+
+Of course you can use all the available GraphQL tools like middleware or libraries for quickly building front-end applications (apollo-tools, react, semantic-ui, victory etc.). 
+That allows you to integrate these APIs quickly into your monitoring/administration scripts or dashboards.
+
+== Implementation Details
+
+Like the regular GraphQL endpoint in https://github.com/neo4j-graphql/neo4j-graphql[`neo4j-graphql`^], this is a server extension serving GET, POST and OPTIONS endpoints.
+They take in queries, variables and operation names to execute within a single transaction.
+After execution the results or errors are returned as JSON to the client.
+
+// todo image of cycle?
+
+The necessary graphql-schema is built from the available user-defined-procedures deployed in Neo4j.
+
+====
+
+*User Defined Procedures*
+
+In 2016, Neo4j 3.0 got a neat new extension point.
+You could provide annotated Java methods as user defined procedures, which then were callable either stand-alone or as part of your database queries.
+As our (react-based) Neo4j-Browser moved from HTTP to a binary transport, the original management REST-APIs were augmented with procedures providing the same functionality.
+
+Each procedure can take parameters and returns a stream of data with individual named columns, similar to query results both of which can use data types from the https://neo4j.com/docs/developer-manual/current/drivers/cypher-values/#driver-neo4j-type-system[Cypher type system^].
+
+Ever since a large amount of functionality has been moved to procedures and functions giving us a broad selection of things to expose via GraphQL.
+
+====
+
+To construct the schema, I iterated over the available procedures, creating one _field_ for each procedure.
+
+I took the named procedure parameters as input arguments and used custom output types (per procedure) holding the returned columns.
+Input parameters with default values could be nullable, the others are defined as non-null.
+Procedure descriptions turned into field descriptions, the deprecation information was also transferred.
+
+I mapped basic scalar types and lists directly to GraphQL types.
+
+Only the `Map` (dict/object) type I had to map to a `List<Attribute>` where each attribute is
+
+[source,graphql]
+----
+type Attribute {
+   name: String!
+   value: String
+   type: String!  = "String"
+}
+----
+
+which worked suprisingly well both for inputs and outputs.
+
+image::{img}/neo4j-graphql-admin-map-values.png[]
+
+Similarly I had to create custom types for `Node`, `Relationship` and `Path`.
+
+For these 4 custom types I added the appropriate (de-)serialization code.
+All other unknown types were rendered to strings.
+
+The data fetcher for each field, just executes the wrapped procedure with the input arguments from the environment.
+The results are then mapped to the output type fields (optionally transformed) and returned to the endpoint.
+
+Based on their metadata I combined the fields into object types for Queries and Mutations respectively.
+
+image::{img}/neo4j-graphql-admin-mutation.png[title="Call a mutating operation with parameters"]
+
+And that was basically it.
+
+_I was surprised myself, firing up GraphiQL after deploying the extension and being able to intuitively call any of the queries and mutations without and hiccups_
+
+== Challenges
+
+My biggest challenge is the lack of namespaces in GraphQL.
+While you can substructure queries nicely with nested types, the same is not available for mutations.
+
+To keep the API naming consistent across both, I decided to not substructure queries and like mutations, just join the capitalized parts of the namespace and procedure name together.
+
+Another slight challenge was the missing information about read vs. write operations in the `DBMS` and `SCHEMA` scopes of Neo4j procedures.
+So I had to use a whitelist to determine "read-only" ones, which of course is not sufficient.
+
+== Notables
+
+Something other API technologies don't have built in and which is really cool, is the ability to choose and pick any number of queries or mutations you want to run in a single request.
+
+If necessary you can even alias multiple invocations of the same query with different parameters (think statistics per database).
+
+image::{img}/neo4j-graphql-admin-combined.png[title="Combining multiple queries in a single call"]
+
+And you can even run graph-algorithms or cypher statements as part of this API, which is kinda cool.
+
+image:{img}/neo4j-graphql-admin-cypher.png[width=450,title="Executing Cypher via GraphQL API"]
+image:{img}/neo4j-graphql-admin-algo.png[width=450,title="Running Graph Algorithms via GraphQL API"]
+
+== Next Steps
+
+Currently I only directly expose the procedures parameters and results to the users.
+Going forward it would be nice to derive higher level types that offer their own (dynamic) query fields, like
+
+* a Label type that also can return counts
+* a Server type that can provide it's cluster role or other local information
+* adding more dynamic fields with parameters on a Node or Relationship type for custom traversals
+
+I would love a bunch of monitoring and management mobile-, web-apps and commandline-clients to be built on top of this management API to see where we could improve the usability and what feedback and requests we get.
+Of course the first target would be http://neo4j-apps.github.io[graph-apps] for https://neo4j.com/developer/guide-neo4j-desktop/[Neo4j Desktop].
+So if you're interested in this, please reach out and let's chat.

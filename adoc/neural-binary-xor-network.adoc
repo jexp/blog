@@ -1,0 +1,509 @@
+= Running Deep Learning Neural Networks in a Graph database like Neo4j
+:neo4j-version: 3.1
+:author: Michael Hunger
+:twitter: @mesirii
+:tags: neural networks, machine learning
+:img: ../img
+
+
+I know I'm late to the game, but better now than never.
+I wanted to start with deep learning and neural networks for a while just never made the time, which is unfortunate, as is it is a quite fun topic.
+
+Especially coming from a graph database background, the network bit of it feels all natural.
+
+== How to use a graph database with Neural Networks?
+
+My idea is to provide added value to developers that work with neural networks.
+Graph databases should be great for large scale storage and visualization of these networks and also for simulating their training and use.
+And as soon as you have the networks in there, you're also able to compare them and find similiar sub-structures and interesting parts.
+
+The goal is not (yet) to run deep and wide RNN in Neo4j as efficiently as the widely used infrastructures do.
+But you should at least be able to run a stored network and probably also train it.
+
+== Little bit of introduction to Neural Networks
+
+When starting to look into it, it turned out that representing the XOR gate is the "Hello World" of Neural Networks.
+Easy to understand but still complex enough to be interesting and touching the relevant bits.
+
+I started with the http://machinethink.net/blog/the-hello-world-of-neural-networks/[first half of this blog], which explains the basics really well, but doesn't go into back propagation.
+
+I wont repeat too much but the *basic ideas* are:
+
+A Neural Network tries to reproduce the operation of our brain, where neurons combine (several) input signals and fire on their own when a certain threshold or condition is met to the next neurons in line.
+
+It is a network of input, compute(hidden) and output-neurons (or -units) which are organized in multiple (horizontal) layers.
+Neurons (Nodes) might have a bias value and are connected by relationships with weights.
+
+To use a Neural Network you provide (numeric or vector) inputs at the input neurons and then compute new neuron values *layer by layer* by summing up the source-neuron-value scaled by the weight of the relationship to the target neuron plus its optional bias value.
+
+To make this all work within a range of `0..1` and to represent the required "activation potential" you use an activation function like sigmoname: `S(x) = 1 / (1 + exp(-x))` on the sum of these values.
+
+We'll look into this in more detail with the concrete example, to understand that I'll quickly explain the core concepts of graph databases.
+
+== Little bit of introduction to graph databases
+
+Graph Databases are systems built to efficiently store, query and manage highly connected information.
+The basic building blocks in the _property graph model_ are *labeled nodes* connected by *directed, named relationships* both of which can carry any attributes.
+To support complex queries efficiently, the existing relationships ar stored (pre-computed), e.g. as a list with each node.
+So instead of a JOIN computation at query time it uses a graph traversal following direct pointers ot the other nodes.
+
+The declarative query language use in Neo4j and other graph databases is called Cypher, which centers around Ascii-Art graph patterns as its core, plus the regular filtering, projection, aggregation functionality you know from SQL and a some more capabilities for data flows and handling data structures.
+
+====
+You can follow the following examples along by either spinning up an empty sandbox at http://neo4j.com/sandbox, executing `docker run -p 7474:7474 -p7687:7687 neo4j` or http://neo4j.com/download[downloading and installing Neo4j] onto your machine (default username/password for the latter two are neo4j/neo4j).
+====
+
+Here are two simple examples for Cypher statements:
+
+.Creating a single neuron pair
+----
+CREATE (in1:Neuron {name:"in1",layer:0})
+CREATE (h1 :Neuron {name:"h1", layer:1, bias: -10})
+
+CREATE (in1)-[r:CON {weight:20}]->(h1)
+RETURN in1, r, h1
+----
+
+<1> This CREATES two nodes, each labeled `Neuron` with an bunch of properties, namely an `name` and a `layer` index assigned to two variables `in1` and `h1`. 
+The hidden neuron (`h1`) also gets a bias value.
+<2> Then we CREATE a relationship with the type `CON` from `in1` to `h1` and a single attribute, `weight`
+<3> Finally we RETURN all 3 to the user e.g. to view visualization.
+
+.find all neurons which have a smaller value than their inputs
+----
+MATCH (n:Neuron)-[r:CON]->(m:Neuron)
+WITH m, sum(n.value * r.weight) as inputs
+WHERE inputs > m.value
+RETURN m.name as neuron, m.value as value, inputs
+----
+
+<1> This MATCHes all visual graph pattern of "one neuron connected to another neuron via a `CON` relationship".
+<2> Aggregation over all input neurons and connections by computing the `sum` of their product and aliasing it with `inputs`.
+<3> Filter by comparing that sum with the target neuron values.
+<4> Return attributes and computed scalar values.
+
+== The XOR "Hello World" in Cypher
+
+Back to the "Hello World" of Neural Networks, the *XOR function*, which you all remember, but which is seemingly not possible express with the classic networks without hidden layers.
+
+We can even compute our value table with Cypher:
+
+[source,cypher]
+----
+UNWIND [[false,false],[false,true],[true,false],[true,true]] AS in 
+
+RETURN in[0] as in0, in[1] as in1, in[0] XOR in[1] AS out
+----
+
+//table
+
+ifndef::env-graphgist[]
+----
++-----------------------+
+| in0   | in1   | out   |
++-----------------------+
+| false | false | false |
+| false | true  | true  |
+| true  | false | true  |
+| true  | true  | false |
++-----------------------+
+----
+endif::env-graphgist[]
+
+
+I start with the most often described example network setup.
+
+++++
+https://www.youtube.com/watch?v=kNPGXgzxoHw
+++++
+
+We have *two input* neurons which are fully connected to the *two neurons in the hidden layer* which connect to a *single output neuron*.
+
+Each of the nodes gets a bias and each of the relationships gets a weight, both of which we currently just take at face value from the common example setup.
+
+If we were to create that network with Cypher it would look like this:
+
+ifndef::env-graphgist[]
+image::{img}/ml-xor-network-create.jpg[]
+endif::env-graphgist[]
+
+
+//setup
+[source,cypher]
+----
+CREATE 
+(in1:Neuron:Input {name:"in1",layer:0}),
+(in2:Neuron:Input {name:"in2",layer:0}),
+
+(h1:Neuron:Hidden {name:"h1",layer:1,bias:-10}),
+(h2:Neuron:Hidden {name:"h2",layer:1,bias: 30}),
+
+(in1)-[:CON {weight:20}]->(h1),
+(in1)-[:CON {weight:20}]->(h2),
+       
+(in2)-[:CON {weight:-20}]->(h1),
+(in2)-[:CON {weight:-20}]->(h2),
+
+(o1:Neuron:Output {name:"o1",layer:100,bias:-30}),
+
+(h1)-[:CON {weight:20}]->(o1),
+(h2)-[:CON {weight:20}]->(o1)
+
+RETURN *
+----
+
+Basically just creating the neuron-nodes in layers and connecting them with weighted relationships.
+
+Which results in this really pretty graph visualization:
+
+//graph
+
+ifndef::env-graphgist[]
+image::{img}/ml-xor-network-weights.jpg[]
+endif::env-graphgist[]
+
+We initialize our network by setting the values for the two input neurons, e.g. to `{in1:1, in2:0}`.
+
+[source,cypher]
+----
+MATCH (in1:Neuron:Input {name:"in1"}),(in2:Neuron:Input {name:"in2"})
+SET in1.value = 1, in2.value = 0
+----
+
+Now our textbook computation for the new value of a target neuron in our network looks like this.
+
+[source,cypher]
+----
+MATCH (source:Neuron:Input)-[r:CON]->(target:Neuron)
+WITH target, sum( source.value * r.weight ) + target.bias as inputSum
+SET target.value = 1.0 / (1.0 + exp(-1.0 * inputSum))
+RETURN target.name, target.value, inputSum
+----
+
+<1> find all graph patterns where a source points to a target
+<2> aggregate per target, compute the input sum (value*weight) and add the targets bias
+<3> apply the activation function, in our case sigmoname: `S(x) = 1 / (1 + exp(-x))`
+
+//table
+
+ifndef::env-graphgist[]
+----
++-------------------------------------------+
+| target.name | target.value       | inputSum |
++-------------------------------------------+
+| "h1"      | 0.9999546021312976 | 10       |
+| "h2"      | 1.0                | 50       |
++-------------------------------------------+
+----
+endif::env-graphgist[]
+
+As explained in the video above, these weights and biases turn our neurons into `OR` (h1), `NAND` (h2) and `AND` (o1) gates to represent the XOR function.
+This happens by pusing the _input sum plus bias_ either to larger negative or positive values for sigmoid to result in values close to 0 or 1.
+
+Now we would have to apply the same computation again for the next layer to compute the outputs.
+
+[source,cypher]
+----
+MATCH (source:Neuron)-[r:CON]->(target:Neuron:Output)
+WITH target, sum( source.value * r.weight ) + target.bias as inputSum
+SET target.value = 1.0 / (1.0 + exp(-1.0 * inputSum))
+RETURN target.name, target.value, inputSum
+----
+
+//table
+
+ifndef::env-graphgist[]
+----
++----------------------------------------------------+
+| target.name | target.value       | inputSum          |
++----------------------------------------------------+
+| "o1"      | 0.9999545608951235 | 9.999092042625954 |
++----------------------------------------------------+
+----
+endif::env-graphgist[]
+
+The result fits our bill for the computation of XOR, we can apply the same for the other input values too.
+
+To compute everything in single statement, we have to change the structure slightly, as we have to compute layer by layer, we sort the neurons by layer index.
+As Cypher does depth first search by default the order of computation would otherwise be off.
+
+[source,cypher]
+----
+WITH {in1:1,in2:0} as input
+MATCH (n:Neuron:Input) SET n.value = input[n.name]
+WITH input, count(*) as inputNeurons
+
+MATCH (n:Neuron) WHERE NOT n:Input WITH * ORDER BY n.layer
+SET n.value = 1.0 / (1.0 + exp(-1.0 * (n.bias + reduce(v=0.0, weightedValue IN [(p)-[r:CON]->(n) | p.value * r.weight] | v + weightedValue))))
+
+WITH * WHERE n:Output
+RETURN input, n.name as output, round(n.value*10.0)/10.0 as value;
+----
+
+<1> define our input data from map
+<2> find input neurons and set value by name
+<3> only keep the input and count of updated nodes for the next part
+
+<4> find all non-input neurons and order them by layer
+<5> compute the sigmoid of the input sum plus bias as the new target value, with the input-sum computation done inline with `reduce` and a _pattern comprehension_ 
+
+<6> Only keep the output neurons
+<7> Return input and all outputs
+
+//table
+
+image::{img}/ml-xor-network-run.jpg[]
+
+*TODO* I wanted to compute all inputs at once but the Cypher execution / writing values to the nodes only keeps the last value around.
+
+[source,cypher]
+----
+UNWIND [{row:0,in1:0,in2:0},{row:1,in1:0,in2:1},{row:2,in1:1,in2:0},{row:3,in1:1,in2:1}] as input
+MATCH (n:Neuron) SET n.value = case when n:Input then input[n.name] else n.value end
+
+WITH * WHERE NOT n:Input WITH * ORDER BY input.row, n.layer
+SET n.value = 1.0 / (1.0 + exp(-1.0 * (n.bias + reduce(v=0.0, weightedValue IN [(p)-[r:CON]->(n) | p.value * r.weight] | v + weightedValue))))
+
+WITH * WHERE n:Output
+RETURN input, n.name as output, round(n.value*10.0)/10.0 as value;
+----
+
+//table
+
+*This was the easy bit*
+
+We can now store and compute (forward-propagage) Neural Networks in our graph, which is already pretty cool.
+
+Going forward we want to be able to provide procedures like `apoc.ml.compute("network",{inputs})` and also provide things like `apoc.ml.logistics` / sigmoid / sigmoid.prime functions.
+
+In an upcoming post I want to demonstrate how to extract network representations from the common deep learning frameworks and store them in Neo4j and perhaps load them from the database too.
+
+This would not just enable storage + visualization but also comparison and computing some interesting graph properties and running some graph algorithms on the networks.
+(E.g. to find central nodes or weighted shortest paths).
+
+NOTE: Please try yourself with common networks and let me (http://twitter.com/mesirii[@mesirii]) know how it goes for you.
+
+I haven't covered other types of networks yet, like _Recurrent Neural Networks (RNN)_ or _Convolutional Neural Networks (CNN)_ that's also up for another post.
+
+But instead I wanted to look at training our networks in the graph to figure out how to arrive at the weights that we've used so far "automagically".
+
+== Training Neural Networks
+
+As the  blog post I've been reading only contained a very general statement with regards to training and computing the weigths:
+
+____
+Determine how wrong the prediction is. There are various ways to express this error, or “loss”, as some numeric quantity.
+
+Perform a backward pass through the network and move the weights a little bit in the direction of the right answer.
+The next time you make a prediction for the same inputs, the answer will be a little more correct.
+____
+
+I had to look for another post on the same example network but explaining the whole training bit, and found https://stevenmiller888.github.io/mind-how-to-build-a-neural-network/[this really well written post] from Steven Miller, the Development Manager at Segment.
+
+The basics are simple, the devil is in the detail (it also doesn't help that my last real exposure to math was some 20 years ago).
+
+Network setup:
+
+1. You create your Neural Networks with the required sizes of input and output layers
+2. You add as many hidden layers as make sense
+3. You (fully) connect the previous layer to the next (non-connected could be also weight = 0)
+4. You assign (smallish) random numbers to weights (and biases)
+
+In our case we reuse our existing network structure and just "reset" biases and weights to "random" values.
+
+I use some fixed values here b/c otherwise the numbers won't be repeatable, you could use Cypher's `rand()` function in a real approach.
+
+[source,cypher]
+----
+WITH [0.1,0.3,0.5] as random
+MATCH (p:Neuron)-[r:CON]->(n:Neuron)
+SET n.bias = random[id(n) % 3], r.weights = random[id(r) % 3]
+
+RETURN *
+----
+
+// table
+
+For training your repeat the next steps several (tens of thousand times) with your training data.
+
+5. Apply your network to the inputs (forward pass), 
+6. compute the output errors
+7. propagate that delta backwards through the layers based on the existing weights (back propagation)
+
+Let's start with applying our inputs (0,1) to this random network:
+
+[source,cypher]
+----
+WITH {in1:0,in2:1} as input
+MATCH (n:Neuron:Input) SET n.value = input[n.name]
+WITH input, count(*) as inputNeurons
+
+MATCH (n:Neuron) WHERE NOT n:Input WITH * ORDER BY n.layer
+SET n.value = 1.0 / (1.0 + exp(-1.0 * (n.bias + reduce(v=0.0, weightedValue IN [(p)-[r:CON]->(n) | p.value * r.weight] | v + weightedValue))))
+
+WITH * WHERE n:Output
+RETURN input, n.name as output, round(n.value*1000.0)/1000.0 as value;
+----
+
+//table
+
+ifndef::env-graphgist[]
+----
++---------------------------------+
+| input          | output | value |
++---------------------------------+
+| {in1=0, in2=1} | "o1"   | 0.574 |
++---------------------------------+
+----
+endif::env-graphgist[]
+
+=== Back Propagation
+
+The back propagation starts at the outputs and then walks through the layers from the end, distributing the previous layer's error delta onto the existing weights based on their previous values (contribution) to the output.
+
+I won't go into the math behind it, just the mechanics, for the details please see Steven Millers post.
+
+The expected output is 1, our output is 0.574 so only half of that value.
+
+First we have to compute the delta (error).
+
+`error = expected - output = 1 - 0.574 = 0.426`
+
+Sometimes also the squared error function is used: 
+
+`error = 1/2 * ( expected - output ) ^ 2`
+
+
+Now we have to distribute that error backwards onto the weights and the bias that went into the output, we have two weights coming from `h1` and `h2` and the bias of o1 itself.
+
+Our input sum is:
+
+`inputSum = h1.value * r1.weight + h2.value * r2.weight + o1.bias = xxx`
+
+Applying the activation function:
+
+`S(x) = S(...) = 0.574`
+
+We compute the steepness of the slope of the activation function via the derivation of sigmoid as the value the activation has to change.
+(The derivation of sigmoid is called sigmoid prime, or `S'(x) = S(x)*(1-S(x))`)
+
+`deltaOutputSum = S'(inputSum) * (error) = S'(...) * 0.426 = xxx * 0.426 = `
+
+For backward propagation of the error each contributing part gets a partial delta of the error based on it's contribution.
+
+We use this delta output sum to comput *two things now*,
+
+* the change of the weights and bias
+* and the new (adapted) values of our previous level of neurons for the next level of back propagation.
+
+We can compute the change of weights by dividing the `deltaOutputSum` by the previous value of each source neuron.
+
+`r.weight = r.weight + deltaOutputSum / source.value`
+
+For the bias we do the same, only treating source.value as 1 as the bias is independent of any source.
+
+TODO, I just made this up, check it.
+
+`n.bias = n.bias + deltaOutputSum`
+
+Similarly we can compute the delta ("error") of the hidden neurons to back-propagate, but *we need to use the old (previous) `rel.weight`*, because we back-propagate the old computation, not the new one.
+
+`deltaHiddenSum = deltaOutputSum / r.weight * sigmoidPrime(inputSum)`
+
+`source.value = source.value + deltaOutputSum / r.weight * sigmoidPrime(inputSum)`
+
+// TODO do we need to remove the bias from the inputSum ?
+
+Now we apply the same for the weights of the input layer, propagating each using the existing weights and input-sums and our new, delta of the hidden neurons.
+
+`r.weight = r.weight + deltaOutputSum / input.value`
+
+// todo, or should we still ? perhaps treat zero as "close to zero", but then it's quite a huge influence
+If the input value was zero then we don't change the weight because it didn't contribute to the input sum in the first place.
+
+
+// TODO learning rate
+////
+
+[source,cypher]
+----
+CREATE 
+(in1:Neuron:Input {name:"in1",layer:0}),
+(in2:Neuron:Input {name:"in2",layer:0}),
+
+(h1:Neuron:Hidden {name:"h1",layer:1,weight:-8}),
+(h2:Neuron:Hidden {name:"h2",layer:1,weight:-20}),
+
+(in1)-[:CON {weight:54}]->(h1),
+(in1)-[:CON {weight:14}]->(h2),
+       
+(in2)-[:CON {weight:17}]->(h1),
+(in2)-[:CON {weight:14}]->(h2),
+
+(o0:Neuron:Output {name:"o0",layer:100,weight:-48}),
+
+(h1)-[:CON {weight:92}]->(o0),
+(h2)-[:CON {weight:-98}]->(o0);
+----
+// WITH input, count(*) as inputsUpdated
+
+
+[source,cypher]
+----
+WITH {in1:1,in2:0} as input
+MATCH (n:Neuron:Input) SET n.value = input[n.name]
+WITH input, count(*) as inputNeurons
+
+MATCH (n:Neuron) WHERE NOT n:Input WITH * ORDER BY n.layer
+SET n.value = 1.0 / (1.0 + exp(-1.0 * (n.weight + reduce(v=0.0, wv IN [(p)-[r:CON]->(n) | toFloat(p.value) * toFloat(r.weight)] | v + wv))))
+
+WITH * WHERE n:Output
+RETURN input, collect({name:n.name, v: round(n.value*10.0)/10.0}) as output;
+----
+
+// TODO
+[source,cypher]
+----
+UNWIND [{in1:0,in2:0},{in1:0,in2:1},{in1:1,in2:0},{in1:1,in2:1}] as input
+UNWIND keys(input) as key
+MATCH (in:Neuron:Input {name:key}) SET in.value = input[key]
+WITH distinct input
+
+MATCH (n:Neuron) WHERE NOT n:Input WITH * ORDER BY n.layer
+WITH input,collect(n) as neurons
+FOREACH (n IN neurons | SET n.value = 1.0 / (1.0 + exp(-1.0 * (n.weight + reduce(v=0.0, wv IN [(p)-[r:CON]->(n) | toFloat(p.value) * toFloat(r.weight)] | v + wv)))))
+
+RETURN input, size(neurons) as neuronsUpdated, [o IN neurons WHERE o:Output | {name:o.name, v:o.value}] as output
+----
+
+[source,cypher]
+----
+UNWIND [{row:0,in1:0,in2:0},{row:1,in1:0,in2:1},{row:2,in1:1,in2:0},{row:3,in1:1,in2:1}] as input
+MATCH (n:Neuron) SET n.value = input[n.name]
+
+WITH * WHERE NOT n:Input WITH * ORDER BY input.row, n.layer
+SET n.value = 1.0 / (1.0 + exp(-1.0 * (n.weight + reduce(v=0.0, wv IN [(p)-[r:CON]->(n) | toFloat(p.value) * toFloat(r.weight)] | v + wv))))
+
+WITH * WHERE n:Output
+RETURN input, {name:n.name, v: n.value} as output;
+----
+
+[source,cypher]
+----
+MATCH (n:Neuron) WHERE NOT n:Input WITH * ORDER BY n.layer
+SET n.value = 1.0 / (1.0 + exp(-1.0 * (n.weight + reduce(v=0.0, wv IN [(p)-[r:CON]->(n) | toFloat(p.value) * toFloat(r.weight)] | v + wv))))
+RETURN n.name, n.value, n.weight, n.layer;
+----
+
+[source,cypher]
+----
+match (n:Neuron) RETURN n.name, n.value, n.weight order by n.layer, n.name;
+----
+
+////
+
+== References
+
+* https://en.wikibooks.org/wiki/Artificial_Neural_Networks/Activation_Functions[Activation Functions]
+* http://neo4j.com/developer/cypher[Cypher Introduction]
+* https://mattmazur.com/2015/03/17/a-step-by-step-backpropagation-example/[]

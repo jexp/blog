@@ -1,0 +1,220 @@
+= The Devoxx Conference Graph (WIP)
+
+Great discussion at speakers dinner with Stephan Janssen. 
+
+Got idea for creating a conference graph from the devoxx data, from the REST API.
+
+http://cfp.devoxx.be/api
+
+* A collection of Conferences
+* A conference
+* A list of speakers
+* A speaker
+* A talk
+* A set of schedules
+* A schedule
+* A link
+* The list of event's talks formats (conference, labs, keynote...)
+* The list of event's tracks
+* The list of Rooms
+* A schedule for a specific room and a specific day
+
+
+== Queries
+
+.Top Tracks
+----
+match (t:Track)<-[:IN_TRACK]-(:Talk)
+return t.title, count(*) as c
+order by c desc;
+----
+
+.Speaker statistics
+----
+match (s:Speaker)-[:PRESENTS]->(t:Talk)-[:IN_TRACK]->(tr:Track)<-[:HAS_TRACK]-(c:Conference)
+return s.name, count(distinct t) as c, collect(distinct tr.title), collect(distinct c.label)
+order by c desc limit 10;
+----
+
+.A speakers network
+----
+match (s:Speaker)-[:PRESENTS]->(t:Talk)-[:IN_ROOM]->(r:Room)<-[:HAS_ROOM]-(c:Conference)-[:HAS_TRACK]->(tr:Track)<-[:IN_TRACK]-(t)
+where s.name = 'Josh Long'
+return s,t,c,tr; 
+----
+
+image::https://imgur.com/pRxi8Vk.jpg[]
+
+// https://www.dropbox.com/s/a9bndc4nx8uws8o/devoxx-single-speaker-josh.jpg?dl=0
+
+// correlation graph speaker to speaker by joint tracks (topics)
+// you clearly see the Java <-> Modern Web <-> Cloud clusters
+
+.speaker network
+----
+match (s:Speaker)-[:PRESENTS]->(t:Talk)-->(tr:Track)<-[:IN_TRACK]-(t2)<-[:PRESENTS]-(s2:Speaker)
+where id(s)<id(s2)
+with s,s2, count(*) as c, collect(distinct tr.title) as tracks
+where c > 15
+return s,s2, apoc.create.vRelationship(s,'SAME_TOPICS',{count:c,tracks:tracks},s2) as rel
+----
+
+image::https://i.imgur.com/hElBKUq.jpg[link="https://www.dropbox.com/s/5luh3iwft8c5o9k/devoxx-speaker-co-tracks.jpg?dl=0"]
+
+----
+call algo.pageRank(
+'match (s:Speaker) return id(s) as id','
+match (s:Speaker)-[:PRESENTS]->(t:Talk)-->(tr:Track)<-[:IN_TRACK]-(t2)<-[:PRESENTS]-(s2:Speaker)
+where id(s)<id(s2)
+with s,s2, count(*) as c
+return id(s) as source,id(s2) as target,c as value
+',{graph:'cypher'});
+----
+
+.top speakers by page-rank
+----
+match (s:Speaker) return s.name,s.pagerank order by s.pagerank desc limit 10
+----
+
+----
+call algo.betweenness(
+'match (s:Speaker) return id(s) as id','
+match (s:Speaker)-[:PRESENTS]->(t:Talk)-->(tr:Track)<-[:IN_TRACK]-(t2)<-[:PRESENTS]-(s2:Speaker)
+where id(s)<id(s2)
+with s,s2, count(*) as c
+where c > 15
+return id(s) as source,id(s2) as target,c as value
+',{graph:'cypher'})
+----
+
+----
+match (s:Speaker) return s.name,s.centrality order by s.centrality desc limit 10
+----
+== importing the data
+
+----
+unwind ["be","ma","fr","co.uk","pl","us"] as tld
+call apoc.load.json("http://cfp.devoxx."+tld+"/api/conferences") yield value 
+with head(value.links) as link
+WITH *
+call apoc.load.json(link.href) yield value as conf
+merge (c:Conference {id:conf.eventCode})
+set c.label = conf.label, c.locale = conf.locale, c.venue = conf.localisation, c.days = conf.days, c.proposalTypesId = conf.proposalTypesId, c.url = link.href
+WITH *
+call apoc.load.jsonArray(link.href+"/speakers") yield value as speaker
+merge (s:Speaker {id:toLower(replace(coalesce(speaker.twitter,trim(speaker.firstName + " " + speaker.lastName)),"@",""))})
+set s.company = speaker.company, s.name = trim(speaker.firstName + " " + speaker.lastName), s.avatarURL = speaker.avatarURL, s.twitter = speaker.twitter, s.uuid = speaker.uuid
+WITH *
+call apoc.load.json(head(speaker.links).href) yield value as speakerDetails
+set s.bio = speakerDetails.bio, s.blog = speakerDetails.blog, s.lang = speakerDetails.lang
+WITH *
+unwind speakerDetails.acceptedTalks as talk
+merge (t:Talk {id:talk.id}) on create set t.talkType = talk.talkType, t.title = talk.title, t.track = talk.track
+merge (s)-[:PRESENTS]->(t)
+with distinct c, link
+call apoc.load.json(link.href+"/tracks") yield value as tracks
+unwind tracks.tracks as track
+merge (tr:Track {id:track.id}) ON CREATE SET tr += track, tr.title = replace(track.title,"&amp;","&")
+merge (c)-[:HAS_TRACK]->(tr)
+with distinct c, link
+call apoc.load.json(link.href+"/schedules/") yield value as schedules
+unwind schedules.links as schedule
+merge (c)-[:DAY]->(d:Day {day:split(schedule.href,'/')[-1]}) ON CREATE SET d.title = schedule.title, d.url = schedule.href
+WITH *
+call apoc.load.json(schedule.href) yield value as scheduleDetails
+WITH *
+unwind scheduleDetails.slots as slot
+with * where not slot.notAllocated and slot.break is null
+merge (c)-[:HAS_ROOM]->(r:Room {id:slot.roomId}) ON CREATE SET r.name = slot.roomName, r.capacity = slot.roomCapacity
+merge (t:Talk {id:slot.talk.id}) 
+SET t.startTime = slot.fromTimeMillis, t.endTime = slot.toTimeMillis, t.start = slot.fromTime, t.end = slot.toTime, t.slotId = slot.slotId,
+t.lang = slot.talk.lang, t.summary = slot.talk.summary, t.talkType = slot.talk.talkType
+MERGE (t)-[:IN_ROOM]->(r)
+MERGE (t)-[:ON_DAY]->(d)
+MERGE (tr:Track {id:slot.talk.trackId})
+MERGE (t)-[:IN_TRACK]->(tr);
+----
+
+=== Run these separately to clean up
+
+Duplicate Tracks
+
+----
+match (t:Track)
+return t.title, count(*)
+order by t.title asc;
+----
+
+----
+match (t:Track) where t.title is not null
+with t.title as title, collect(t) as tracks
+call apoc.merge.nodes(tracks) yield node
+return node.title, node.id;
+----
+
+----
+unwind ['Modern Web','Java','Big Data','Cloud','Mobile','anguages'] as keyword
+match (t:Track) where t.title is not null and t.title contains keyword
+with * order by size(t.title) DESC
+WITH keyword, collect(t) as tracks
+call apoc.merge.nodes(tracks) yield node
+return keyword, node.title, node.id;
+----
+
+----
+match (t:Track) where t.title contains 'Mobile' set t.id = 'mobile';
+----
+
+----
+match (t:Track) where t.title contains 'Java Language' set t.id = 'java';
+----
+
+
+== Testing
+
+----
+call apoc.load.json(link.href+"/tracks") yield value as tracks
+foreach (track IN tracks.tracks |
+merge (t:Track {id:track.id}) SET t.image = track.imgsrc, t.title = track.title, t.description = track.description)
+----
+
+----
+unwind ["be"] as tld
+call apoc.load.json("http://cfp.devoxx."+tld+"/api/conferences") yield value 
+with head(value.links) as link
+call apoc.load.json(link.href+"/schedules/") yield value as schedules
+unwind schedules.links as schedule
+call apoc.load.json(schedule.href) yield value as scheduleDetails
+unwind scheduleDetails.slots as slot
+with * where any (x in [slot.talk.id, slot.talk.trackId] where x is null) and not 
+(not slot.notAllocated or slot.break is not null)
+return slot.talk.id, slot.talk.trackId,slot.talk;
+----
+
+----
+unwind ["be","ma","fr","co.uk","pl","us"] as tld
+call apoc.load.json("http://cfp.devoxx."+tld+"/api/conferences") yield value 
+with head(value.links) as link
+WITH *
+call apoc.load.json(link.href) yield value as conf
+merge (c:Conference {id:conf.eventCode})
+SET c.country = tld
+----
+
+----
+call apoc.load.json("http://cfp.devoxx.be/api/conferences/DVBE17/talks/JMA-6842") yield value
+return  value.title, value.lang, value.audienceLevel,value.talkType, value.track, value.tags, value.speakers, keys(value),size(keys(value))
+----
+
+----
+╒════════════════════════════════════════════╤════════════╤═════════════════════╤════════════════╤═════════════════════════════════╤══════════════════════════════════════════════════════════════════════╤══════════════════════════════════════════════════════════════════════╤══════════════════════════════════════════════════════════════════════╤═══════════════════╕
+│"value.title"                               │"value.lang"│"value.audienceLevel"│"value.talkType"│"value.track"                    │"value.tags"                                                          │"value.speakers"                                                      │"keys(value)"                                                         │"size(keys(value))"│
+╞════════════════════════════════════════════╪════════════╪═════════════════════╪════════════════╪═════════════════════════════════╪══════════════════════════════════════════════════════════════════════╪══════════════════════════════════════════════════════════════════════╪══════════════════════════════════════════════════════════════════════╪═══════════════════╡
+│"Build, Debug and Deploy your first Chatbot"│"en"        │"l1"                 │"Conference"    │"Big Data &amp; Machine Learning"│[{"value":"chat bots"},{"value":"serverless"},{"value":"Alexa"},{"valu│[{"link":{"rel":"http://cfp.devoxx.be/api/profile/speaker","title":"Ar│["summary","trackId","speakers","talkType","summaryAsHtml","id","track│11                 │
+│                                            │            │                     │                │                                 │e":"Machine Learning for Developers"},{"value":""}]                   │un Gupta","href":"http://cfp.devoxx.be/api/conferences/DVBE17/speakers│","title","lang","audienceLevel","tags"]                              │                   │
+│                                            │            │                     │                │                                 │                                                                      │/69e5596a50112585d5acdb93e0a4da47a10a6a8d"},"name":"Arun Gupta"},{"lin│                                                                      │                   │
+│                                            │            │                     │                │                                 │                                                                      │k":{"rel":"http://cfp.devoxx.be/api/profile/speaker","title":"Tara Wal│                                                                      │                   │
+│                                            │            │                     │                │                                 │                                                                      │ker","href":"http://cfp.devoxx.be/api/conferences/DVBE17/speakers/bf04│                                                                      │                   │
+│                                            │            │                     │                │                                 │                                                                      │43d3cc0f9ef6c7550d58fd0c88301906aff6"},"name":"Tara Walker"}]         │                                                                      │                   │
+└────────────────────────────────────────────┴────────────┴─────────────────────┴────────────────┴─────────────────────────────────┴──────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────┴───────────────────┘
+----

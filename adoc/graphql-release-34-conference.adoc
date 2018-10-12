@@ -1,0 +1,12 @@
+== GraphQL-Europe and Neo4j-GraphQL Release
+
+Will, Benoit and I are super excited to attend and sponsor this year's https://www.graphql-europe.org/[graphql-europe conference^] on June 15th this year in Berlin.
+
+If you are there as well make sure to drop by and have a chat with us about GRANDstack, neo4j-graphql and front-ends in React or Angular5.
+
+We are also running a *[Grandstack.io Hackathon^]* as part of our quest to gather feedback on our efforts around GraphQL with really cool prizes!
+
+The conference is organized by the good folks from prisma.io who just rebranded from graph.cool as part of their initiative to provide convenient graphql interfaces as database APIs for all kinds of databases including Neo4j.
+
+image::https://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/20180517232220/GraphQL-Europe-2018.jpg[link=hackathon]
+

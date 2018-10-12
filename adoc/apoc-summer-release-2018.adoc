@@ -1,0 +1,96 @@
+= Proudly presenting: The APOC Summer 2018 Release
+
+It seems we have settled into a release rhythm for APOC that is aligned with the seasons, which is kinda nice, so now the https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases/tag/3.4.0.2[APOC Summer 2018 Release^] is out. 
+As usual you can install APOC with a single-click in Neo4j Desktop, it is available in Neo4j Sandbox and in Neo4j Cloud and in several other offerings.
+
+While most of you are probably eduring a way too hot summer (thanks to the human induced climate change :( ) a large number of contributors added new features to APOC or fixed existing issues.
+
+I want to thank everyone who contributed to APOC, raised issues or asked questions. 
+As most procedures are just a few lines of self-contained code, contributing to APOC is actually quite easy to do. 
+That's why I want to encourage everyone who has an itch to scratch, to first check if there is already a solution in the library, and if not, take the few minutes to contribute it for everyone to use.
+
+To answer the first question - I know that the whole library can be quite overwhelming - I wanted to point out some ways of quickly figuring out if some functionality already exists in APOC:
+
+1. use `call apoc.help('keyword')` which checks both procedure/function names and descriptions and also lists the signatures.
+2. use this https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_overview_of_apoc_procedures_functions[searchable, interactive overview^] in the documentation
+3. check the https://neo4j-contrib.github.io/neo4j-apoc-procedures/[table of content] in the docs and see if you find it in the relevant area
+4. ask in the https://neo4j-users.slack.com/messages/C1APWRTRU[#neo4j-apoc channel on Slack^]
+
+If you rather want to explore yourself, you can also try the http://localhost:7474/browser/?cmd=play&args=apoc[Neo4j-Browser Guide^] with `:play apoc`.
+
+I also recently started to record short videos for different areas of APOC (and will continue to do so).
+You can find the first 9 videos in this playlist:
+
+++++
+<iframe width="560" height="315" src="https://www.youtube.com/embed/videoseries?list=PL9Hl4pk2FsvXEww23lDX_owoKoqqBQpdq" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+++++
+
+You might also enjoy the https://www.slideshare.net/neo4j/graphtour-madrid-utilizing-powerful-extensions-for-analytics-operations[slides^] and https://www.youtube.com/watch?v=cdJCpp3Xgc0&list=PL9Hl4pk2FsvUOlgYXrNE1wXkZ_HMnZ32_&index=7[presentation^] our Developer Relations Group gave during GraphTour in Spring 2018 for using "powerful extension with Neo4j", which also covered a lot of APOC functionality.
+
+== New Features in the Summer Release
+
+* Version upgrade Neo4j 3.4.5 APOC 3.4.0.2
+
+* Support reverse geocoding in apoc.spatial (#876)
+* Support of Base64url encoding and decoding (#870)
+
+* Add support for loading CSVs formatted according the import tool's specification (#581)
+* Read headers for load csv from config object (#834)
+
+* add a configuration option to mergeNodes that allows to combine relationships of the same type and direction (#850)
+
+* implement functions from pgsql - degree, label exists (#860)
+
+* Adds text similarity/distance methods and double metaphone text encoder (#865)
+
+* Added support to function apoc.date.fromISO8601 (#837)
+
+* Added unit "weekday" to apoc.date.field() (#838)
+
+* Added optional 4th parameter to procedure 'apoc.periodic.repeat'. (#853)
+
+* Added optional parameter to procedure 'apoc.trigger.add' that allows configuration to be passed in. (#859)
+
+* Add concurrency parameter (default to 50) to periodic.iterate
+
+* add index selectivity to apoc.meta.data apoc.meta.schema and the apoc.index procedures (#842)
+
+* Add apoc.diff user functions (#760)
+
+* Allow passing parameters to apoc.cypher.runFile (#813)
+
+* Allow direction-only (typeless) relationships in the path expander relationshipFilter and sequences (#821)
+* Added whitelistNodes and blacklistNodes, to finish up node-specific filtering for path expanders. (#796)
+
+=== Bugfixes
+
+* Previously only array values were added as individual entries to lucene indexes. With the new custom indexing of arbitrary map-documents, this should now also work for lists.
+* One issue that Neo4j 3.4 caused for the functions that support neo4j-graphql-js, was fixed in the implementation.
+* Added thrown runtime exception if an `apoc.trigger.*` procedure is called but `apoc.trigger.enabled=true` has not been set in the neo4j.conf file.
+* `apoc.text.clean` no longer strips utf8 characters (incl. cyrillic/chinese/japanese symbols), only whitespace and special characters are replaced/simplified.
+
+=== Documentation Updates
+
+* Besides the https://neo4j.com/blog/apoc-release-for-neo4j-3-4-with-graph-grouping/[blog post and demo on virtual node-grouping^], I also added more https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_node_grouping[detailed documentation^].
+* The Elasticsearch procedures where updated to match their documentation.
+
+== Contributors
+
+Thank you all for your contributions:
+
+* Alberto De Lazzari
+* Angelo Busato
+* Gabor Szarnyas
+* Alex Iudice
+* Cayetano
+* ArGeBre
+* Benjamin
+* Tobias Lindaaker
+* Adam Cowley
+* Karol Brejna
+* Andrew Bowman
+
+== Feedback
+
+Please see if APOC is useful for you. Many thing you wished Cypher could do become possible with the library. 
+If you find issues, please https://github.com/neo4j-contrib/neo4j-apoc-procedures/issues[report them^], if you have questions, please ask them in our https://neo4j.com/slack[Community Support Channels^]

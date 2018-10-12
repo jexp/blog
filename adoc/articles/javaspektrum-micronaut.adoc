@@ -1,0 +1,891 @@
+= Ad Astra: Das Micronaut Framework
+
+
+Es passiert nicht oft, dass ein neues Anwendungsframework in der Java-Welt vorgestellt wird.
+Noch seltener wird im gleichen Atemzug von Millisekunden gesprochen.
+
+Besonders für MicroServices, Serverless (FaaS), mobile Android-Anwendungen sowie Streamverarbeitung sind is kurze Startzeit und effiziente Operationen wichtig, da die Anforderungen an kurze Latenzen sehr hoch sind.
+Bisher haben sich die meisten Java-Frameworks in diesem Aspekt nicht mit Ruhm bekleckert.
+
+Die Entwickler von OCI rund um Graeme Rocher haben mit [Micronaut] ein komplettes (full-stack und cloud-native) Framework entwickelt, dass die Bequemlichkeit von Spring mit der Geschwindigkeit von handgeschriebenen Code verbindet.
+
+Ich habe schon im zeitigen Frühjahr mit Graeme über Micronaut gesprochen, und jetzt nach der Veröffentlichung der Repositories und der ersten Releases, ist ein guter Zeitpunkt, diesen spannenden Ansatz vorzustellen.
+
+Das Team bringt durch die 10-jährige Entwicklung von Grails (Groovy), das selbst auf dem Spring-Stack basiert, viel praktische Erfahrung mit.
+
+Micronaut ist Apache 2 lizensiert und unterstützt Anwendungsentwicklung in Java, Kotlin und Groovy.
+Da es nicht auf Reflection basiert, kann das Framework auch auf Android genutzt werden.
+
+== Die Idee hinter Micronaut
+
+Mit Micronaut sollen die bekannten und beliebten Eigenschaften von Fullstack-Frameworks erhalten bleiben, wie z.B. 
+
+* Dependency Injection
+* einfache Konfiguration mit sinnvollen Standards
+* asynchrone APIs
+* wenig Boilerplate Code
+* Service Discovery
+* Monitoring
+* skalierbare (HTTP) Clients
+* asynchrone HTTP Server mit Routing, Middleware, Security usw. 
+
+Um Entwicklern den Einstieg zu erleichtern, sind viele der Ansätze, APIs und Annotationen an die von Spring und Grails angelehnt.
+Beans, Controller, Jobs und Services entsprechen ihren Spring-Äquivalenten.
+
+Zugleich sollten die Probleme mit
+
+* Startzeit
+* Speicherbedarf
+* Proxies/Reflections
+* Integrationstests des vollen Stacks
+
+zufriedenstellend gelöst werden.
+
+Wie kann man nun diese beiden Ziele - Komfort und Geschwindigkeit miteinander vereinbaren?
+
+Indem man den Aufwand zur Konfiguration, Dependency Injection, Profilaktivierung, Routen- und Finder-Methoden-Auflösung von der Laufzeit auf die Compilezeit verschiebt.
+
+In Groovy, Kotlin und Scala war es ja schon lange möglich mittels Compiler-Plugins aufgrund von Konfiguration, Konventionen und Annotationen (Byte)Code zu generieren, der dann zur Laufzeit der Anwendung sehr effektiv ausgeführt wurde.
+In Java selbst, wird das mit Annotation Prozessoren (APT) erreicht, wie von Lombok oder Hibernate bekannt.
+
+Zu anderen sind natürlich Microservice bzw. FaaS Projekte viel kleiner als klassische, monolithische Anwendungen mit ihren tausenden von Klassen.
+Damit sind sowohl der Compile und Generierungsaufwand, als auch das Setup der Anwendung beim Start viel weniger aufwändig.
+
+== Was macht Micronaut besonders?
+
+// == Der kleine Unterschied: Code-Generierung
+
+Zum einen ist da eine Liste von nützlichen Features und Integrationen, zum anderen die genutzten Ansätze für die Generierung von Systembestandteilen zur Compile-Zeit.
+
+Dependency Injection wird wie in Spring durch einen IoC (Inversion of Control) Container unterstützt, dessen Implementierung sich auf Code-Generierung stützt und der nur im Ausnahmefall Reflection und Proxies einsetzt.
+
+Für alle Stellen für Injection und Beans wird mittels ASM Code generiert, der die Bereitstellung und Konfiguration von Instanzen (Prototypen, Singletons und andere Scopes) ausimplementiert.
+Dadurch fällt der Classpath und Reflection-Scan zum Start der Anwendung weg, genau wie Caches für alle Reflection-Informationen (Annotationen, Felder, Methoden, Konstruktoren). 
+Zum anderen kann die JVM wie gewohnt im JIT-Prozess den generierten Code optimieren und inlinen.
+Da in komplexeren Setups oft Ketten von Beans instanziiert werden müssen, macht sich die Leistungsteigerung kulmulativ bemerkbar.
+
+Die Code-Generierung erfolgt in Annotation Prozessoren (Java) bzw AST Transformationen (Groovy) oder Compiler Plugins (Kotlin,kapt).
+Die dabei gesammelten Annotations-Informationen werden zur Laufzeit mittels `BeanDefinition`en zur Verfügung gestellt.
+
+Mit `@Inject` können wie gehabt Konstruktoren, Felder oder Setter annotiert werden. 
+Beans können optional als `@Singleton` markiert werden oder aus mit `@Bean` annotierten Methoden einer `Factory` kommen.
+Es gibt auch einen `BeanContext` wie in Spring, der aber nicht genutzt werden muss, wenn man seine Anwendung einfach mit Injections zusammenstellt.
+
+Wie anderswo auch, gibt es eine Qualifikation für Beans mit diversen Annotationen und auch Scopes wie `@Context`, `@Infrastructure` oder `@ThreadLocal` oder eigene Varianten.
+`@Refreshable` ist ein Scope der Beans per externem Trigger (e.g. via API oder `RefreshEvent`) neu erzeugt.
+Mit `@Requires` können sehr flexible Bedingungen basierend auf Konfiguration, Umgebung usw. an die Verfügbarkeit von Beans geknüpft werden.
+
+Beans in Micronaut, anders als in Spring, haben keine Namen, _nur ihren Typen und ggf. Qualifier_, was weniger Ambiguitätsprobleme verursacht.
+Dafür kann mit `@Replaces` angegeben werden, dass ein Bean ein anderes ersetzen kann, z.B. in dem Fall das dessen Bedingungen nicht erfüllt werden.
+Ganze Gruppen von Beans innerhalb eines Packages, können mit einer @Configuration annotation in `package-info.*` konfiguriert werden.
+
+////
+
+The key is a set of AST transformations (fro Groovy) and annotation processors (for Java) that generate classes that implement the BeanDefinition interface.
+
+The ASM byte-code library is used to generate classes and because Micronaut knows ahead of time the injection points, there is no need to scan all of the methods, fields, constructors, etc. at runtime like other frameworks such as Spring do.
+
+Also since reflection is not used in the construction of the bean, the JVM can inline and optimize the code far better resulting in better runtime performance and reduced memory consumption. This is particularly important for non-singleton scopes where the application performance depends on bean creation performance.
+
+In addition, with Micronaut your application startup time and memory consumption is not bound to the size of your codebase in the same way as a framework that uses reflection. Reflection based IoC frameworks load and cache reflection data for every single field, method, and constructor in your code. Thus as your code grows in size so do your memory requirements, whilst with Micronaut this is not the case.
+////
+
+Alle annotierten Beans im Classpath werden während des Buildvorgangs ermittelt und verknüpft.
+Abhängigkeiten zu Bibliotheken zur Persistenz, Orchestrierung usw. werden zum gleichen Zeitpunkt aufgelöst und deren Dienste als Beans zur Verfügung gestellt.
+
+Für alle APIs unterstützt Micronaut durchgängig reaktive Typen um eine effiziente Nutzung von Systemresourcen zu erlauben.
+// Micronaut will automatically discover dependency injection metadata on the classpath and wire the beans together according to injection points you define.
+
+.Beispielservice für Meetup-Gruppen
+----
+@Singleton
+class GroupService {
+   @Inject GroupRepository repo;
+   
+   public Single<Group> group(Single<String> id) { 
+       return id.map(value -> repo.findById(value))
+   }
+}
+----
+
+----
+import io.micronaut.context.*
+...
+GroupService service = BeanContext.run().getBean(GroupService.class)
+service.group('graphdb-berlin').forEach( ... )
+----
+
+== Konfiguration
+
+Wie in Boot & Grails wird Konfigurationsinformation aus Property-, JSON-, YAML- oder Groovy-Dateien direkt genutzt, kann aber mit Umgebungsvariablen bzw. System Properties überschrieben werden.
+Falls diese Werte typsicher sein sollen, können sie auch in Klassen definiert werden.
+
+Die Konfigurationswerte werden dann in mit `@Value` annotierten Stellen gesetzt (auch wieder per generiertem Bytecode), spannend ist die Nutzung solcher Ausdrücke auch in anderen Annotationsattributen, z.B. `@Controller("${api.version}/list")`.
+Application-Kontexte können mit mehreren Umgebungen spezifiziert werden, diese sind dann die Basis für spezifische Konfigurationen oder bedingte Selektion von Beans.
+Bestimmte Umgebungen (z.B. Tests, Cloud) werden automatisch erkannt oder aus `MICRONAUT_ENVIRONMENTS` bzw. `micronaut.environments` gelesen.
+
+== AOP zur Compile-Zeit
+
+Zur Realisierung von systemübergreifenden Belangen (cross-cutting concerns) wie Logging, Transaktionen, Monitoring sind die Konzepte von AOP [HungerJS] weiterhin anwendbar.
+Ursprünglich wurde im AOP-Lager auf dedizierte Compiler wie `aspectj` gesetzt, in den letzten 5-10 Jahren jedoch vermehrt auf Load-Time-Weaving bzw. Laufzeitproxies, z.B. für `@Transactional` in Spring gewechselt.
+
+Micronaut geht jetzt wieder dazu zurück, Methodenersetzungen (Around-Advices) und das Hinzufügen neuer Klassenbestandteile und Verhaltens (Introduction-Advice) zur Compile-Zeit anzuwenden. 
+Dabei werden die ursprünglichen Klassen durch beim Compilieren generierte Proxies ergänzt.
+
+Für Around-Advices implementiert man eine Methode `MethodInterceptor.intercept(MethodInvocationContext)` die statt der originären (annotierten) Methode aufgerufen wird, und dann ggf. an diese delegiert.
+
+.Beispiel Around Advice als Cache
+[source,java]
+----
+@Singleton
+class CacheInterceptor implementiert MethodInterceptor<Object,Object> {
+   @Inject Cache<MethodCall,Object> cache;
+   public Object intercept(MethodInvocationContext<Object, Object> context) {
+       return cache.computeIfAbsent(methodCall(context), call -> context.proceed);
+   }
+}
+----
+
+.Memoized Annotation mit unserem CacheInterceptor
+[source,java]
+----
+@Around 
+@Type(CacheInterceptor.class) 
+@Target(ElementType.METHOD) 
+public @interface Memoized {}
+----
+
+.Anwendung der _Memoized_ Annotation
+[source,java]
+----
+...
+   @Memoized
+   BigInteger factoral(BigInteger input) { ... }
+...
+----
+
+Da die Compile-Reihenfolge nicht immer deterministisch ist, ist es sinnvoll, die eigenen AOP-Advices in einem separaten Modul (Jar) zu halten, damit sie im Projekt dann bereitstehen.
+
+Introduction-Advices werden z.B. für Persistenz-Frameworks eingesetzt, oder im Micronauts Http-Client, sie werden adäquat implementiert.
+
+// TODO Q Prototype proxy per instance ??? e.g. for introducing instance variables
+
+Micronaut benutzt diese AOP-Mechanismen selbst für
+
+* Validierung, JSR-303 mittels Hibernate-Validator
+* Caching (synchron und asynchron), (z.B. mittels Caffeine oder Redis) `@Cacheable`
+* Retry mit `@Retryable` auch auf asynchronen Methoden
+* Retry für Beans (z.B. wenn Dienste (noch) nicht verfügbar sind)
+* Circuit Breaker mit `@CircuitBreaker`
+* Zeitlich gesteuerte Ausführung mittels `@Scheduled`
+* `@Transactional` auch für Springs Variante mittels Alias
+// , annotiert mit @Blocking für den korrekten I/O-ThreadPool
+
+Nützlich für Resilienz ist auch `@Fallback` mit dem Klassen annotiert werden können, die im Fehlerfall ein "sicheres" Minimalverhalten bereitstellen.
+
+Micronaut integriert auch Netflix' Hystrix Bibliothek die dedizierte Implementierungen für Resilienzmuster über Kommandos bereitstellt. 
+Dazu müssen neben dem Einbinden von `io.micronaut.configuration:netflix-hystrix` nur kritische Methoden mit `@HystrixCommand` annotiert werden, ein Hystrix-Dashboard steht dann optional auch zur Verfügung.
+
+Originäre Spring Projekte können auch mit Micronaut konfiguriert und genutzt werden, z.B. das deklarative Transaktionsmanagement würde dann über Micronaut AOP zur Compile-Zeit realisiert.
+
+== Beispiele
+
+Das Micronaut Tooling nutzt zur Zeit _Maven_ und _Gradle_ als Buildsysteme, in _IntelliJ_ muss das Annotation Processing aktiviert werden.
+Laut Dokumentation wird dies in Eclipse nicht ausreichend unterstützt, so dass hier auf die Maven oder Gradle Integration zurückgegriffen werden muss, genauso für Kotlin Projekte.
+
+Micronaut Anwendungen werden zu einem ausführbaren Jar oder Docker Container assembliert und können dann auf der jeweiligen Cloud-Infrakstruktur deployed werden.
+Lokal kann man sie mit `./gradlew run` starten.
+
+Die mitgelieferten Beispiele [MicronautExample] sind einfache Hello-World's für Java, Kotlin und Groovy, es gibt aber online auch Guides [MicronautGuides] mit lauffähigen Beispielen für spezifische Themen, wie z.B. Authentifizierung.
+
+Im Beispielrepository findet sich auch eine komplette Anwendung, ein Petstore, der als "federated" Microservice-Architektur umgesetzt wurde.
+Die Microservices werden über Consul orchestriert und benutzen jeweils Neo4j, MongoDB oder Redis als Datenbanken, zum Teil arbeiten sie mit GORM und integrieren exemplarisch die Twitter API.
+Das Frontend ist eine einfache React-Anwendung, die auf eine Fassade (Storefront) zugreift die die einzelnen Services kapselt.
+Die Dienste kommunizieren asynchron über HTTP, zum Teil auch per streaming, die APIs nutzen zumeist reaktive Ansätze.
+
+Im folgenden Beispiel [MicronautMeet] werde ich die API von Meetup.com für Städte und Anmeldungen (RSVP) (stream.meetup.com/2/rsvps) konsumieren und dann mit verschiedenen Microservices diese Events verarbeiten, speichern, aggregieren.
+
+////
+// https://api.meetup.com/2/cities?offset=0&format=json&page=5&radius=50&order=size&desc=false&sig_id=136017342&sig=863d22f3c488d5914a5ab1b190a4ecacf5e8e137
+// https://api.meetup.com/2/cities?page=5
+
+// https://www.meetup.com/meetup_api/docs/stream/2/rsvps/#polling
+
+// SNAPSHOTS https://oss.sonatype.org/content/groups/public/io/micronaut/
+// CLI: https://oss.sonatype.org/content/groups/public/io/micronaut/cli/1.0.0-SNAPSHOT/
+// Examples: https://github.com/micronaut-projects/micronaut-examples
+
+//// 
+
+== Erste Schritte mit der Micronaut CLI
+
+Micronaut kann man als Binärreleases von der Website (Repository) herunterladen, leichter geht es aber mit SDKman [SDKMAN].
+Damit wird Micronaut und das Kommandozeilentool `mn` installiert, laut Dokumentation funktioniert Micronaut mit Java 8 bis 10 (mit minimalen Anpassungen z.B. für `javax` Annotationen).
+
+----
+$ sdk install micronaut
+
+$ mn --version
+| Micronaut Version: 1.0.0.M1
+| JVM Version: 1.8.0_172
+----
+
+Das Management von Micronaut Projekten erfolgt am Einfachsten über das `mn` Tool, entweder über den direkten Aufruf oder einen interaktiven Modus, der auch Kommandovervollständigung bietet.
+Damit können Projekte, Controller, Http-Clients, Jobs, Funktionen (Serverless), Service-Förderation und vieles mehr erzeugt werden.
+Die Aufrufe werden mit Flags gesteuert und können Profilen mit Templates für die Code-Generierung zugeordnet werden.
+Die sogenannten "Features" können zur Zeit nur beim Erstellen des Projektes automatisiert aktiviert werden.
+Später muss man der Dokumentation folgen und die Änderungen manuell vornehmen.
+Man kann sich aber sehr gut vorstellen so eine Automatisierung mit [Atomist] umzusetzen.
+
+.Erzeugung unseres Dienstes
+----
+mn create-app micro-meet-city
+| Application created .../micro-meet-city
+cd micro-meet-city
+----
+
+Erzeugt ein Projekt mit einer Gradle Build Konfiguration, der Klasse `Application` im Paket `micro.meet.city` für und `src/main/resources/application.yml` für Konfiguration.
+
+----
+public class Application {
+    public static void main(String[] args) {
+        Micronaut.run(Application.class);
+    }
+}
+----
+
+Der Port (`server.port`) wird zufällig ausgewählt oder aus Umgebungsvariablen geholt, man kann ihn aber auch festlagen.
+
+.Fix Server-Port in src/main/resources/application.yml
+----
+micronaut:
+    application:
+        name: micro-meet-city
+    server:
+        port: 8888
+----
+
+Mit `./gradlew run` kann die Anwendung gestartet werden, nur ohne Controller, Jobs oder andere Dienste macht sie noch nichts.
+
+== Http Server
+
+Der asynchrone Http Server in Micronaut basiert auf Netty und ist darauf optimiert, serverseitigen Nachrichtenaustausch zwischen Services zu leisten und nicht primär als Browser-Endpunkt zu dienen.
+Daher sind die Mime-Typen für Endpunkte standardmässig auch als `application/json` definiert und das Ausliefern statischer Resourcen muss explizit aktiviert werden.
+Header, Pfad- und Query-Elemente, JSON bzw. Form-Daten können an POJOs oder direkt an Controller-Parameter gebunden werden.
+Incrementelle Datei-Uploads (`MediaType.MULTIPART_FORM_DATA`) werden direkt unterstützt, z.B. über `Publisher<PartData>` oder `StreamingFileUpload` Parameter.
+// Ebenso Downloads mittels `AttachedFile` oder mittels `StreamedFile(InputStream)`.
+
+Asynchrone Methoden sollten in Micronaut das Mittel der Wahl sein.
+Controller-Methoden mit reaktiven Ergebnistypen (z.B. `Observable, Publisher, CompletableFuture` etc.) werden asynchron in Netty ausgeführt, alle anderen in einem dedizierten I/O-Threadpool.
+Das kann auch notwendig sein, wenn man fremde, synchrone Dienste aufruft, dann kann man Methoden auch mit `@Blocking` annotieren.
+
+Server Sent Events (SSE, `text/event-stream`) kann man über einen `Publisher<Event<DataType>>` an die Konsumenten schicken.
+Für die volle Http-Antwort mit Status, Header-Feldern und Body wird eine `HttpResponse` zurückgegeben.
+
+Der Controller wird mittels Kommandozeile generiert.
+
+----
+mn create-controller City
+----
+
+Die generierte Methode wird modifiziert und gibt jetzt den Pfad-Parameter zurück.
+
+----
+@Controller("/city")
+public class CityController {
+
+    @Get("/echo/{text}")
+    public Single<String> echo(String text) {
+        return Single.just("> " + text);
+    }
+}
+----
+
+Positiv fällt die Startup-Zeit auf:
+
+----
+./gradlew assemble
+java -jar build/libs/micro-meet-city-0.1-all.jar 
+14:24:31.753 [main] INFO  io.micronaut.runtime.Micronaut - Startup completed in 989ms. Server Running: http://localhost:8888
+----
+
+Auch der Apache Bench Test ist nicht schlecht, für mein MacBook mit einer CPU.
+
+----
+ab -n5000 -c2 http://localhost:8888/city/echo/test
+This is ApacheBench, Version 2.3 <$Revision: 1807734 $>
+
+Concurrency Level:      2
+Time taken for tests:   0.944 seconds
+Complete requests:      5000
+Failed requests:        0
+Total transferred:      475000 bytes
+HTML transferred:       30000 bytes
+Requests per second:    5295.38 [#/sec] (mean)
+Time per request:       0.378 [ms] (mean)
+Time per request:       0.189 [ms] (mean, across all concurrent requests)
+Transfer rate:          491.27 [Kbytes/sec] received
+
+Percentage of the requests served within a certain time (ms)
+  50%      0
+  66%      0
+  75%      0
+  80%      0
+  90%      0
+  95%      1
+  98%      1
+  99%      1
+ 100%      7 (longest request)
+----
+
+// Für inkrementelles JSON Binding wird die asychrone JSON API von Jackson genutzt.
+
+Unser Controller kann jetzt andere Dienste, wie z.B. Repositories benutzen, die einfach injected werden.
+
+Wir können aber auch Daten von einer anderen API entgegennehmen und aufbereitet weitereichen.
+
+Wenn die Controller keine blockierende Operationen aufrufen, werden sie trotzdem im Netty Event-Loop ausgeführt nachdem die Parameter-Informationen gelesen wurden, auch wenn keine reaktiven Typen genutzt wurden.
+
+Micronaut Controller unterstützen wie Spring auch, das _RFC-6570 URI Template_ z.B. für Platzhalter im URI-String mit einer breiten Palette von Möglichkeiten, die in der Dokumentation erläutert werden.
+Neben Variablen aus der URI können auch `Header`, `Cookie` und `Body` an Controller Methodenparameter gebunden werden.
+Neben den üblichen HTTP-Verben, werden auch `@Patch`, `@Trace`, `@Options` unterstützt.
+
+
+Http-Filter (Modifikation von Request bzw. Response sowie Tracing, Security) sind in Micronaut ebenfalls asynchron, und werden durch Implementierung von `HttpServerFilter.doFilter` gehandhabt und über eine `@Filter` Annotation an URL Muster gebunden.
+
+Micronaut ist standardmässig zustandslos kann aber in-memory oder Redis-basierte Sessions bei Bedarf unterstützen, ähnlich wie bei Spring-Session.
+
+Für die Fehlerbehandlung geht Micronaut einen interessanten Weg, es können Methoden (optional annotiert mit @Error) im Controller (oder global) deklariert werden, die als letzten Parameter einen bestimmten Exception-Typ ausweisen, dessen Verarbeitung dann in dieser Fehlerbehandlungsmethode erfolgt.
+
+== Http Client
+
+Micronaut unterstützt einen deklarativen Http-Client, der mittels `@Client` Annotation auf einem Interface oder einer abstrakten Klasse definiert wird.
+Die Implementierung des Clients erfolgt in Micronaut-AOP durch eine Introduction-Advice.
+Daneben gibt es noch einen low-level HTTP Client, z.B für Tests und reaktive Streams.
+
+Wir wollen uns Informationen aus der Meetup API für Städte bedienen: https://api.meetup.com/2/cities?page=10
+
+----
+mn create-client City
+----
+
+Wir erstellen uns zuerst zwei minimale Pojos für das Abfrageergebnis und die Stadt.
+
+.City und CityResult POJO
+----
+public class City {
+  public long id;
+  public String city;
+  public String country;
+  public double lon, lat;
+}
+
+class CityResult {
+    public List<City> results;
+}
+----
+
+Den generierten Client passen wir etwas an.
+
+----
+@Client("https://api.meetup.com/2")
+public interface CityClient {
+
+    @Get("/cities{?page}")
+    public CityResult cities(int page);
+}
+----
+
+Und benutzen ihn in unserem Controller:
+
+----
+@Controller("/city")
+public class CityController {
+
+    @Inject CityClient client;
+
+    @Get("/list/{count:5}")
+    public Stream<City> cities(int count) {
+        return client.cities(5).results.stream();
+    }
+}
+----
+
+----
+curl http://localhost:8888/city/list/1
+[{"id":1007712,"city":"Dresden","country":"de","lon":13.739999771118164,"lat":51.04999923706055}]
+----
+
+Http-Clients sind auch sehr flexibel was das Parameter-Binding betrifft, sie können ebenso wie Controller-Methoden mittels Annotationen Parameter an URI's, Query-Parameter, Header, Cookies oder den Payload binden.
+Auch die eingebauten Mechanismen zur Resilienz wie `@Retryable` und `@CircuitBreaker` lassen sich auf Http-Clients anwenden.
+
+== Testing
+
+Durch die kurze Start-Zeit von Micronaut Anwendungen, kann man sie in Unit- und Integrationstests direkt starten.
+Mocking von Beans kann durch @Replaces und @Primary bzw. Qualifier im Testpaket erfolgen.
+Auch die Nutzung testspezifischer, deklarativer Http-Clients für die eigenen Controller ist einfach möglich.
+Test der Persistenzintegration erfolgt oft mit Datenbanksetups die entweder direkt im Prozess laufen oder von diesem gemanaged werden.
+
+Für Tests kann man den `EmbeddedServer` nutzen.
+
+.Test
+----
+public class CityControllerTest {
+    private EmbeddedServer server;
+    private CityControllerClient client;
+    @Before
+    public void setup() {
+        this.server = ApplicationContext.run(EmbeddedServer.class);
+        this.client = server.getApplicationContext().getBean(CityControllerClient.class);
+    }
+    @Test
+    public void shouldReturnHello() {
+        String response = client.cities(1).blockingGet();
+        assertEquals(true, response.contains("\"country\":"));
+    }
+    @After
+    public void cleanup() {
+        this.server.stop();
+    }
+}
+----
+
+
+== Wiederkehrende Jobs
+
+Wir wollen natürlich nicht immer wieder auf die Meetup API zugreifen, sondern die Informationen in unserer Datenbank (oder Cache) zwischenspeichern.
+
+Für das regelmässige Abholen erzeugt man einen Job, in dem der Http Client ebenso benutzt wird, und die Daten mittels einem Repository speichert.
+
+Micronaut unterstützt Jobs mit regelmässigem Aufrufen von `@Scheduled` Methoden, die auch mittels CRON-Syntax oder mittels Konfigurationsparametern gesteuert werden können.
+
+----
+mn create-job City
+mn create-bean CityRepository
+----
+
+.Minimalistisches CityRepository
+----
+@Singleton
+public class CityRepository {
+   private final Map<Long,City> data=new ConcurrentHashMap<>();
+
+   public void save(City c) {
+      data.putIfAbsent(c.id, c);
+   }
+   public Stream<City> findByName(String name) {
+      return data.values().stream().filter(c -> c.city.contains(name));
+   }
+}
+----
+
+.CityJob
+----
+@Singleton
+public class CityJob {
+
+    @Inject CityClient client;
+    @Inject CityRepository repo;
+
+    @Scheduled(fixedRate = "5m")
+    public void process() {
+        client.cities(5).forEach(repo::save);
+    }
+}
+----
+
+Jetzt können wir unser Repository auch im Controller verwenden.
+
+----
+    @Inject CityRepository repo;
+    @Get("/named/{name}")
+    public Stream<City> cities(String name) {
+        return repo.findByName(name);
+    }
+----
+
+
+----
+curl http://localhost:8888/city/named/Ch
+[{"id":1007724,"city":"Chemnitz","country":"de","lon":12.9,"lat":50.8},
+ {"id":1007461,"city":"Cheská Lípa","country":"cz","lon":14.53,"lat":50.69}]
+----
+
+== Persistenz in Micronaut
+
+Natürlich ist eine `ConcurrentHashMap` kein Ersatz für eine Datenbank.
+
+Micronaut unterstützt zur Zeit Redis, relationale Datenbanken mittels Hibernate, MongoDB und Neo4j.
+Bis auf Redis wird auch Objekt-Mapping mittels GORM (mit Groovy) angeboten.
+// Für diese Datenbanken kann man jeweils auch mittels entsprechender Konfiguration und in-process Bibliotheken Testinstanzen für Integrationstest erzeugen.
+Beispiele für diese Datenbankintegrationen findet man im Petstore.
+
+Entweder man gibt beim Erzeugen des Projektes das jeweilige Persistenz-Feature (meist eine Datenbank pro Microservice) mit, oder fügt die Dependencies und Konfiguration manuell hinzu, die Details sind in der Dokumentation erläutert.
+
+----
+mn create-app <name> -feature bolt-neo4j
+----
+
+.build.gradle für bolt-neo4j
+----
+compile "io.micronaut.configuration:neo4j-bolt"
+----
+
+.Top-level Eintrag in application.yml (oder via Umgebungsvariablen `neo4j.uri`)
+----
+neo4j:
+    uri: bolt://localhost
+----
+
+Dann kann man sich im Repository einen Neo4j-Driver bereitstellen lassen, und diesen benutzen.
+
+----
+@Inject Driver driver;
+
+public void save(City city) {
+   try (Session s = driver.session()) {
+       String statement = "MERGE (c:City {id:$city.id}) ON CREATE SET c+=$city";
+       s.writeTransaction(tx -> tx.run(statement, singletonMap("city", city.asMap())));
+   }
+}
+
+public Stream<City> findByName(String name) {
+   try (Session s = driver.session()) {
+       String statement = "MATCH (c:City) WHERE c.city contains $name RETURN c";
+       return s.readTransaction(tx -> tx.run(statement, singletonMap("name",name)))
+               .list(record -> new City(record.get("c").asMap())).stream();
+   }
+}
+----
+
+== Fazit
+
+Neben Geschwindigkeit und Kompaktheit beeindruckt Micronaut mit seinem Funktionsumfang, Beispielen und Dokumentation.
+Im zweiten Teil im nächsten Heft möchte ich Micronauts Fähigkeiten rund um Cloud-Native, Unterstützung von Function as a Service (FaaS) und die Nutzung reaktiver Ansätze näher beleuchten.
+Bis dahin freue ich mich schon auf neue Releases udn Features und möchte jeden ermuntern, das Framework auch auszuprobieren.
+
+== Referenzen
+
+* Micronaut GitHub https://github.com/micronaut-projects
+* Micronaut Docs: https://docs.micronaut.io
+* Main Website: https://micronaut.io
+* Video: 
+* Micronaut Guides: https://guides.micronaut.io/
+* FAQ: https://micronaut.io/faq.html
+* Micronaut Getting Started: https://medium.com/@jonashavers/getting-started-with-micronaut-595515985a98
+* GORM-Neo4j: http://gorm.grails.org/latest/neo4j
+* MicroMeet: https://github.com/jexp/neo4j-micronaut-meetup
+
+
+= Teil 2: Micronaut ist ein "cloud-native" Weltbürger
+
+== Cloud Native
+
+Da Micronaut im Jahre 2018 das Licht der Welt erblickt hat, ist neben den reaktiven und asynchronen Operationen für Microservices auch eine enge Integration in Clouddienste ("cloud-native") vorauszusetzen.
+Das Framework konnte aus den Erfahrungen von Spring Cloud und anderen Bibliotheken schöpfen.
+Daher sind die entsprechenden Funktionalitäten für Springentwickler vertraut.
+
+Relevante Features sind:
+
+* verteilte Konfiguration
+* Service Discovery
+* Client Side Load Balancing
+* Distributed Tracing
+* Cloud Functions (Serverless)
+
+Micronaut kann von AWS bis Heroku mindestens 8 verschiedene Cloud-Umgebungen erkennen und damit bedingte Konfiguration, Config-Dateien und Beans ermöglichen.
+Zusätzlich stehen dann Metainformationen der Maschine und Umgebung in `ServiceInstance.getMetadata()` zur Verfügung.
+
+// Die ServiceInstance ist im `ApplicationContext` verfügbar (embedded) oder wird vom `DiscoveryService` oder `LoadBalancer` geladen.
+
+----
+LoadBalancer loadBalancer = loadBalancerResolver.resolve("some-service");
+Flowable.fromPublisher(loadBalancer.select())
+        .subscribe((instance) ->
+    ConvertibleValues<String> metaData = instance.getMetadata();
+    ...
+);
+----
+
+Consul (HashiCorp), Kubernetes und Eureka können für Aspekte wie verteilte Konfiguration, Service Discovery und Healthchecks genutzt werden, beim Erstellen einer Anwendung kann man sie als "Feature" hinzuwählen.
+// , Zookeeper, DNS,
+// Micronaut kann auch mit einer Kubernetes Laufzeitumgebung kommunizieren.
+// Die Clients für Consul und Eureka sind mittels Hausmitteln von Micronaut implementiert.
+
+Im Petstore Beispiel wird Consul genutzt.
+
+Konfigurierte Eigenschaften werden transparent aus den verteilten Diensten (aus dem `/config/application[,prod]` Verzeichnis) gelesen und wie reguläre Properties aufgelöst.
+Anwendungs-Instanzen können sich nach dem Start unter ID (Anwendungsname) und Tags bei der Service Discovery registrieren.
+Der `DiscoveryClient` findet registrierte Service-Instanzen, einfacher geht es aber mit einer benannten `@Client` Annotation an dem HttpClient der mit der Zielanwendung kommunizieren soll.
+Verfügbarkeit von Diensten kann über die "Healthcheck"-Integration (mit Testfrequenz und TTL für Einträge) sichergestellt werden.
+
+Um die Ausfallsicherheit zu erhöhen, können für jeden Service mehrere Instanzen verfügbar sein, diese werden dann vom DiscoveryClient über `LoadBalancer.select()` nacheinander asynchron zur Verfügung gestellt. Auch dort sind Mechanismen wie Retry und CircuitBreaker aktiv.
+
+Um Nachvollziehbarkeit von Microservice Interaktionen herzustellen, unterstützt Micronaut die OpenTracing API mittels Konfiguration und Annotationen für Scope und Parameter. 
+`Zipkin` und `Jaeger` werden als Bibliotheken integriert.
+
+=== Cloud Functions
+
+Aufgrund seiner Performance-Characteristiken für Startup, Latenz und Speicherverbraucht ist Micronaut auch besser für Cloud-Funktionen (Serverless) geeignet als traditionelle Frameworks.
+Dabei wird von der Cloud-Infrastruktur keine Anwendung mehr deployed sondern nur einzelne Funktionen, die ggf. für eine gewisse Zeit aktiv (hot) gehalten werden.
+Zur Zeit wird AWS Lambda unterstützt, andere Frameworks sollen folgen.
+
+Man kann mittels `mn create-function <name> [-lang Kotlin]` das entsprechende Gerüst generieren.
+// Dabei wird eine `FunctionApplication` als Hauptklasse genutzt und j
+Jede mit `@FunctionBean` annotierte Klasse, die eines der `java.util.Function` Interfaces (Supplier, Consumer, BiConsumer, Function, BiFunction) implementiert kann als Cloud-Function deployed werden.
+Dann werden die Funktionen beim DiscoveryService registriert und stehen mittels (ggf. reactive) `@FunctionClient` annotiertem Interface zum Aufruf zur Verfügung.
+Abhängigkeiten und Konfiguration können wie gehabt injiziert werden.
+Zum Test können die Funktionen auch lokal als Web-Anwendung ausgeführt werden.
+In Groovy ist das einfacher, da dort Top-Level Funktionen direkt deklariert werden können.
+
+== Monitoring
+
+
+TODO publish with docker or to heroku?
+
+== Code-Generierung
+
+== Profiles
+
+== Federations
+
+== Functions (AWS Lambda)
+
+////
+Ich:hello-world-lambda mh$ mn help create-federation
+| Command: create-federation
+| Description:
+Creates a federation of services
+
+| Usage:
+create-federation [NAME] --services [SERVICENAME-A SERVICENAME-B ...]
+
+| Arguments:
+* Federation Name - The name of the federation to create. (OPTIONAL)
+
+| Flags:
+* inplace - Used to create a service using the current directory
+* build - Which build tool to configure. Possible values: "gradle", "maven".
+* profile - The profile to use
+* features - The features to use
+* services - The names of the services to create
+Ich:hello-world-lambda mh$ mn help create-function
+| Command: create-function
+| Description:
+Creates a serverless function application
+
+| Usage:
+create-function [NAME] -lang [LANG] -provider [PROVIDER]
+
+| Arguments:
+* Function Name - The name of the function to create. (OPTIONAL)
+
+| Flags:
+* inplace - Used to create a service using the current directory
+* build - Which build tool to configure. Possible values: "gradle", "maven".
+* features - The features to use
+* lang - Which language to use. Possible values: "java", "groovy", "kotlin".
+* provider - Which cloud provider to use. Possible values: "aws".
+* test - Which test framework to use. Possible values: "junit", "spock", "spek".
+Ich:hello-world-lambda mh$ mn help list-profiles
+| Command: list-profiles
+| Description:
+Lists the available profiles
+
+| Usage:
+mn list-profiles
+Ich:hello-world-lambda mh$ mn list-profiles
+| Available Profiles
+--------------------
+* function-aws - The function profile for AWS Lambda
+* function - The function profile
+* federation - The federation profile
+* service - The service profile
+* base - The base profile
+Ich:hello-world-lambda mh$ mn profile-info function-aws
+Profile: function-aws
+--------------------
+The function profile for AWS Lambda
+
+Provided Commands:
+--------------------
+* help - Prints help information for a specific command
+* create-job - Creates a job with scheduled method
+* create-bean - Creates a singleton bean
+
+Provided Features:
+--------------------
+* function-aws-kotlin - Creates AWS Lambda function using Kotlin
+* test-aws-spek - Creates Spek test for AWS function
+* test-aws-spock - Creates Spock test for AWS function
+* function-aws-groovy - Creates an AWS Lambda function using Groovy
+* test-aws-junit - Creates JUnit test for AWS function
+* function-aws-java - Creates an AWS Lambda function using Java
+* discovery-consul - Adds support for Service Discovery with Consul (https://www.consul.io)
+* hibernate-jpa - Adds support for Hibernate/JPA
+* mongo-gorm - Configures GORM for MongoDB for Groovy applications
+* mongo-reactive - Adds support for the Mongo Reactive Streams Driver
+* neo4j-gorm - Configures GORM for Neo4j for Groovy applications
+* config-consul - Adds support for Distributed Configuration with Consul (https://www.consul.io)
+* http-server - Adds support for running a Netty server
+* neo4j-bolt - Adds support for the Neo4j Bolt Driver
+* tracing-jaeger - Adds support for distributed tracing with Jaeger (https://www.jaegertracing.io)
+* security-jwt - Adds support for JWT (JSON Web Token) based Authentication
+* junit - Adds support for the JUnit testing framework
+* hibernate-gorm - Adds support for GORM persistence framework
+* java - Adds support for Java in the application
+* kotlin - Adds support for Kotlin in the application
+* spek - Adds support for the Spek testing framewokr
+* redis-lettuce - Configures the Lettuce driver for Redis
+* jdbc-hikari - Configures SQL DataSource instances using Hikari Connection Pool
+* jdbc-tomcat - Configures SQL DataSource instances using Tomcat Connection Pool
+* discovery-eureka - Adds support for Service Discovery with Eureka
+* http-client - Adds support for creating HTTP clients
+* jdbc-dbcp - Configures SQL DataSource instances using Commons DBCP
+* spock - Adds support for the Spock testing framework
+* groovy - Adds support for Groovy in the application
+* security-session - Adds support for Session based Authentication
+* tracing-zipkin - Adds support for distributed tracing with Zipkin (https://zipkin.io)
+
+////
+
+
+////
+== Feedback
+
+* mn commands to run / test etc.
+* deployment to heroku
+
+Ask Graeme:
+
+- Portion of conscoiulsy "interpreted" vs. "compiled/generated" code?
+- Options for folks to add their own Plugins?
+- GraalVM?
+- Stream processing / Kafka / Akka equivalent?
+- CLI/Shell ?
+- TODO Question Http2?
+- Parameter binding by parameter name? (b/c compile time information)
+- is there a way to declare Controller methods as lambdas?
+- graphql?
+////
+
+== Asynchroner Client
+
+Neben dem regulären HTTP-Client kann man JSON- und Event-Streams mit dem `RxStreamingHttpClient` nutzen, ein deklarativer Client ist für die Zukunft geplant.
+
+Auch die eigenen Services können Daten und Events von Controller zu Client streamen, wie auch im Petstore für Angebote `Offer` gezeigt wird.
+
+In meinem Fall möchte ich von der streaming Meetup-API lesen und dann die erhaltenen Daten in unserem System bereitstellen.
+
+In einem RSVP Event sind 6 Elemente enthalten: `Member, Group, Event, Venue, Rsvp, GroupTopic`.
+
+////
+zwischenspeichern und an einem Endpunkt pro Datentyp für die Konsumenten bereitstellen
+Die Reactive Streams API erlaubt mit den Datenstrom zu splitten und 
+Wir können die Events in unserem System z.b. auch auf Kakfa Topics verteilen und unsere anderen Services die relevanten Topics abbonieren lassen.
+RxHttpClient
+
+////
+
+.RsvpController
+----
+@Controller("/rsvp")
+public class RsvpController {
+
+@Inject @Client("https://stream.meetup.com") 
+RxStreamingHttpClient rxClient;
+
+@Get(value = "/", produces = MediaType.APPLICATION_JSON_STREAM)
+public Publisher<Rsvp> stream() {
+    return rxClient.jsonStream(HttpRequest.GET("/2/rsvps"), Rsvp.class);
+}
+----
+
+
+
+
+
+////
+== Features
+
+* Entwicklung von asynchronen, nicht-blockierenden Anwendungen
+* non-blocking Server, basierend auf Netty
+* Unterstützt Reactive Streams (RxJava 2, Reactor, Akka)
+* Startzeit von *weniger als einer Sekunde*
+* Winzige Prozessesse, die mit Heapgrößen von 8MB auskommen
+* Keine Reflection zur Laufzeit
+* Dependency Injection & AOP (Aspekte Orientierte Programmierung API) zur Compile Zeit
+* Load balancing
+* Integrierte Unterstützung von SQL und NoSQL (MongoDB, Redis, Neo4j, Cassandra) Datenbanken über entsprechende Bibliotheken (GORM, Hibernate)
+* Unit- und Integrationstests mit dem vollen Stack, dank minimaler Latenz
+* Deklarativer, reaktiver HTTP-Client auch auf Netty Basis
+
+////
+
+----
+mn create-client rsvp
+| Rendered template Client.java to destination src/main/java/micro/meetups/RsvpClient.java
+----
+
+----
+@Client("rsvp")
+public interface RsvpClient {
+
+    @Get("/")
+    public HttpStatus index();
+}
+----
+
+
+////
+mn help
+
+Usage (optionals marked with *):'
+mn [target] [arguments]*'
+
+| Examples:
+$ mn create-app my-app
+
+| Language support for Groovy and/or Kotlin can be enabled with the corresponding feature::
+$ mn create-app my-groovy-app -features=groovy
+$ mn create-app my-kotlin-app -features=kotlin
+
+| Available Commands (type mn help 'command-name' for more info):
+| Command Name                          Command Description
+----------------------------------------------------------------------------------------------------
+create-bean                             Creates a singleton bean
+create-client                           Creates a client interface
+create-controller                       Creates a controller and associated test
+create-job                              Creates a job with scheduled method
+help                                    Prints help information for a specific command
+
+////
+
+
+//// 
+
+TODO change code to reactive types
+
+.CityController
+----
+@Inject CityRepository repo
+
+@Post("/")
+public Single<HttpResponse<Event>> save(@Body Single<City> event) { 
+    return event.map(ev -> {
+                repo.save(event.getId(), ev); 
+                return HttpResponse.created(ev); 
+            }
+    );
+}
+
+@Post("/")
+public CompletableFuture<HttpResponse<Group>> save(@Body CompletableFuture<Group> group) {
+    return group.thenApply(g -> {
+                repo.save(g.getId(), g);
+                return HttpResponse.created(g);
+            }
+    );
+}
+----
+////

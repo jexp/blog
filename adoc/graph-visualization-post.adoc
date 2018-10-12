@@ -1,0 +1,585 @@
+= Using 5 Javascript Graph Visualization Frameworks with a Graph Database
+
+== Introduction: Querying Data from Neo4j
+
+A graph database stores its data as nodes and relationships.
+That makes it easy to represent connected, real world information find new insights in the data.
+
+To make it visual again, we often use Javascript data visualization frameworks.
+
+And today we'll be not drawing charts or maps but graphs, aka. networks.
+You can do the former easily too with aggregation or geo-information drawn from the graph but that's for another time.
+
+To query a Neo4j database we use Cypher a  pictoral graph query language, that represents patterns as Ascii Art.
+
+=====
+If you haven't installed Neo4j, you can do that quickly with https://neo4j.com/download[Neo4j-Desktop].
+After installation just create a project and a graph, start up the engine and open Neo4j Browser (which itself is a React Application).
+In the command line on top, type `:play movies graph` and click on the 2nd slide the create script, run it once and you should have a basic dataset for playing around.
+
+You can also just spin up a https://neo4j.com/sandbox[Neo4j Sandbox] which have many different datasets available, e.g. Twitter, Paradise Papers, Movie recommendations and more.
+For an empty database just use a "Blank Sandbox" and then create the movie database as above. 
+Note your *password*, the *server ip-address* and the *bolt port* (not HTTP!).
+=====
+
+So the simplest and fastest query is:
+
+----
+MATCH (first)-->(second) RETURN id(first) AS source, id(second) AS target
+----
+
+This query can easily pull a million relationships from a graph in a single second, much more than most visualization frameworks can visualize.
+
+It only retrieves the structure which is great when zoomed out.
+
+For more details we might want to know labels of nodes and types of relationships, so we can color each accordingly.
+
+----
+MATCH (first)-[r]->(second) 
+RETURN { id: id(first), label:head(labels(first)) } AS source, 
+       { type:type(r) } as rel,
+       { id: id(second), label:head(labels(second)) } AS target
+----
+
+If we want to we can return more detail, e.g. caption, sizes, clusters, weights:
+
+----
+MATCH (first)-[r]->(second) 
+RETURN { id: id(first), label:head(labels(first)), caption:first.name, size:first.pagerank, cluster:first.community } AS source, 
+       { type:type(r), size:r.weight } as rel,
+       { id: id(second), label:head(labels(second)), caption:second.name, size:second.pagerank, cluster:second.community } AS target
+----
+
+Those queries pull incrementally more data, so perhaps it's more sensible to pull that additional information only if the user zooms in.
+Then we can provide a list of already loaded, visible ids (with the first query) as filter:
+
+----
+MATCH (first)-[r]->(second) 
+WHERE id(first) IN $ids AND id(second) IN $ids
+RETURN { id: id(first), label:head(labels(first)), caption:first.name, size:first.pagerank, cluster:first.community } AS source, 
+       { type:type(r), size:r.weight } as rel,
+       { id: id(second), label:head(labels(second)), caption:second.name, size:second.pagerank, cluster:second.community } AS target
+----
+
+For a full blown detail information of a node (with all possible properties), we can load that data when the user hovers or clicks on the node:
+
+----
+MATCH (node) 
+WHERE id(node) = $id
+RETURN { id: id(node), label:head(labels(node)), caption:node.name, size:node.pagerank, cluster:node.community, 
+         outDegree: size((node)-->()), inDegree: size((node)<--()), .* } AS details
+----
+
+== Loading Data with the Javascript Driver
+
+Querying data with the Javascript driver is very performant and quite straightforward, I'll mention the one weirdness as we get there.
+
+You can get the driver via npm, or via CDN (rawgit) into your project.
+
+Let's start by querying with node:
+
+----
+npm install neo4j-driver
+----
+
+----
+node
+----
+
+.import module, create a driver
+----
+const neo4j = require('neo4j-driver').v1;
+# for local installation 
+const driver = neo4j.driver('bolt://localhost', neo4j.auth.basic('neo4j', 'password'));
+# for sandbox
+const driver = neo4j.driver('bolt://serverip:boltport', neo4j.auth.basic('neo4j', 'password'));
+----
+
+If the connection fails, please check that your server is running, the address (esp. in the remote case) and the authentication.
+
+.create a session
+----
+const session = driver.session();
+----
+
+.get a single node
+----
+var query = "MATCH (n) RETURN n LIMIT 1";
+
+var _ = session.run(query).then(console.log);
+----
+
+.result datastructure
+----
+{ records: 
+   [ Record {
+       keys: [Array],
+       length: 1,
+       _fields: [Array],
+       _fieldLookup: [Object] } ],
+  summary: 
+   ResultSummary {
+     statement: { text: 'MATCH (n) RETURN n LIMIT 1', parameters: {} },
+     statementType: 'r',
+     counters: StatementStatistics { _stats: [Object] },
+     updateStatistics: StatementStatistics { _stats: [Object] },
+     plan: false,
+     profile: false,
+     notifications: [],
+     server: ServerInfo { address: 'localhost:7687', version: 'Neo4j/3.3.4' },
+     resultConsumedAfter: Integer { low: 0, high: 0 },
+     resultAvailableAfter: Integer { low: 4, high: 0 } } }
+----
+
+we see fields "records", each of which has a "keys", a `get(key)` method, and private "_fields" and "_fieldLookup"
+we see "summary" with resultXXX-times, statement, counters, plan, notifications, serverInfo
+
+
+.return keys and values for each record
+----
+var _ = session.run(query).then( result => result.records.forEach(r => console.log(r.keys, r.keys.map(k => r.get(k)))));
+----
+
+We see that weird Integer type, which is the "number" type of the Neo4j driver, due to Javascripts inability to represent whole numbers > 2^53
+You can call `value.toNumber()` on it, more details in the docs/readme of the neo4j-javascript-driver
+
+.turn single record into an object
+----
+var query = "MATCH (n:Movie) RETURN id(n) as id, labels(n) as labels, n.title, n.released  LIMIT 1";
+
+var _ = session.run(query).then(result => console.log(result.records[0].toObject()) );
+----
+
+----
+{ id: Integer { low: 0, high: 0 },
+  labels: [ 'Movie' ],
+  'n.title': 'The Matrix',
+  'n.released': Integer { low: 1999, high: 0 } }
+----
+
+A small performance test on my machine using a cross product which yields 5M rows but we limit it to 1M results with 3 values each.
+
+----
+var query = 'match (n),(m),(o) return id(n), id(m),id(o) limit 1000000';
+var start = new Date();
+var _ = session.run(query).then(result => console.log(result.records.length,new Date()-start));
+> 1000000 1970
+----
+
+It shows that it takes a little bit less than 2 seconds to retrieve that data.
+If we were processing that data in a streaming manner and not build up a large array, it is much faster.
+
+----
+var query = 'match (n),(m),(o) return id(n), id(m),id(o) limit 1000000';
+var count = 0;
+var start = new Date();
+var _ = session.run(query).subscribe({onNext: r => count++, onCompleted : () => console.log(count,new Date()-start)});
+> 1000000 912
+----
+
+.close session & driver
+----
+session.close();
+driver.close();
+----
+
+Ok, now we should know how to query Neo4j.
+
+Within the browser our code will mostly look like this.
+All additional code will be setup or configuration of the visualization framework.
+
+----
+<script src="//cdn.rawgit.com/neo4j/neo4j-javascript-driver/1.4.1/lib/browser/neo4j-web.min.js"></script>
+<script>
+  // create driver & session
+  const driver = neo4j.v1.driver("bolt://localhost", neo4j.v1.auth.basic("neo4j", "test"));
+  const session = driver.session();
+  const start = new Date()
+  // run query
+  session
+    .run('MATCH (n)-->(m) RETURN id(n) as source, id(m) as target LIMIT $limit', {limit: 200})
+    .then(function (result) {
+      // turn records into list of link-objects (can have different shapes depending on framework)
+      // note that we turn the node-ids into javascript ints
+      const links = result.records.map(r => { return {source:r.get('source').toNumber(), target:r.get('target').toNumber()}});        
+      // close session as soon as we have the data
+      session.close();
+      // log results & timing
+      console.log(links.length+" links loaded in "+(new Date()-start)+" ms.")
+      // gather node-ids from both sides
+      const ids = new Set(); 
+      links.forEach(l => {ids.add(l.source);ids.add(l.target);});
+      // create node-array
+      const nodes = Array.from(ids).map(id => {return {id:id}})
+      // create "graph" representation
+      const graphData = { nodes: nodes, links: links};
+      // pass graph data to visualization framework (here 3d-force-graph)
+      const Graph = ForceGraph3D()(document.getElementById('3d-graph')).graphData(graphData);
+    })
+    .catch(function (error) {
+      console.log(error);
+    });
+</script>
+----
+
+== Javascript Graph Visualization Frameworks
+
+Most graph visualization frameworks have some kind of "graph" API to take a number of nodes and a number of links or relationships and then render them either with SVG, Canvas, WebGL.
+Some of them take plain objects as input, others have an API to add nodes and relationships.
+
+Most of them offer several options for styling, interaction, graph-layout algorithms etc.
+We won't go into the details of each of them, just point out where to find more information.
+
+Here are the frameworks we'll look at today:
+
+|===
+| name | package | docs
+| d3.js (v4 /v5?) | | https://d3js.org/
+| vis.js | |
+| three-js via 3d-graph-xxx | |
+| ngraph/vivagraph.js | |
+| sigma.js | |
+| cytoscape.js | |
+|===
+
+
+There are a number of other, commercial frameworks and tools, that we might want to revisit in another post.
+Most of them have Neo4j support built in.
+
+* yworks yfiles
+* linkurious
+* keylines
+* tom sawyer
+* graphistry
+
+== D3.js
+
+https://d3js.org/[Data-Driven-Documents (D3)^] is the most well known tool for data visualization in Javascript, there is a lot of information and projects around it.
+For a long time D3's version 3 was active, last year v4 came out, now we're at v5 which was released in early 2018.
+
+
+There are several graph visualizations in https://bl.ocks.org[D3's gallery^], we will just use the simplest one: https://bl.ocks.org/mbostock/4062045
+
+Network visualization is just one of the many things D3 can do.
+But as you can see there are a lot of bits ot be configured, even for a simple variant.
+More details can be found here: http://www.coppelia.io/2014/07/an-a-to-z-of-extra-features-for-the-d3-force-layout/[A-Z features for D3 force layout^]
+
+.Setup drawing area and load libraries
+----
+<svg id="graph" width="960" height="600"></svg>
+<script src="//d3js.org/d3.v4.min.js"></script>
+<script src="//cdn.rawgit.com/neo4j/neo4j-javascript-driver/1.4.1/lib/browser/neo4j-web.min.js"></script>
+----
+
+.Loading Graph Data
+----
+<script>
+const driver = neo4j.v1.driver("bolt://localhost", neo4j.v1.auth.basic("neo4j", "password"));
+
+const limit = 100;
+// here we return node and relationship objects
+// usually we don't want this as this loads too much data
+const query = "MATCH (source)-[rel]->(target) RETURN source, rel, target LIMIT $limit" 
+
+const nodes = new Map();
+const rels = [];
+
+const session = driver.session();
+session
+  .run(query, {limit: limit})
+  .subscribe({
+    onNext: function (record) {
+       const source = record.get('source');
+       const sourceId = source.identity.toNumber();
+       nodes.set(sourceId,{id:sourceId, type:0, caption:source.properties['name'] || source.properties['title']});
+       const target = record.get('target');
+       const targetId = target.identity.toNumber();
+       nodes.set(targetId,{id:targetId, type:1, caption:target.properties['name'] || target.properties['title']});
+
+       const rel = record.get('rel');
+       rels.push({source:sourceId,target:targetId});
+    },
+    onCompleted: function () {
+      session.close();
+      driver.close(); // or later
+      render(nodes, rels);
+    },
+    onError: function (error) {
+      console.log(error);
+    }
+  });
+</script>
+----
+
+////
+For mapping our sets of labels to a numeric value for the color choice, we could do the following.
+Keep a Set that keeps insert-order, and add all labels that we encounter, then get the index for the current labels and set the nth bits of our color value to 1.
+
+.Numeric Mapping of Labels
+----
+var allLabels = new Set();
+source.labels.map(l=>{allLabels.add(l);return Array.from(allLabels).indexOf(l);}).map(idx => 1 << idx).reduce((a,b)=>a+b)
+----
+////
+
+Our Graph Loading code calls the `render(nodes, rels)` function, which looks like this (with a few bells and whistles for setup, dragging, caption, color):
+
+----
+<script>
+// adapted from: https://bl.ocks.org/mbostock/4062045
+
+// select by element-id
+var svg = d3.select("#graph"),
+    width = +svg.attr("width"),
+    height = +svg.attr("height");
+
+// color scheme
+var color = d3.scaleOrdinal(d3.schemeCategory20);
+
+// setup layout
+var simulation = d3.forceSimulation()
+    .force("link", d3.forceLink().id(function (d) { return d.id; }))
+    .force("charge", d3.forceManyBody())
+    .force("center", d3.forceCenter(width / 2, height / 2));
+
+// the render function we call
+function render(nodes, rels) {
+
+  // append all rels as "line.links" 
+  var link = svg.append("g")
+    .attr("class", "links")
+    .selectAll("line")
+    .data(rels)
+    .enter().append("line");
+
+  // append all nodes as "circle.nodes"
+  // radius 8, color by type attribute
+  // dragging enabled
+  var node = svg.append("g")
+      .attr("class", "nodes")
+    .selectAll("circle")
+    .data(nodes)
+    .enter().append("circle")
+      .attr("r", 8)
+      .attr("fill", function(d) { return color(d.type); })
+      .call(d3.drag()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended));
+
+  // "title" rendering from "caption" property
+  node.append("title")
+      .text(function(d) { return d.caption; });
+
+  // setup layout engine
+  simulation.nodes(nodes).on("tick", ticked);
+
+  simulation.force("link").links(rels);
+
+  function ticked() {
+    link
+        .attr("x1", function(d) { return d.source.x; })
+        .attr("y1", function(d) { return d.source.y; })
+        .attr("x2", function(d) { return d.target.x; })
+        .attr("y2", function(d) { return d.target.y; });
+
+    node
+        .attr("cx", function(d) { return d.x; })
+        .attr("cy", function(d) { return d.y; });
+  }
+
+  // drag functions
+  function dragstarted(d) {
+    if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+  }
+  
+  function dragged(d) {
+    d.fx = d3.event.x;
+    d.fy = d3.event.y;
+  }
+  
+  function dragended(d) {
+    if (!d3.event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+  }
+}
+</script>
+----
+
+.Minimal CSS
+----
+<style>
+.links line {
+  stroke: #999;
+  stroke-opacity: 0.6;
+}
+
+.nodes circle {
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+</style>
+----
+
+
+== Vis.js
+
+http://visjs.org/[Vis.js^] is a data & graph visualization library, developed by Almende B.V in the Netherlands.
+
+// slider / toggle for setup parameters
+
+== Neovis.js
+
+My colleague Will Lyon has developed a wrapper around vis.js called https://github.com/johnymontana/neovis.js[neovis.js^] which comes with a number of sensible defaults to quickly render a (small) graph with captions, sizes, cluster colors and relationship-widths.
+It has a few simple settings and gets you up and running quickly.
+
+[source,javascript]
+----
+<script src="https://rawgit.com/neo4j-contrib/neovis.js/master/dist/neovis.js"></script>
+
+<script type="text/javascript">
+        var viz;
+
+        function draw() {
+            var config = {
+                container_id: "viz",
+                server_url: "bolt://localhost:7687",
+                server_user: "neo4j",
+                server_password: "sorts-swims-burglaries",
+                initial_cypher: "MATCH (n)-[r:INTERACTS]->(m) RETURN *",
+                labels: {
+                    "Character": {
+                        "caption": "name",
+                        "size": "pagerank",
+                        "community": "community"
+                    }
+                },
+                relationships: {
+                    "INTERACTS": {
+                        "thickness": "weight",
+                        "caption": false
+                    }
+                }
+            };
+
+            viz = new NeoVis.default(config);
+            viz.render();
+        }
+    </script>
+----
+
+The draw function just passes a config object with connection information, a query and settings per label or relationship-type.
+I.e. which properties are to be used for caption, size and color (community).
+
+image::https://github.com/neo4j-contrib/neovis.js/raw/master/img/example-viz.png[]
+
+
+[source,html]
+----
+<!doctype html>
+<html>
+    <head>
+        <title>Neovis.js Simple Example</title>
+        <style type="text/css">
+            html, body {
+                font: 16pt arial;
+            }
+    
+            #viz {
+                width: 900px;
+                height: 700px;
+                border: 1px solid lightgray;
+                font: 22pt arial;
+            }
+        </style>
+    </head>
+    <body onload="draw()">
+        <div id="viz"></div>
+    </body>    
+</html>
+----
+
+== Three.js via 3d-force-graph
+
+Three.js is a 2d and 3d drawing library for Javascript that supports WebGL.
+
+While it's possible to use three.js directly, it's a bit involved, and my last attempts have been a while ago.
+
+Kim Albrecht used it for his "graph of the universe" visualizations for the Barabasi-Labs, see my take on it here: https://neo4j.com/blog/neo4j-3-0-graph-universe/
+
+== Vivagraph.js (ngraph)
+
+If you followed the blog post, just mentioned you have already seen that [Vivagraph^] by Andrei Kashcha is really powerful.
+It is a very efficient javascript library for graph layouting and rendering, today built on top of [ngraph modules^].
+Besides the Javascript implementation, there are also modules for graph layout in C.
+
+== Sigma.js
+
+http://sigmajs.org/[Sigma.js^] by Alexis Jacomy has been around for quite some time and is known to be fast and powerful.
+Currently version 2 is in development which is almost a full rewrite.
+
+...
+----
+
+----
+
+== Cytoscape.js
+
+http://js.cytoscape.org/[Cytoscape.js^] ...
+
+[source,html]
+----
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.2.11/cytoscape.min.js"></script>
+
+<script>
+var cy = cytoscape({
+
+  container: document.getElementById('cy'), // container to render in
+
+  elements: [ // list of graph elements to start with
+    { // node a
+      data: { id: 'a' }
+    },
+    { // node b
+      data: { id: 'b' }
+    },
+    { // edge ab
+      data: { id: 'ab', source: 'a', target: 'b' }
+    }
+  ],
+
+  style: [ // the stylesheet for the graph
+    {
+      selector: 'node',
+      style: {
+        'background-color': '#666',
+        'label': 'data(id)'
+      }
+    },
+
+    {
+      selector: 'edge',
+      style: {
+        'width': 3,
+        'line-color': '#ccc',
+        'target-arrow-color': '#ccc',
+        'target-arrow-shape': 'triangle'
+      }
+    }
+  ],
+
+  layout: {
+    name: 'grid',
+    rows: 1
+  }
+
+});
+</script>
+----
+
+////
+
+////

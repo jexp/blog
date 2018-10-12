@@ -1,0 +1,37 @@
+# graph platform
+
+etl
+procedures-apoc=procedures & apoc
+desktop
+cypher
+cloud
+graph-algorithms=graph algorithms
+operations
+import-export=import / export
+installation
+modeling
+visualization
+cluster
+browser
+
+# integrations
+
+databases=other databases
+orchestration
+stream-processing=stream processing
+ai-ml-nlp=ai, ml, nlp
+geospatial
+bi-visualization=bi & visualization
+docker
+
+# drivers=drivers & stacks
+python
+java
+spring-data-neo4j=spring data neo4j
+javascript
+net=.net
+graphql-grandstack=graphql & grandstack
+r
+go
+php
+ruby
