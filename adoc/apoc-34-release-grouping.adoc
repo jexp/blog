@@ -1,0 +1,130 @@
+= APOC Release for Neo4j 3.4 with Graph Grouping
+
+Just in time for the Neo4j 3.4.0 release, we also pushed out two versions of APOC, namely 3.3.0.3 and 3.4.0.1.
+You can download them from https://github.com/neo4j-contrib/neo4j-apoc-procedures/releases[GitHub^], Maven or most conveniently with a single click in Neo4j Desktop.
+
+image::https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/3.3/docs/img/desktop-apoc.jpg[]
+
+WARNING: Please note that the "self upgrade" process in Neo4j Desktop might leave the previous APOC version in your `plugins` directory, you'll have to remove it yourself if your DB is tripping over it.
+
+This time, we had to spend much more effort on updating the internals, as Neo4j 3.4. comes with a new SPI (Kernel API) for more effiecient interaction with the Cypher runtime.
+
+As APOC uses that SPI in a number of places, we can thank https://twitter.com/darthvader42[Stefan Armbruster^] who took on the job of updating all of those. 
+
+*I also want to thank everyone who contributed or https://github.com/neo4j-contrib/neo4j-apoc-procedures/issues[reported back issues^] or feature requests.*
+
+
+Although this is release is lighter on features, there are two things that made it in, which I hope will make all your lives easier.
+
+== Load Excel (XLS)
+
+Much of the business data is still living in Excel today, as quick computation, summariziation, charts and formatting is very handy.
+And as I learned a long time ago, from https://www.slideshare.net/kfrdbs/peyton-jones[Simon Peyton Jones^], Excel's expression language is the most widely used, immutable functional language in the world.
+
+One other feature that is very useful is to group data that belongs together into several sheets of the same file.
+That's the main difference, between `apoc.load.xls` and `apoc.load.csv` that you can address individual sheets or even regions.
+
+We use the Apache POI library to read excel, but as I didn't want to grow APOC by many megabytes you'll have to add these dependencies yourself if you want to use excel loading.
+
+The are linked in the https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_load_csv_and_xls[documentation for both procedures^].
+Those two also come with a number of other cool features such as:
+
+* provide a line number
+* provide both a map and a list representation of each line
+* automatic data conversion (including split into arrays)
+* option to keep the original string formatted values
+* ignoring fields (makes it easier to assign a full line as properties)
+* headerless files
+* replacing certain values with null
+
+So if you have a sheet like this, you can not just access the individual Sheets, but also an region like shown here.
+The name of the sheet is `Offset` so don't get confused :)
+
+image::https://raw.githubusercontent.com/neo4j-contrib/neo4j-apoc-procedures/3.4/docs/img/load.xls.jpg[]
+
+[source,cypher]
+----
+CALL apoc.load.xls('file:///path/to/file.xls','Offset!B2:F3',
+  {mapping:{Integer:{type:'int'}, Array:{type:'int',array:true,arraySep:';'}}})
+----
+
+Resulting in:
+
+[opts=header,cols="5*m"]
+|===
+| String | Boolean | Integer | Float | Array
+| "Test" | true | 2 | 1.5 | [1,2,3]
+|===
+
+== Graph Grouping
+
+The other feature that I'm really happy about is *graph grouping*.
+Quite some time ago, https://twitter.com/kc1s[Martin Junghanns^] told me about the graph operators in https://github.com/dbs-leipzig/gradoop_demo#graph-grouping[Gradoop^], one of which is graph grouping.
+
+I found that a really cool and useful idea, so I implemented a first version in APOC a while ago.
+
+1. This is a way of summarizing a graph by grouping nodes by one or more properties, resulting in virtual nodes that represent these groups.
+2. Then for each of the virtual nodes all of the relationships between each group are aggregated too.
+3. And you can provide additional aggregation functions for both nodes and relationships besides just counting them, e.g. sum of values or min/max of timestamps, that also turn into properties of the aggregated graph entities.
+
+The https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_node_grouping[documentation for this procedure^] also details all the command line and configuration options, like skipping orphans or post-filtering the results.
+
+Here is a quick example:
+
+[source,cypher]
+----
+CALL apoc.nodes.group(['User'],['country','gender'])
+YIELD node, relationship RETURN *;
+----
+
+image::https://s3.amazonaws.com/dev.assets.neo4j.com/wp-content/uploads/20180518003123/user-country-gender-1.jpg[]
+
+This is especially helpful to get an birds eye view of the graph, like a summarization.
+
+So you can e.g. group a _User graph by country and gender_ or a _citation-graph by publication year_.
+
+As Martin and Max had built a nice Javascript application demoing that feature, I could take it and adapt it to a Neo4j / APOC backend.
+
+You will find the adapted source code in this https://github.com/neo4j-examples/neo4j-grouping/issues[GitHub repository^].
+
+It is self contained and even https://rawgit.com/neo4j-examples/neo4j-grouping/master/index.html[hosts a running app^].
+
+image::https://github.com/neo4j-examples/neo4j-grouping/raw/master/img/group-user-country.jpg[link=https://rawgit.com/neo4j-examples/neo4j-grouping/master/index.html]
+
+As part of this I also added https://neo4j-contrib.github.io/neo4j-apoc-procedures/#_node_functions[a number of functions^] to access node and relationship attributes that also work with virtual nodes and relationships.
+
+Going forward I want to make it run on graph projections and also improve performance further.
+
+== Release Summary
+
+=== Features/Improvements
+
+* `apoc.load.xls` for loading data from Excel files, supports both xls and xlsx
+* Improvements for `apoc.nodes.group`, e.g. filtering of rel-types or of outputs by counts
+* Accessor functions for (virtual) entities (e.g. to postfilter them by property or label)
+* dijkstra algorithm supporting multiple results
+* `date.format(null)` returns null, also add ISO8601 convenience format
+
+
+=== Bugfixes
+
+* fix for `apoc.periodic.iterate` with statements that already started with `WITH`
+* fix for deleted nodes in explicit index
+* `apoc.cypher.runTimeboxed` uses separate thread
+* Missing Iterator Utils in apoc .jar file
+* Add missing `apoc.coll.combinations()`
+* check for availability before running sync index update thread
+
+=== Documentation
+
+* docs for `apoc.load.csv` and `apoc.load.xls`
+* docs for `apoc.group.nodes`
+* docs for `apoc.coll.contains`
+
+
+So please go ahead and try out the new features and update your APOC dependency to the last version.
+
+You should also make it a habit to learn one new APOC procedure or function each day, there more than are enough for every day of the year :)
+Start with `CALL apoc.help('keyword')` to not get lost anymore.
+
+Cheers, Michael

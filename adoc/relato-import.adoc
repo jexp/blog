@@ -1,0 +1,542 @@
+= Quick Import: Relato Business Graph Database from Data.World into Neo4j
+:img: ../img
+
+== Late Night Tweet
+
+On Friday night I saw this tweet by Russel Jurney which sparked my interest.
+Him open-sourcing graphy business data that he has been been working on for quite some time trying to build a business is something we have to be grateful for.
+
+++++
+<blockquote class="twitter-tweet" data-lang="en"><p lang="en" dir="ltr">I&#39;ve just open sourced Relato&#39;s business graph database, with 400K links between companies. Partnerships, example customers, competitors, investors.  <a href="https://t.co/cmwVOMa2SA">https://t.co/cmwVOMa2SA</a> <a href="https://t.co/DxyQr29Af7">pic.twitter.com/DxyQr29Af7</a></p>&mdash; Russell Jurney (@rjurney) <a href="https://twitter.com/rjurney/status/929072362028281856?ref_src=twsrc%5Etfw">November 10, 2017</a></blockquote>
+<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+++++
+
+He links to a https://blog.datasyndrome.com/open-sourcing-relatos-business-graph-database-fca220daadd8[longer blog post] explaining the history and the content of the data.
+
+As part of that he points us to the https://data.world/datasyndrome/relato-business-graph-database[Data.World repository] where he made the roughly 400k connections available to everyone to use.
+
+image::https://cdn-images-1.medium.com/max/1600/1*5A9pRkwKNWlSMUVho372jg.jpeg[]
+
+
+As I already had created an account on Data.World for our [Graphs for Good Hackation] in October in NYC, I could access the data immediately.
+
+You can query the data using SparQL, download the JSON or even grab an URL to access it remotely, which was what I did for ease of use.
+
+image::{img}/relato-dataworld.jpg[]
+
+
+== Neo4j
+
+As I wanted to import it into Neo4j, I grabbed the Neo4j Desktop package for the latest 3.3.0 release http://neo4j.com/download[from the website].
+
+This comes with a *free develper license of Neo4j Enterprise*, which is really useful.
+The Neo4j Desktop is an Electron app that allows you to manage multiple databases of different versions and install extensions and run the visual database browser.
+
+image::{img}/relato-neo4j-desktop.jpg[]
+
+So I created a new Project & Database with Neo4j 3.3.0 Enterprise and installed the "APOC" procedures _Plugin_, which is a really useful collections of tools.
+
+Now I can start my database, open my browser and start accessing the data.
+
+If you want to learn more about Neo4j, check out http://neo4j.com/developer/get-started
+
+For an overview of the Cypher query language, the http://neoj4.com/docs/cypher-refcard/current[reference card] is really useful.
+
+Now we can start querying our URL (you can also download it locally and load it from there for faster turnaround).
+
+== The Data
+
+We use the `apoc.load.json` procedure which will give us a stream of JSON records, so we can use this already to query and analyse remote data.
+Similar procedures are available for most other databases as well as CSV and XML.
+
+----
+CALL apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') YIELD value
+RETURN count(*);
+----
+
+.Our file has 374k records
+----
+╒══════════╕
+│"count(*)"│
+╞══════════╡
+│373663    │
+└──────────┘
+----
+
+We can also look at the first few json objects, to see which data they contain.
+
+----
+call apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') yield value
+return value limit 1;
+----
+
+----
+{
+  "update_time": {
+    "$date": "2015-02-12T21:23:12.929Z"
+  },
+  "home_name": "F5 Networks",
+  "home_domain": "f5.com",
+  "_id": {
+    "$oid": "54dd19c08899a4c549dc71cf"
+  },
+  "link_name": "Dell",
+  "type": "partnership",
+  "link_domain": "dell.com",
+  "username": "rjurney"
+}
+----
+
+== Data Import - Businesses
+
+Now we can start creating our data. Basically 2 businesses are linked by a relationship.
+We could create the full graph in one go, but to make it easier to follow, we take smaller steps here.
+
+Let's start with the businesses first.
+
+As in the links, most businesses appear multiple times, we can use their *distinct occurrence*.
+We start with the _left side_ which Russell calls _home_.
+
+----
+CALL apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') YIELD value
+WITH distinct value.home_domain as domain, value.home_name as name
+RETURN count(*)
+----
+
+----
+╒══════════╕
+│"count(*)"│
+╞══════════╡
+│24266     │
+└──────────┘
+----
+
+I want to use domain as the business-id, as it is more unique.
+So we create a constraint for it.
+
+----
+CREATE CONSTRAINT ON (b:Business) ASSERT b.domain IS UNIQUE;
+----
+
+----
+CALL apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') YIELD value
+WITH distinct value.home_domain as domain, value.home_name as name
+CREATE (:Business {domain:domain, name:name})
+----
+
+Now we continue with the right side, which is called _link_.
+Note that businesses on the right might already have appeared on the left, side, so if we used CREATE as before, we could get a constraint violation for the duplicates.
+That's why we'll use MERGE.
+
+----
+call apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') yield value
+with distinct value.link_domain as domain, value.link_name as name
+merge (:Business {domain:domain}) ON CREATE SET b.name = name;
+----
+
+So now we have a lot of Business _nodes_ in our database, but they are not connected, so that's not a graph.
+
+== Data Import - Links
+
+Let's create the connections, between _home_ and _link_, using the type and storing date and user as properties on the relationship.
+
+Easiest would be to do a batch at a time, we can look at the distribution of links by type and that's quite evenly spaced out.
+
+----
+call apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') yield value
+return toUpper(value.type), count(*);
+----
+
+----
+╒═════════════════════╤══════════╕
+│"toUpper(value.type)"│"count(*)"│
+╞═════════════════════╪══════════╡
+│"CUSTOMER"           │80465     │
+├─────────────────────┼──────────┤
+│null                 │114       │
+├─────────────────────┼──────────┤
+│"SUPPLIER"           │79401     │
+├─────────────────────┼──────────┤
+│"INVESTMENT"         │71630     │
+├─────────────────────┼──────────┤
+│"PARTNERSHIP"        │112953    │
+├─────────────────────┼──────────┤
+│"COMPETITOR"         │29100     │
+└─────────────────────┴──────────┘
+----
+
+
+We have to deal with the `null` value though, which we can also look at.
+
+----
+call apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') yield value
+with * where value.type IS null
+return value limit 10;
+----
+
+----
+╒═════════════════════════════════════════════════════════════════╕
+│"value"                                                          │
+╞═════════════════════════════════════════════════════════════════╡
+│{"link_domain":"navinet.net","home_domain":"csc.com","_id":{"$oid│
+│":"574e15023bf9e624d32e1e0a"}}                                   │
+├─────────────────────────────────────────────────────────────────┤
+│{"link_domain":"cisco.com","home_domain":"pgi.com","_id":{"$oid":│
+│"574e16043bf9e624d32e25d0"}}                                     │
+├─────────────────────────────────────────────────────────────────┤
+│{"link_domain":"pgi.com","home_domain":"micron.com","_id":{"$oid"│
+│:"574e16043bf9e624d32e25d1"}}                                    │
+├─────────────────────────────────────────────────────────────────┤
+│{"link_domain":"pgi.com","home_domain":"ibm.com","_id":{"$oid":"5│
+│74e16283bf9e624d32e26c2"}}                                       │
+----
+
+We see for these records there are things missing: 
+
+* the names of the companies (good that we used domain as identifiers)
+* the link type
+* the date and user
+
+Let's start with these records then, as they are easier.
+We need to MATCH businesses by _domain_ and then CREATE relationships between them, for the unspecified ones, we just use RELATED_TO.
+
+----
+call apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') yield value
+where value.type is null
+match (from:Business {domain:value.home_domain})
+match (to:Business {domain:value.link_domain})
+create (from)-[:RELATED_TO]->(to);
+----
+
+[NOTE]
+If Neo4j complains about Out-Of-Memory, the Neo4j-Desktop configures your database initially only with small memory settings.
+If you go to the "Settings" tab, you can increase the `dbms.heap.*` values to 500M or 1G.
+
+We can do the same import for the other types we've seen, e.g. `CUSTOMER`.
+
+This time we also want to store the user and the date, but actually not as ISO-8601 in UTC, but as _seconds_ since Epoch.
+For that we parse the string with this function `apoc.date.parse(value.update_time.`$date`,'s',"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")`.
+
+----
+call apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') yield value
+with toUpper(value.type) as type, value WHERE type = 'CUSTOMER'
+match (from:Business {domain:value.home_domain})
+match (to:Business {domain:value.link_domain})
+create (from)-[:CUSTOMER 
+               {user:value.username,
+                date:apoc.date.parse(value.update_time.`$date`,'s',"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")}]->(to);
+----
+
+We run a similiar statement for the other types:
+
+* SUPPLIER
+* INVESTMENT
+* PARTNERSHIP
+* COMPETITOR
+
+As some of these records would create two links, one per direction, we can choose to use MERGE instead and _leave off the directional arrow-tip_.
+
+----
+CALL apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS') YIELD value
+WITH value WHERE toUpper(value.type) = 'COMPETITOR'
+MATCH (from:Business {domain:value.home_domain})
+MATCH (to:Business {domain:value.link_domain})
+CREATE (from)-[rel:COMPETITOR]->(to)
+ON CREATE SET rel.user = value.username,
+   rel.date = apoc.date.parse(value.update_time.`$date`,'s',"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+----
+
+== Data Inspection
+
+So now that we have all our data imported, we can have a first look.
+
+For instance just showing a bunch of businesses and their `SUPPLIER`s.
+
+----
+MATCH (b1:Business)-[s:SUPPLIERS]->(b2)
+RETURN b1,s,b2
+LIMIT 10;
+----
+
+image::{img}/relato-suppliers.jpg[]
+
+----
+match (n:Business) return count(*);
+----
+
+----
+╒══════════╕
+│"count(*)"│
+╞══════════╡
+│51104     │
+└──────────┘
+----
+
+----
+match (n:Business)-[r]->() return type(r), count(*) order by count(*) desc;
+----
+
+----
+╒═════════════╤══════════╕
+│"type(r)"    │"count(*)"│
+╞═════════════╪══════════╡
+│"PARTNERSHIP"│139998    │
+├─────────────┼──────────┤
+│"CUSTOMER"   │95405     │
+├─────────────┼──────────┤
+│"SUPPLIER"   │89401     │
+├─────────────┼──────────┤
+│"INVESTMENT" │78085     │
+├─────────────┼──────────┤
+│"COMPETITOR" │30660     │
+├─────────────┼──────────┤
+│"RELATED_TO" │114       │
+└─────────────┴──────────┘
+----
+
+To see a larger part of the graph, we can chose a few businesses that don't have too many relationships (we don't want to see a hairball).
+And follow their connections 2 hops out, using the same condition on the whole path.
+
+----
+MATCH (b:Business) where size((b)--()) < 20 
+MATCH path = (b)--(b2)--(b3) where size((b2)--()) < 20 and size((b3)--()) < 20
+RETURN path LIMIT 700;
+----
+
+image::{img}/relato-part.jpg[]
+
+== Alternative Import Approach
+
+====
+
+As mentioned before, we can also combine all of these steps into one load operation. 
+
+Here we use:
+
+* `apoc.periodic.iterate` for batching work on a stream of records (almost 400k)
+* `coalesce` to provide defaults null values
+* `apoc.create.relationship` to create relationships with dynamic types
+* `apoc.map.clean` to remove null values from properties
+
+----
+call apoc.periodic.iterate("
+call apoc.load.json('https://query.data.world/s/_kQZwISTfInOevAL2Cy2SelUkue4NS')
+","
+
+merge (from:Business {domain:value.home_domain}) ON CREATE SET home.name = value.home_name
+merge (to:Business {domain:value.link_domain}) ON CREATE SET link.name = value.link_name
+
+with *, apoc.date.parse(value.update_time.`$date`,'s',\"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'\") as date
+
+call apoc.create.relationship(from, toUpper(value.type), 
+  apoc.map.clean({updated:date,id:value._id.`$oid`,user:value.username},[],[null])
+     ,to) yield rel
+
+return count(*)",
+
+{batchSize:10000,iterateList:true});
+----
+
+====
+
+== Data Analytics
+
+We can look at the distribution of degrees in the data using `apoc.stats.degrees` which takes an optional argument of the relationship-type.
+
+----
+call apoc.stats.degrees()
+----
+
+----
+╒══════╤═══════════╤═══════╤═════╤═════╤═════╤═════╤═════╤══════╤═════╤═════╤══════════════════╕
+│"type"│"direction"│"total"│"p50"│"p75"│"p90"│"p95"│"p99"│"p999"│"max"│"min"│"mean"            │
+╞══════╪═══════════╪═══════╪═════╪═════╪═════╪═════╪═════╪══════╪═════╪═════╪══════════════════╡
+│null  │"BOTH"     │433663 │2    │6    │23   │55   │260  │1244  │26047│1    │16.972017845961176│
+└──────┴───────────┴───────┴─────┴─────┴─────┴─────┴─────┴──────┴─────┴─────┴──────────────────┘
+----
+
+----
+call db.relationshipTypes() yield relationshipType
+call apoc.stats.degrees(relationshipType) yield type, total,p50, p75, p90, p95, p99, p999, max, min, mean
+return type, total,p50, p75, p90, p95, p99, p999, max, min, mean;
+----
+
+----
+╒═════════════╤═══════╤═════╤═════╤═════╤═════╤═════╤══════╤═════╤═════╤════════════════════╕
+│"type"       │"total"│"p50"│"p75"│"p90"│"p95"│"p99"│"p999"│"max"│"min"│"mean"              │
+╞═════════════╪═══════╪═════╪═════╪═════╪═════╪═════╪══════╪═════╪═════╪════════════════════╡
+│"PARTNERSHIP"│139998 │1    │2    │5    │14   │78   │351   │22991│0    │5.4790427363807135  │
+├─────────────┼───────┼─────┼─────┼─────┼─────┼─────┼──────┼─────┼─────┼────────────────────┤
+│"CUSTOMER"   │95405  │0    │2    │5    │12   │66   │299   │2257 │0    │3.733778177833438   │
+├─────────────┼───────┼─────┼─────┼─────┼─────┼─────┼──────┼─────┼─────┼────────────────────┤
+│"INVESTMENT" │78085  │0    │0    │4    │11   │55   │261   │1751 │0    │3.055925172197871   │
+├─────────────┼───────┼─────┼─────┼─────┼─────┼─────┼──────┼─────┼─────┼────────────────────┤
+│"COMPETITOR" │30660  │0    │0    │2    │6    │21   │79    │598  │0    │1.199906073888541   │
+├─────────────┼───────┼─────┼─────┼─────┼─────┼─────┼──────┼─────┼─────┼────────────────────┤
+│"SUPPLIER"   │89401  │0    │2    │5    │11   │61   │277   │2101 │0    │3.4988063556668756  │
+├─────────────┼───────┼─────┼─────┼─────┼─────┼─────┼──────┼─────┼─────┼────────────────────┤
+│"RELATED_TO" │114    │0    │0    │0    │0    │0    │1     │31   │0    │0.004461490294301816│
+└─────────────┴───────┴─────┴─────┴─────┴─────┴─────┴──────┴─────┴─────┴────────────────────┘
+----
+
+What are the nodes with the biggest competition in our graph, i.e. the biggest degree ?
+
+----
+MATCH (b:Business)
+WITH b, size( (b)-[:COMPETITOR]-() ) as degree
+RETURN b.name, b.domain, degree
+ORDER BY degree DESC LIMIT 5
+----
+
+Obviously the usual suspects.
+
+----
+╒═══════════╤═══════════════╤════════╕
+│"b.name"   │"b.domain"     │"degree"│
+╞═══════════╪═══════════════╪════════╡
+│"Google"   │"google.com"   │598     │
+├───────────┼───────────────┼────────┤
+│"Microsoft"│"microsoft.com"│533     │
+├───────────┼───────────────┼────────┤
+│"Facebook" │"facebook.com" │462     │
+├───────────┼───────────────┼────────┤
+│"Apple"    │"apple.com"    │417     │
+├───────────┼───────────────┼────────┤
+│"IBM"      │"ibm.com"      │379     │
+└───────────┴───────────────┴────────┘
+----
+
+For partnerships it looks different, Cisco is a clear leader here and AWS in the top 5.
+
+----
+╒═════════════════════╤════════════════╤════════╕
+│"b.name"             │"b.domain"      │"degree"│
+╞═════════════════════╪════════════════╪════════╡
+│"Cisco"              │"cisco.com"     │22982   │
+├─────────────────────┼────────────────┼────────┤
+│"Microsoft"          │"microsoft.com" │3582    │
+├─────────────────────┼────────────────┼────────┤
+│"Rackspace"          │"rackspace.com" │3572    │
+├─────────────────────┼────────────────┼────────┤
+│"Amazon Web Services"│"aws.amazon.com"│2336    │
+├─────────────────────┼────────────────┼────────┤
+│"IBM"                │"ibm.com"       │1918    │
+└─────────────────────┴────────────────┴────────┘
+----
+
+We can also apply ranking (e.g. page-rank) and clustering on this data.
+
+To enable that we install the *neo4j-graph-algorithms* library. 
+The latest release can be https://github.com/neo4j-contrib/neo4j-graph-algorithms/releases/tag/3.3.0.0[found here].
+From there we grab the `graph-algorithms-algo-3.3.0.0.jar` file and drop it into the `plugins` folter when you `Open Folder`.
+
+NOTE: For this to work, we have to add this config setting `dbms.security.procedures.unrestricted=algo.*` and restart the server.
+
+----
+call algo.pageRank();
+----
+
+This call computed the page-rank in 2 seconds and wrote the results to our business nodes.
+
+What is the highest ranking nodes in our graph?
+
+----
+MATCH (b:Business) where exists(b.pagerank)
+RETURN b.name, b.domain, b.pagerank
+ORDER BY b.pagerank DESC LIMIT 5
+----
+
+Again, not surprising.
+
+----
+╒═══════════╤═══════════════╤══════════════════╕
+│"b.name"   │"b.domain"     │"b.pagerank"      │
+╞═══════════╪═══════════════╪══════════════════╡
+│"Microsoft"│"microsoft.com"│184.0849425       │
+├───────────┼───────────────┼──────────────────┤
+│"Google"   │"google.com"   │174.71597049999997│
+├───────────┼───────────────┼──────────────────┤
+│"IBM"      │"ibm.com"      │124.25576300000002│
+├───────────┼───────────────┼──────────────────┤
+│"Facebook" │"facebook.com" │124.16897800000001│
+├───────────┼───────────────┼──────────────────┤
+│"Apple"    │"apple.com"    │89.4175015        │
+└───────────┴───────────────┴──────────────────┘
+----
+
+What does it look like for betweenness centrality, i.e. businesses which connect other clusters of businesses.
+Let's try that for the `PARTNERSHIP` relationship.
+
+----
+call algo.betweenness('Business','PARTNERSHIP');
+----
+
+This one takes longer to compute (3 mins on my Mac) as it needs to run *all* shortest paths in the graph to see which nodes most frequently appear on them.
+
+----
+MATCH (b:Business) where exists(b.betweenness)
+RETURN b.name, b.domain, b.betweenness
+ORDER BY b.betweenness DESC LIMIT 5
+----
+
+----
+╒═══════════════════════════════╤═══════════════════╤══════════════╕
+│"b.name"                       │"b.domain"         │"b.centrality"│
+╞═══════════════════════════════╪═══════════════════╪══════════════╡
+│"CA Technologies"              │"ca.com"           │21474.83647   │
+├───────────────────────────────┼───────────────────┼──────────────┤
+│"NVIDIA"                       │"nvidia.com"       │21474.83647   │
+├───────────────────────────────┼───────────────────┼──────────────┤
+│"Mphasis Australia Pty Limited"│"mphasis.com"      │21474.83647   │
+├───────────────────────────────┼───────────────────┼──────────────┤
+│"Datapipe"                     │"datapipe.com"     │21474.83647   │
+├───────────────────────────────┼───────────────────┼──────────────┤
+│"MicroStrategy"                │"microstrategy.com"│21474.83647   │
+└───────────────────────────────┴───────────────────┴──────────────┘
+----
+
+Last but not least we can also cluster our businesses, e.g. the `CUSTOMER` graph.
+
+----
+call algo.labelPropagation('Business','CUSTOMER','OUTGOING',{iterations:10});
+----
+
+This returns after 2 seconds. We have 42559 partiions.
+
+----
+match (b:Business) 
+return count(distinct b.partition) as partitions
+----
+
+How big are the top-largest partitions and what are their most highly ranked nodes.
+
+We can clearly see the different industries being separated, with software being the largest.
+
+----
+╒═════════════╤══════╤════════════════════════════════════════════════════════════════╕
+│"b.partition"│"size"│"topRanked"                                                     │
+╞═════════════╪══════╪════════════════════════════════════════════════════════════════╡
+│37867        │8142  │{"name":"Microsoft","partition":37867,"pagerank":184.0849425,"ce│
+│             │      │ntrality":21474.83647,"domain":"microsoft.com"}                 │
+├─────────────┼──────┼────────────────────────────────────────────────────────────────┤
+│7463         │6     │{"name":"LPL Financial Services","partition":7463,"pagerank":1.5│
+│             │      │988079999999996,"centrality":21474.83647,"domain":"lpl.com"}    │
+├─────────────┼──────┼────────────────────────────────────────────────────────────────┤
+│48510        │4     │{"name":"Arch Coal","partition":48510,"pagerank":0.7785664999999│
+│             │      │997,"centrality":0,"domain":"archcoal.com"}                     │
+├─────────────┼──────┼────────────────────────────────────────────────────────────────┤
+│19254        │4     │{"name":"Creo Technologies","partition":19254,"pagerank":2.85521│
+│             │      │,"centrality":7594,"domain":"creotech.com"}                     │
+├─────────────┼──────┼────────────────────────────────────────────────────────────────┤
+│5071         │4     │{"name":"Wheatstone","partition":5071,"pagerank":0.8830485,"cent│
+│             │      │rality":175.37634,"domain":"wheatstone.com"}                    │
+├─────────────┼──────┼────────────────────────────────────────────────────────────────┤
+│26920        │3     │{"name":"Pivotal Software","partition":26920,"pagerank":1.909389│
+│             │      │4999999999,"centrality":81.736,"domain":"pivotal.com"}          │
+├─────────────┼──────┼────────────────────────────────────────────────────────────────┤
+│7225         │3     │{"name":"Micrus Endovascular","partition":7225,"pagerank":0.6911│
+│             │      │354999999999,"centrality":0,"domain":"micruscorp.com"}          │
+----
+
+I hope this was useful for you to get up and running with a graph database quickly,
+both in terms of getting data imported but also analyizing it quickly.

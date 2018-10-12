@@ -1,0 +1,822 @@
+= Citation Network Scholarship
+
+Take more ideas from: https://maxdemarzi.com/2012/07/18/hcir-2012/
+
+Data taken from: http://labs.semanticscholar.org/corpus/
+
+Current numbers from sample dataset (10k papers).
+
+Inspired by Tweet by https://twitter.com/invisiblecomma[Alf Eaton^]:
+
+____
+OK who wants to import a 40GB newline-delimited JSON file into a graph database?
+http://labs.semanticscholar.org/corpus/
+____
+
+++++
+https://twitter.com/invisiblecomma/status/931221018542264320
+++++
+
+----
+match (n) return labels(n), count(*) as c order by c desc;
+----
+
+----
++----------------------+
+| labels(n)   | c      |
++----------------------+
+| ["Paper"]   | 162185 |
+| ["Author"]  | 36827  |
+| ["Topic"]   | 6589   |
+| ["Journal"] | 2757   |
++----------------------+
+----
+
+== Most prolific Authors
+
+Not impressive, dataset issue.
+
+----
+MATCH (a:Author)-[:WROTE]->() RETURN a, count(*) AS c ORDER BY c DESC LIMIT 5;
+----
+
+----
++-------------------------------------------------------------------------+
+| a                                                                   | c |
++-------------------------------------------------------------------------+
+| Node[30132]{name:"Hiroyuki Takahashi",id:"1844162",ids:["1844162"]} | 4 |
+| Node[23317]{name:"Dennis A. Smith",id:"1744261",ids:["1744261"]}    | 4 |
+| Node[20488]{ids:["2018770"],id:"2018770",name:"Yutaka Masuda"}      | 3 |
+| Node[62]{ids:["1849271"],id:"1849271",name:"Kazuo Suzuki"}          | 3 |
+| Node[19058]{name:"Mary K.L. Collins",id:"5335071",ids:["5335071"]}  | 3 |
++-------------------------------------------------------------------------+
+----
+
+== Co Authors of Most Prolific Author
+
+----
+MATCH (a:Author)-[:WROTE]->(p)<-[:WROTE]-(coAuthor) 
+WHERE a.name = 'xxx'
+RETURN count(distinct coAuthor) as coAuthors;
+----
+
+TODO
+
+----
+MATCH (a:Author)-[:WROTE]->(p)<-[:WROTE]-(coAuthor) 
+WHERE a.name = 'xxx'
+RETURN coAuthor.name, count(*) as c 
+ORDER BY c DESC LIMIT 5;
+----
+
+TODO
+
+
+== Author Name Overlap
+
+----
+match (a:Author)-[:WROTE]->(p) return a.name,count(*) as c order by c desc limit 5;
+----
+
+----
++-----------------+
+| a.name      | c |
++-----------------+
+| "Wei Li"    | 6 |
+| "Wei Wang"  | 6 |
+| "Jun Wang"  | 6 |
+| "Yu Zhang"  | 4 |
+| "Wei Huang" | 4 |
++-----------------+
+----
+
+----
+match (a:Author)-[:WROTE]->(p) 
+with a, collect(substring(p.title,0,20)) as papers
+return a.name, sum(size(papers)) as c, collect({a:a.id, papers:papers}) as papers
+order by c desc limit 5;
+----
+
+
+----
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| a.name      | c | papers                                                                                                                                                                                                                                                                                                                                |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "Wei Li"    | 6 | [{a -> "1688012", papers -> ["Afatinib versus erlo"]},{a -> "26831871", papers -> ["Safety and feasibili"]},{a -> "26766852", papers -> ["Biosynthesis of sibi"]},{a -> "26339366", papers -> ["Integrative Physiolo"]},{a -> "24292959", papers -> ["Cisplatin-induced se"]},{a -> "26661646", papers -> ["Risk and prognostic "]}]  |
+| "Wei Wang"  | 6 | [{a -> "25861732", papers -> ["An efficient molecul"]},{a -> "25565648", papers -> ["Folate-linked lipopl"]},{a -> "24589264", papers -> ["Cisplatin-induced se"]},{a -> "26847436", papers -> ["Targeted mutations o"]},{a -> "23294598", papers -> ["Ionizing radiation-i"]},{a -> "26716040", papers -> ["A role for nuclear f"]}] |
+| "Jun Wang"  | 6 | [{a -> "26097559", papers -> ["Differential antican"]},{a -> "19992460", papers -> ["An efficient molecul"]},{a -> "1715001", papers -> ["Enriching music mood"]},{a -> "25797316", papers -> ["[Enzymatic degradati","Adjuvant Cytokine-In"]},{a -> "26688672", papers -> ["Multi-Keyword Multi-"]}]                                 |
+| "Yu Zhang"  | 4 | [{a -> "25030487", papers -> ["Silica-based nanocap"]},{a -> "1682848", papers -> ["Speaker adaptation u","Scope playback: self"]},{a -> "25839854", papers -> ["A Semantic Mapping S"]}]                                                                                                                                             |
+| "Wei Huang" | 4 | [{a -> "1730584", papers -> ["Characterization of ","Does Citrulline Have","A fast implementatio"]},{a -> "Wei Huang", papers -> ["Calcium signaling, m"]}]                                                                                                                                                                           |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+----
+
+== Papers by Citations
+
+----
+match (p:Paper) 
+with p, size( (p)-[:CITES]->() ) as out, size( (p)<-[:CITES]-() ) as in 
+return p.title, out,in 
+order by out + in desc limit 10;
+----
+
+
+----
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| p.title                                                                                                                                                                         | out | in   |
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "Mining and summarizing customer reviews"                                                                                                                                       | 26  | 2186 |
+| "A Hidden Markov Model for Predicting Transmembrane Helices in Protein Sequences"                                                                                               | 26  | 758  |
+| "Wireless sensor and actor networks: research challenges"                                                                                                                       | 14  | 628  |
+| "Other minds in the brain: a functional imaging study of "theory of mind" in story comprehension."                                                                              | 32  | 506  |
+| "Excitation-transcription coupling in skeletal muscle: the molecular pathways of exercise"                                                                                      | 465 | 53   |
+| "Supervised Dictionary Learning"                                                                                                                                                | 19  | 497  |
+| "A General Theory of Phase Noise in Electrical Oscillators"                                                                                                                     | 5   | 511  |
+| "Changing physician performance. A systematic review of the effect of continuing medical education strategies."                                                                 | 0   | 514  |
+| "A Complete Bibliography of Publications in Numerische Mathematik (2000–2009)"                                                                                                  | 511 | 0    |
+| "Guidelines on the use of therapeutic apheresis in clinical practice--evidence-based approach from the Apheresis Applications Committee of the American Society for Apheresis." | 336 | 120  |
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+----
+
+== Most Cited Authors
+
+----
+MATCH (a:Author)-[:WROTE]->(p) 
+WITH a, count(*) as count, collect(p)[0..5] as papers, sum( size( (p)<-[:CITES]-() )) AS citations 
+ORDER BY citations desc LIMIT 10 
+RETURN a.name, count, citations, [p in papers | p.title];
+----
+
+
+----
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| a.name                   | count | citations | [p in papers | p.title]                                                                                                                                                                               |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "Minqing Hu"             | 1     | 2186      | ["Mining and summarizing customer reviews"]                                                                                                                                                           |
+| "Bing Liu"               | 1     | 2186      | ["Mining and summarizing customer reviews"]                                                                                                                                                           |
+| "Gunnar von Heijne"      | 1     | 758       | ["A Hidden Markov Model for Predicting Transmembrane Helices in Protein Sequences"]                                                                                                                   |
+| "Anders Krogh"           | 1     | 758       | ["A Hidden Markov Model for Predicting Transmembrane Helices in Protein Sequences"]                                                                                                                   |
+| "Erik L. L. Sonnhammer"  | 1     | 758       | ["A Hidden Markov Model for Predicting Transmembrane Helices in Protein Sequences"]                                                                                                                   |
+| "Ian F. Akyildiz"        | 2     | 700       | ["Wireless sensor and actor networks: research challenges","A Distributed Dynamic Regional Location Management Scheme for Mobile IP"]                                                                 |
+| "Ismail Hakki Kasimoglu" | 1     | 628       | ["Wireless sensor and actor networks: research challenges"]                                                                                                                                           |
+| "Francis R. Bach"        | 3     | 518       | ["Statistical Machine Learning and Convex Optimization Lecture 3 — March 17th 3.1 Motivation 3.2 Robbins-monro Algorithm","Supervised Dictionary Learning","Glycan classification with tree kernels"] |
+| "Michelle A Thomson"     | 1     | 514       | ["Changing physician performance. A systematic review of the effect of continuing medical education strategies."]                                                                                     |
+| "Andrew D. Oxman"        | 1     | 514       | ["Changing physician performance. A systematic review of the effect of continuing medical education strategies."]                                                                                     |
++------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+----
+
+== Paper Citations with Breakdown
+
+----
+MATCH (a:Author)-[:WROTE]->(p) 
+WITH a, p, size( (p)<-[:CITES]-() ) as citations
+ORDER BY citations DESC 
+WITH a, count(*) as count, collect({title:substring(p.title,0,20), year:p.year, citations:citations})[0..5] as papers, sum( citations ) as citations order by citations desc limit 10 
+RETURN a.name, count, citations, papers;
+----
+
+----
++-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| a.name                   | count | citations | papers                                                                                                                                                                                               |
++-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| "Minqing Hu"             | 1     | 2186      | [{title -> "Mining and summarizi", year -> 2004, citations -> 2186}]                                                                                                                                 |
+| "Bing Liu"               | 1     | 2186      | [{title -> "Mining and summarizi", year -> 2004, citations -> 2186}]                                                                                                                                 |
+| "Gunnar von Heijne"      | 1     | 758       | [{title -> "A Hidden Markov Mode", year -> 1998, citations -> 758}]                                                                                                                                  |
+| "Anders Krogh"           | 1     | 758       | [{title -> "A Hidden Markov Mode", year -> 1998, citations -> 758}]                                                                                                                                  |
+| "Erik L. L. Sonnhammer"  | 1     | 758       | [{title -> "A Hidden Markov Mode", year -> 1998, citations -> 758}]                                                                                                                                  |
+| "Ian F. Akyildiz"        | 2     | 700       | [{title -> "Wireless sensor and ", year -> 2004, citations -> 628},{title -> "A Distributed Dynami", year -> 2002, citations -> 72}]                                                                 |
+| "Ismail Hakki Kasimoglu" | 1     | 628       | [{title -> "Wireless sensor and ", year -> 2004, citations -> 628}]                                                                                                                                  |
+| "Francis R. Bach"        | 3     | 518       | [{title -> "Supervised Dictionar", year -> 2008, citations -> 497},{title -> "Glycan classificatio", year -> 2007, citations -> 21},{title -> "Statistical Machine ", year -> 2016, citations -> 0}] |
+| "R. Brian Haynes"        | 1     | 514       | [{title -> "Changing physician p", year -> 1995, citations -> 514}]                                                                                                                                  |
+| "Dave Davis"             | 1     | 514       | [{title -> "Changing physician p", year -> 1995, citations -> 514}]                                                                                                                                  |
++-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+----
+
+
+== Papers per Year
+
+----
+match (p:Paper)
+return p.year, count(*) order by p.year asc;
+----
+
+----
++-------------------+
+| p.year | count(*) |
++-------------------+
+| 1991   | 145      |
+| 1992   | 143      |
+| 1993   | 133      |
+| 1994   | 140      |
+| 1995   | 180      |
+| 1996   | 161      |
+| 1997   | 183      |
+| 1998   | 191      |
+| 1999   | 220      |
+| 2000   | 243      |
+| 2001   | 269      |
+| 2002   | 281      |
+| 2003   | 299      |
+| 2004   | 329      |
+| 2005   | 365      |
+| 2006   | 394      |
+| 2007   | 385      |
+| 2008   | 426      |
+| 2009   | 417      |
+| 2010   | 461      |
+| 2011   | 464      |
+| 2012   | 509      |
+| 2013   | 535      |
+| 2014   | 585      |
+| 2015   | 554      |
+| 2016   | 539      |
+| <null> | 153634   |
++-------------------+
+27 rows
+----
+
+== Papers and Citations per Year
+
+----
+MATCH (p:Paper)
+RETURN p.year, sum(size( (p)-[:CITES]->())) AS out, sum(size( (p)<-[:CITES]-() )) AS in, count(*) 
+ORDER BY p.year asc;
+----
+
+----
++-----------------------------------+
+| p.year | out   | in    | count(*) |
++-----------------------------------+
+| 1991   | 129   | 1928  | 145      |
+| 1992   | 208   | 1275  | 143      |
+| 1993   | 109   | 1545  | 133      |
+| 1994   | 299   | 1372  | 140      |
+| 1995   | 425   | 3781  | 180      |
+| 1996   | 347   | 1268  | 161      |
+| 1997   | 667   | 2004  | 183      |
+| 1998   | 998   | 3292  | 191      |
+| 1999   | 1019  | 2525  | 220      |
+| 2000   | 1401  | 2936  | 243      |
+| 2001   | 1176  | 3452  | 269      |
+| 2002   | 1752  | 3334  | 281      |
+| 2003   | 2235  | 4304  | 299      |
+| 2004   | 2673  | 6796  | 329      |
+| 2005   | 2994  | 3781  | 365      |
+| 2006   | 3606  | 3949  | 394      |
+| 2007   | 3701  | 4432  | 385      |
+| 2008   | 4265  | 4690  | 426      |
+| 2009   | 3632  | 4957  | 417      |
+| 2010   | 5008  | 4109  | 461      |
+| 2011   | 5446  | 3884  | 464      |
+| 2012   | 7060  | 3468  | 509      |
+| 2013   | 6566  | 2346  | 535      |
+| 2014   | 6926  | 1847  | 585      |
+| 2015   | 7180  | 1220  | 554      |
+| 2016   | 6998  | 483   | 539      |
+| <null> | 78936 | 76778 | 153634   |
++-----------------------------------+
+27 rows
+----
+
+== Erdös Number
+
+----
+MATCH (erdos:Author) WHERE erdos.name CONTAINS "Erdös" RETURN erdos;
+----
+
+----
+MATCH (erdos:Author) WHERE erdos.name contains "Erdös"
+MATCH p = shortestPath( (a)-[:WROTE*]-(erdos))
+WHERE a <> erdos
+RETURN a.name, length(p)/2 as erdosNumber 
+ORDER BY erdosNumber ASC LIMIT 10;
+----
+
+----
++-------------------------------+
+| a.name          | erdosNumber |
++-------------------------------+
+| <null>          | 0           |
+| "István Miklós" | 1           |
+| "Lajos Soukup"  | 1           |
++-------------------------------+
+3 rows
+----
+
+== Analytics on Projections: Author-Author
+
+Via Citations
+
+----
+MATCH (a:Author)-[:WROTE]->(p)-[:CITES]->(p2)-[:WROTE]-(a2:Author)
+RETURN a, a2, count(*) as citations
+ORDER BY citations desc limit 10;
+----
+
+----
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| a                                                                             | a2                                                                            | citations |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Node[24111]{name:"Bernard Lassègue",id:"6545090",ids:["6545090"]}             | Node[29677]{name:"Marie-Anne Gougerot-Pocidalo",id:"5507640",ids:["5507640"]} | 2         |
+| Node[24113]{name:"Kathy K. Griendling",id:"3500647",ids:["3500647"]}          | Node[29677]{name:"Marie-Anne Gougerot-Pocidalo",id:"5507640",ids:["5507640"]} | 2         |
+| Node[24112]{ids:["8752232"],id:"8752232",name:"A. Martín"}                    | Node[29677]{name:"Marie-Anne Gougerot-Pocidalo",id:"5507640",ids:["5507640"]} | 2         |
+| Node[48599]{name:"Stephen L. Brenner",id:"21073583",ids:["21073583"]}         | Node[26468]{name:"R. Matthew Ward",id:"2234595",ids:["2234595"]}              | 1         |
+| Node[19549]{name:"Neil M. Ferguson",id:"1766275",ids:["1766275"]}             | Node[23025]{name:"Erik Bloomquist",id:"2283832",ids:["2283832"]}              | 1         |
+| Node[49957]{name:"Henk. M. Verheul",id:"7465131",ids:["7465131"]}             | Node[33105]{name:"Domenico Ribatti",id:"4374870",ids:["4374870"]}             | 1         |
+| Node[34938]{ids:["3007981"],id:"3007981",name:"Tien-Chin Wang"}               | Node[37102]{ids:["1705314"],id:"1705314",name:"Nigel Shadbolt"}               | 1         |
+| Node[48598]{name:"Predrag Radivojac",id:"1693041",ids:["1693041"]}            | Node[26472]{name:"Andreas Martin Lisewski",id:"3254491",ids:["3254491"]}      | 1         |
+| Node[45544]{name:"Natalie J. Dorà",id:"4694704",ids:["4694704"]}              | Node[36461]{name:"Baljean Dhillon",id:"1860660",ids:["1860660"]}              | 1         |
+| Node[48610]{name:"Iddo Friedbergco-chair",id:"Iddo Friedbergco-chair",ids:[]} | Node[26468]{name:"R. Matthew Ward",id:"2234595",ids:["2234595"]}              | 1         |
++---------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+10 rows
+----
+
+----
+call algo.pageRank('
+MATCH (a:Author) RETURN id(a) as id
+','
+MATCH (a:Author)-[:WROTE]->(p)-[:CITES]->(p2)-[:WROTE]-(a2:Author)
+RETURN id(a) as source, id(a2) as target, count(*) as weight
+',{writeProperty:"citationRank"});
+----
+
+----
++---------------------------------------------------------------------------------------------------------+
+| nodes  | iterations | loadMillis | computeMillis | writeMillis | dampingFactor | write | writeProperty  |
++---------------------------------------------------------------------------------------------------------+
+| 208358 | 20         | 285        | 152           | 2359        | 0.85          | true  | "citationRank" |
++---------------------------------------------------------------------------------------------------------+
+----
+
+== Bad data Citations
+
+Really low number of citations between authors
+
+----
+MATCH (a:Author)-[:WROTE]->(p)-[:CITES]->(p2)-[:WROTE]-(a2:Author)
+WITH a, a2, count(*) as c
+RETURN count(*);
+----
+
+----
++----------+
+| count(*) |
++----------+
+| 1086     |
++----------+
+----
+
+
+----
+MATCH (a:Author)
+WITH size( (a)-[:WROTE]->() ) as papers
+RETURN min(papers),max(papers),avg(papers),stdev(papers);
+----
+
+----
++----------------------------------------------------------------------+
+| min(papers) | max(papers) | avg(papers)        | stdev(papers)       |
++----------------------------------------------------------------------+
+| 1           | 4           | 1.0179216335840549 | 0.13886871383672497 |
++----------------------------------------------------------------------+
+----
+
+
+== Total Citations
+
+----
+MATCH (a:Author)-[:WROTE]->(p)-[:CITES]->(p2) return count(*);
+----
+
+----
++----------+
+| count(*) |
++----------+
+| 385747   |
++----------+
+1 row
+----
+
+!! Data Quality issue - Papers without authors
+
+----
+MATCH (p:Paper) WHERE NOT EXISTS ( (p)<-[:WROTE]-() ) RETURN count(*);
+----
+
+----
++----------+
+| count(*) |
++----------+
+| 153771   |
++----------+
+1 row
+----
+
+----
+MATCH (a:Author)-[:WROTE]->(p)-[:CITES]->(p2)<-[:WROTE]-(a2:Author)
+WITH id(a) as source, id(a2) AS target, count(*) AS weight
+RETURN count(*);
+----
+
+----
+MATCH (a:Author)
+RETURN a.name, a.citationRank 
+ORDER BY a.citationRank DESC LIMIT 10;
+----
+
+
+=== Via Co-Authorship
+
+----
+MATCH (a:Author)-[:WROTE]->(p)<-[:WROTE]-(a2:Author)
+WHERE id(a) < id(a2)
+RETURN a, a2, count(*) as jointWorks
+ORDER BY jointWorks desc limit 10;
+----
+
+----
++--------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| a                                                                     | a2                                                                      | jointWorks |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Node[25337]{name:"Sohachi Fujimoto",id:"3810583",ids:["3810583"]}     | Node[25339]{name:"Takehiko Tokura",id:"6434101",ids:["6434101"]}        | 2          |
+| Node[43248]{ids:["4855760"],id:"4855760",name:"Katsuo Kamata"}        | Node[43249]{name:"Tsuneo Kobayashi",id:"3796151",ids:["3796151"]}       | 2          |
+| Node[24005]{name:"Ingmar Gräßlin",id:"5117763",ids:["5117763"]}       | Node[24006]{name:"Peter C Mazurkewitz",id:"7600298",ids:["7600298"]}    | 2          |
+| Node[32947]{ids:["5218246"],id:"5218246",name:"Clare Tanton"}         | Node[32952]{name:"Nigel Mark Field",id:"5144119",ids:["5144119"]}       | 2          |
+| Node[34668]{ids:["2822835"],id:"2822835",name:"S. Matsumoto"}         | Node[34670]{ids:["1727786"],id:"1727786",name:"Osamu Hasegawa"}         | 2          |
+| Node[20608]{ids:["1947267"],id:"1947267",name:"Michel Galley"}        | Node[20610]{name:"Christopher D. Manning",id:"1812612",ids:["1812612"]} | 2          |
+| Node[22023]{name:"Charles-Edouard Luyt",id:"5139479",ids:["5139479"]} | Node[22026]{name:"Jean-Louis Trouillet",id:"3883729",ids:["3883729"]}   | 2          |
+| Node[19099]{name:"Armando Tartaro",id:"3303162",ids:["3303162"]}      | Node[19103]{ids:["3290746"],id:"3290746",name:"C Colosimo"}             | 2          |
+| Node[36457]{name:"Panagiotis Douvaras",id:"4823274",ids:["4823274"]}  | Node[36463]{ids:["2864065"],id:"2864065",name:"Robert E Hill"}          | 2          |
+| Node[32952]{name:"Nigel Mark Field",id:"5144119",ids:["5144119"]}     | Node[32961]{ids:["2000230"],id:"2000230",name:"Pam Sonnenberg"}         | 2          |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------+
+----
+
+== Papers by Topics
+
+----
+MATCH (t:Topic)
+RETURN t.name, size( (t)<-[:TOPIC]-() ) as papers
+ORDER BY papers DESC limit 10;
+----
+
+----
++---------------------+
+| t.name     | papers |
++---------------------+
+| "IRON"     | 9      |
+| "Diagram"  | 7      |
+| "WSN"      | 7      |
+| "FMRI"     | 7      |
+| "Grammar"  | 7      |
+| "QOS"      | 7      |
+| "Solver"   | 6      |
+| "Workflow" | 6      |
+| "MAPK"     | 6      |
+| "RUN"      | 6      |
++---------------------+
+10 rows
+----
+
+=== Data Quality 
+
+----
+MATCH (t:Topic)
+RETURN sum(size( (t)<-[:TOPIC]-() )) as papers;
+----
+
+----
++--------+
+| papers |
++--------+
+| 8105   |
++--------+
+----
+
+----
+MATCH (t:Topic)
+WITH size( (t)<-[:TOPIC]-() ) as papers
+RETURN min(papers),max(papers),avg(papers),stdev(papers);
+----
+
+----
++---------------------------------------------------------------------+
+| min(papers) | max(papers) | avg(papers)        | stdev(papers)      |
++---------------------------------------------------------------------+
+| 1           | 9           | 1.2300804370921221 | 0.6464604079931016 |
++---------------------------------------------------------------------+
+----
+
+----
+MATCH (p:Paper)
+WITH size( (p)-[:TOPIC]->() ) as topics
+RETURN min(topics),max(topics),avg(topics),stdev(topics);
+----
+
+----
++-----------------------------------------------------------------------+
+| min(topics) | max(topics) | avg(topics)          | stdev(topics)      |
++-----------------------------------------------------------------------+
+| 0           | 11          | 0.049973795357155286 | 0.4887248060014789 |
++-----------------------------------------------------------------------+
+----
+
+
+MATCH (p1:Paper)-[:TOPIC]->(t)<-[:TOPIC]-(p2:Paper)
+WITH p1,p2,count(*) as c
+RETURN count(*), min(c),max(c),avg(c),stdev(c);
+
++----------------------------------------------------------------------+
+| count(*) | min(c) | max(c) | avg(c)             | stdev(c)           |
++----------------------------------------------------------------------+
+| 4528     | 1      | 4      | 1.0198763250883418 | 0.1574391448325709 |
++----------------------------------------------------------------------+
+1 row
+299 ms
+
+
+MATCH (t1:Topic)<-[:TOPIC]-(p)-[:TOPIC]->(t2:Topic)
+WITH t1,t2,count(*) as c
+RETURN count(*), min(c),max(c),avg(c),stdev(c);
+
++-----------------------------------------------------------------------+
+| count(*) | min(c) | max(c) | avg(c)            | stdev(c)             |
++-----------------------------------------------------------------------+
+| 30938    | 1      | 3      | 1.003232270993594 | 0.057889745017254114 |
++-----------------------------------------------------------------------+
+
+call algo.pageRank.stream('
+MATCH (t:Topic) RETURN id(t) as id
+','
+MATCH (t1:Topic)<-[:TOPIC]-(p)-[:TOPIC]->(t2:Topic)
+RETURN id(t1) as source,id(t2) as target,count(*) as weight
+',{graph:'cypher', writeProperty:'pageRankTopic'}) yield node, score
+RETURN node.name, score ORDER BY score DESC LIMIT 10;
+
++---------------------------------------+
+| node.name        | score              |
++---------------------------------------+
+| "IRON"           | 5.106112           |
+| "Diagram"        | 4.4019125          |
+| "QOS"            | 4.379217499999999  |
+| "FMRI"           | 4.2699075          |
+| "WSN"            | 4.258543           |
+| "Workflow"       | 3.803062           |
+| "RUN"            | 3.7803414999999996 |
+| "Solver"         | 3.6833479999999996 |
+| "Access Control" | 3.6448685          |
+| "HPV"            | 3.636462           |
++---------------------------------------+
+
+call algo.betweenness.stream('
+MATCH (t:Topic) RETURN id(t) as id
+','
+MATCH (t1:Topic)<-[:TOPIC]-(p)-[:TOPIC]->(t2:Topic)
+RETURN id(t1) as source,id(t2) as target,count(*) as weight
+',{graph:'cypher'}) yield nodeId, centrality
+WITH nodeId, centrality ORDER BY centrality DESC LIMIT 10
+MATCH (n) where id(n) = nodeId
+RETURN n.name, centrality;
+
+
++---------------------------------+
+| n.name     | centrality         |
++---------------------------------+
+| "Solver"   | 1581878.922389675  |
+| "IRON"     | 1504124.3297995715 |
+| "Gesture"  | 1314330.928461745  |
+| "Dialogue" | 1066340.251505527  |
+| "Metal"    | 985222.4081491737  |
+| "MIP"      | 958640.4611548017  |
+| "BaLL"     | 921815.9772922356  |
+| "FMRI"     | 912038.6048485138  |
+| "Relay"    | 900563.0683939058  |
+| "WSN"      | 878020.9716260983  |
++---------------------------------+
+
+call algo.closeness.stream('
+MATCH (t:Topic) RETURN id(t) as id
+','
+MATCH (t1:Topic)<-[:TOPIC]-(p)-[:TOPIC]->(t2:Topic)
+RETURN id(t1) as source,id(t2) as target,count(*) as weight
+',{graph:'cypher'}) yield nodeId, centrality
+WITH nodeId, centrality ORDER BY centrality DESC LIMIT 10
+MATCH (n) where id(n) = nodeId
+RETURN n.name, centrality;
+
++----------------------------------------------+
+| n.name                          | centrality |
++----------------------------------------------+
+| "Secondhand Smoke"              | 6588.0     |
+| "Fuel"                          | 6588.0     |
+| "TDT"                           | 6588.0     |
+| "Key Frame"                     | 6588.0     |
+| "CLIP"                          | 6588.0     |
+| "L-cysteine Desulfhydrase"      | 6588.0     |
+| "Seed Germination"              | 6588.0     |
+| "BonnPlace"                     | 6588.0     |
+| "Routability"                   | 6588.0     |
+| "Fractional Integral Operators" | 6588.0     |
++----------------------------------------------+
+
+
+== Data Import
+
+=== Example from semanticscholar site
+
+See: http://labs.semanticscholar.org/corpus/
+
+----
+{
+  "id": "060e50b8752fdd799201fd9570e0bb668f017402",
+  "title": "A review of Web searching studies and a framework for future research",
+  "paperAbstract": "Research on Web searching is at an incipient stage. ...",
+  "keyPhrases": [
+    "OPAC",
+    "..."
+  ],
+  "authors": [
+    {
+      "ids": [
+        "7981846"
+      ],
+      "name": "Bernard J. Jansen"
+    },
+    "..."
+  ],
+  "inCitations": [
+    "81027fc698ca6f49f506c3d5cf679178f3c74df1",
+    "..."
+  ],
+  "outCitations": [
+    "3811f1176f27b4030bda7b6e431e6ce45cb89996",
+    "2b0a8ac61e63a6c4dca5290b93b7622976a6b273",
+    "..."
+  ],
+  "year": 2001,
+  "s2Url": "http://semanticscholar.org/paper/060e50b8752fdd799201fd9570e0bb668f017402",
+  "venue": "Seattle Tech Conf",
+  "journalName": "Seattle JournalPedia",
+  "journalVolume": "10",
+  "journalPages": "32832"
+}
+----
+
+----
+export file="file:///Users/mh/Downloads/papers-2017-10-30-sample/papers-2017-10-30-sample.json.gz"
+:param file="file:///Users/mh/Downloads/papers-2017-10-30-sample/papers-2017-10-30-sample.json.gz"
+----
+
+== First Look at the Data
+
+----
+mkdir papers.db; cp -r plugins papers.db; bin/neo4j-shell -config neo4j.conf -path papers.db
+NOTE: Local Neo4j graph database service at 'papers.db'
+Welcome to the Neo4j Shell! Enter 'help' for a list of commands.
+
+export file="file:///Users/mh/Downloads/papers-2017-10-30-sample/papers-2017-10-30-sample.json.gz"
+
+call apoc.load.json($file) yield value as paper
+return count(*);
+
++----------+
+| count(*) |
++----------+
+| 10000    |
++----------+
+1 row
+3584 ms
+
+call apoc.load.json($file) yield value as paper
+return paper limit 1;
+
+{journalVolume -> "24 6", journalPages -> "718-21", year -> 2012, outCitations -> [], s2Url -> "http://semanticscholar.org/paper/00006a10a193210d00589a59ba9b0a346a258325", id -> "00006a10a193210d00589a59ba9b0a346a258325", authors -> [{name -> "Andrea D. Foebel", ids -> ["4888852"]},{name -> "John P. Hirdes", ids -> ["3325893"]},{name -> "George A. Heckman", ids -> ["5316482"]}], journalName -> "Aging clinical and experimental research", paperAbstract -> "BACKGROUND AND AIMS
+For older individuals living in the community with chronic diseases such as heart failure (HF), caregivers may play an important role in medication adherence. This role may be 
+....
+important strategy in allowing clinically complex older adults to remain safely at home.", keyPhrases -> [], inCitations -> ["409c1608b434cd7d91a2c6b3edd102bc948270aa","fe45b0c3bf1b233fcc2485d693791630e5757a40","2abb6750263c4c31d0f9357e8c7ccfd162f8f564","ed888a8ebde7bd29bd7058bcc2f8f2b683f68ea2","74f05d8c82fe25976a8d7faee268e441e650e085","268229be0be39036a93ed313acc21116147a44b7","607e748206b9d61e6578cf1319c990e1288da7cb","ef4d26222dde3fb5ec457c52582396425cd8ae85"], pdfUrls -> [], title -> "Caregiver status affects medication adherence among older home care clients with heart failure.", venue -> "Aging clinical and experimental research"}
+----
+
+=== Creating Indexes
+
+----
+create constraint on (n:Paper)   assert n.id is unique;
+create constraint on (n:Journal) assert n.name is unique;
+create constraint on (n:Author)  assert n.id is unique;
+create constraint on (n:Topic)   assert n.name is unique;
+create constraint on (n:Journal) assert n.name is unique;
+
+create index on :Author(name);
+create index on :Paper(title);
+----
+
+.Only for smaller samples (up to 1M records)
+----
+call apoc.load.json($file) yield value as paper
+with paper skip 1700000 limit 200000
+merge (p:Paper {id:paper.id}) ON CREATE SET p.title = paper.title, p.abstract = paper.paperAbstract, p.year = paper.year, p.url = paper.s2Url, p.venue = paper.venue
+foreach (phrase IN paper.keyPhrases | merge (t:Topic {name:phrase}) MERGE (p)-[:TOPIC]->(t))
+foreach (author IN paper.authors | MERGE (a:Author {id:coalesce(head(author.ids),author.name)}) SET a.ids = author.ids, a.name = author.name MERGE (a)-[:WROTE]->(p))
+foreach (cit IN paper.inCitations | MERGE (op:Paper {id:cit}) MERGE (op)-[:CITES]->(p))
+foreach (cit IN paper.outCitations | MERGE (op:Paper {id:cit}) MERGE (p)-[:CITES]->(op))
+with * where paper.journalName <> ""
+merge (j:Journal {name:paper.journalName})
+merge (p)-[pu:PUBLISHED]->(j) SET pu.volume = paper.journalVolume, pu.pages = paper.journalPages;
+----
+
+
+----
+// sample file
+export file="file:///Users/mh/Downloads/papers-2017-10-30-sample/papers-2017-10-30-sample.json.gz"
+
+// full file
+export file="file:///mnt/ssdbig/data/papers/papers-2017-10-30.json.gz"
+----
+
+----
+call apoc.load.json($file) yield value as paper
+with apoc.map.clean(paper,[],[null,""]) as paper
+create (p:Paper {id:paper.id}) SET p.title = paper.title, p.abstract = paper.paperAbstract, p.year = paper.year, p.url = paper.s2Url, p.venue = paper.venue
+foreach (phrase IN paper.keyPhrases | merge (t:Topic {name:phrase}) MERGE (p)-[:TOPIC]->(t))
+foreach (author IN paper.authors | MERGE (a:Author {id:coalesce(head(author.ids),author.name)}) SET a.ids = author.ids, a.name = author.name MERGE (a)-[:WROTE]->(p))
+foreach (cit IN paper.inCitations | MERGE (op:Paper {id:cit}) MERGE (op)-[:CITES]->(p))
+foreach (cit IN paper.outCitations | MERGE (op:Paper {id:cit}) MERGE (p)-[:CITES]->(op))
+with * where paper.journalName <> ""
+merge (j:Journal {name:paper.journalName})
+merge (p)-[pu:PUBLISHED]->(j) SET pu.volume = paper.journalVolume, pu.pages = paper.journalPages;
+----
+
+.Results for Sample
+----
+Nodes created: 208358
+Relationships created: 207088
+Properties set: 338854
+Labels added: 208358
+17175 ms
+----
+
+// too slow due to exception as flow control
+//
+
+.Batched Import for large dataset
+----
+call apoc.periodic.iterate('
+call apoc.load.json("'+$file+'") yield value as paper
+return apoc.map.clean(paper,[],[null,""]) as paper
+','
+create (p:Paper {id:paper.id}) SET p.title = paper.title, p.abstract = paper.paperAbstract, p.year = paper.year, p.url = paper.s2Url, p.venue = paper.venue
+foreach (phrase IN paper.keyPhrases | merge (t:Topic {name:phrase}) MERGE (p)-[:TOPIC]->(t))
+foreach (author IN paper.authors | MERGE (a:Author {id:coalesce(head(author.ids),author.name)}) SET a.ids = author.ids, a.name = author.name MERGE (a)-[:WROTE]->(p))
+foreach (cit IN paper.inCitations | MERGE (op:Paper {id:cit}) MERGE (op)-[:CITES]->(p))
+foreach (cit IN paper.outCitations | MERGE (op:Paper {id:cit}) MERGE (p)-[:CITES]->(op))
+with * where paper.journalName <> ""
+merge (j:Journal {name:paper.journalName})
+merge (p)-[pu:PUBLISHED]->(j) SET pu.volume = paper.journalVolume, pu.pages = paper.journalPages
+',{batchSize:10000,iterateList:true});
+----
+
+
+----
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| batches | total | timeTaken | committedOperations | failedOperations | failedBatches | retries | errorMessages | batch                                                   | operations                                                      |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 1       | 10000 | 47        | 10000               | 0                | 0             | 0       | {}            | {total -> 1, committed -> 1, failed -> 0, errors -> {}} | {total -> 10000, committed -> 10000, failed -> 0, errors -> {}} |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+1 row
+48687 ms
+----
+
+== Data Quality
+
+In the sample there are very few authors with more papers, and also very few papers per topic.
+
+----
+call apoc.load.json("file:///Users/mh/Downloads/papers-2017-10-30-sample/papers-2017-10-30-sample.json.gz") yield value as paper
+where size(paper.authors) = 0
+return count(*);
+----
+
+----
++----------+
+| count(*) |
++----------+
+| 1586     |
++----------+
+----
+
+----
+call apoc.load.json("file:///Users/mh/Downloads/papers-2017-10-30-sample/papers-2017-10-30-sample.json.gz") yield value as paper
+where size(paper.keyPhrases) = 0
+return count(*);
+----
+
+----
++----------+
+| count(*) |
++----------+
+| 8225     |
++----------+
+1 row
+----
+
+----
+call apoc.load.json("file:///Users/mh/Downloads/papers-2017-10-30-sample/papers-2017-10-30-sample.json.gz") yield value as paper
+return sum(size(paper.keyPhrases));
+----

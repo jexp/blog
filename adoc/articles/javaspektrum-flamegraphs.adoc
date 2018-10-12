@@ -1,0 +1,216 @@
+= Heiße Bohne - Java Profiling mit Flamegraphs
+
+Eine meiner liebsten Beschäftigungen ist das finden von Hotspots in Programmen und deren Behebung.
+So kann ich mit wenig Aufwand zu of ziemlich beeindruckenden Performance-Steigerungen beitragen und habe auch noch Spass dabei.
+Wie findet man diese Hotspots effektiv? Darum soll es in der heutigen Kolumne gehen.
+
+Informationen aus Performance-Profilern sind oft nicht leicht zu verstehen, bzw. im Kontext zu erfassen.
+Entweder man sieht die "Hauptverdächtigen", d.h. Methoden die in Summe die meiste Zeit benötigt haben, was aber in größeren Systemen nicht so aussagekräftig ist.
+
+Oder man muss händisch in die Detailinformationen abtauchen, die dann nur einen spezifischen Aufrufpfad aufschlüsseln.
+
+Besonders wenn sich die festgestellte Verweilzeit unterschiedlich auf die Methode selbst (self-time) und ihre Aufrufe
+verteilt, ist es nicht trivial festzustellen, an welcher Stelle jetzt die Zeit verbraucht wird.
+
+Wenn man korrektere Informationen über Aufrufhäufigkeiten und -zeiten erhalten möchte, benötigt man einen instrumentierten Profiler-Lauf, der starken Einfluss auf die Laufezeit.
+Die ansonsten genutzten "Sampling"-Profiler betrachten nur ganz viele Stacktraces, die nur an Safepoints erhalten werden können und damit ein verzerrtes Bild der Wirklichkeit zeichnen.
+Könnten wir für Java nur auch Profiler zu nutzen, die viel tiefer im System ansetzen und damit genauer arbeiten und unsere Anwendungen weniger beeinflussen.
+
+
+// Und auch wenn das manuell noch für einen einzigen Profiler-Snapshot machbar ist, bekommt man so nur partielle Informationen.
+
+Es wäre auch viel schöner die Verteilung der Laufzeit im Sinne einer Heat-Map auf verschiedene Systemteile und Methoden auf einen Blick zu sehen und diese auch noch über mehrere Läufe vergleichbar zu machen.
+
+Eine Heat-Map stellt aber nur eine Ebene des Aufrufgraphen (Call-Graph) dar.
+Mit *Flame-Graphs* hat Brendan Gregg (performance engineer, u.a. DTrace), eine Darstellungsform gefunden, die mehreren Anforderungen gerecht wird:
+
+- Verteilung des Anteils an der Laufzeit vertikal innerhalb einer Aufrufkette
+- Verteilung des Anteils an der Laufzeit horizontal über alle parallel ablaufenden Operationen
+- farbliche Kodierung von Hotspots
+- Vergleichbarkeit mehrerer Läufe mittels konsistenter Darstellung
+- Drill Down mit interakiven SVG
+
+“Flame graphs are a visualization of profiled
+software, allowing the most frequent codepaths
+to be identified quickly and accurately.”
+
+image::
+
+Und wie gut sichtbar ist, passt der Name perfekt.
+
+Flame-Graphs können viele Aspekte (Anteile an CPU, Speicher, IO) darstellen, für die Visualisierung von Performance- und Profilinginformationen sind sie aber besonders gut geeignet.
+Daher möchte ich zunächst kurz auf die verschiedenen Arten von Profiling eingehen, bevor wir am praktischen Beispiel zeigen, wie man jeweils Flame-Graphen für diese Ansätze erzeugen kann.
+
+== Flame Graphs
+
+todo more detail?
+
+Flame-Graphs stellen Anteile des Verbrauchs einer Resource dar, wobei horizontal der Anteil and der Gesamtlaufzeit und vertikal der Anteil innerhalb einer Aufrufkette dargestellt wird.
+Horizontale Blöcke sind alphabetisch sortiert, um die Stack-Frames soweit wie möglich zusammenzuführen.
+Damit können auch nebeläufige Programme über alle Threads gut analysiert werden.
+Jedes Rechteck ist ein "Stack-Frame", das oberste Element sind die Methoden die die eigentliche Arbeit ausführen, und nicht nur weiterdelegieren.
+Die Blöcke im "Fundament" sind die Ausgangpunkte für Aufrufe z.B. "main" oder Einsprungspunkte für Threads (z.B. Socket Listeners).
+Die Breite der Blöcke stellt die Aufrufhäufigkeit jedes Stackframes dar, die proportional zur Laufzeit sind.
+
+Sie sind interaktive SVG Darstellungen die Detailinformationen per mouse-over darstellen und auch das Hereinzoomen in einen bestimmten "Gipfel" erlauben.
+
+Das verarbeitete Eingabeformat ist eine semikolon-separierte Liste von Stack-Frames, deren Vorkommenshäufigkeit den Anteil an der Laufzeit repräsentiert.
+
+TODO simples beispiel ausgabe von point?
+
+>>> The x-axis shows the stack profile population, sorted alphabetically (it is not the passage of time), and the y-axis shows stack depth. Each rectangle represents a stack frame. The wider a frame is is, the more often it was present in the stacks. The top edge shows what is on-CPU, and beneath it is its ancestry.
+
+Die Farben werden standardmässig zufällig aus einer Palette gewählt, können aber angepasst werden.
+
+Interpretation:
+
+...
+Große Blöcke auf der Spitze stellen finale Operationen dar, die viel Laufzeitanteil haben, also potentielle Hotspots.
+Dasselbe trifft auf breite Blöcke in der Mitte zu, die viel Anteil an der Gesamtlaufzeit haben, aber eher durch ihre Komplexität (Vielzahl von Verantwortlichkeiten).
+Hohe Flammen zeigen eine große Stacktiefe an, die zumeist auch nicht vorteilhaft ist.
+// hohe Anzahl von Methodenaufrufen -> Overhead?
+...
+
+Brendan Gregg zeigt auf seinem Blog, wie man mittels `jstack` und Google's "Lightweight Java Profiler" schon Flame Graphs von Java Anwendungen erzeugen kann.
+
+Java Flight Recorder generiert ebenso detaillierte Stacktraces.
+xxxx nutzt den JFR Parser von Marcus Hirt, um die relevanten Informationen für Flame-Graphs zu extrahieren.
+
+== Intro Profiling
+
+Wir alle wissen dass "premature optimization" nicht sinnvoll ist. 
+Sinnvoll strukturierte Systeme machen es viel leichter Hotspots einzugrenzen und diese dann lokal zu optimieren.
+
+Die Leistung von Anwendungen wird durch viele Umgebungsparameter begrenzt - Kapazität von CPU, Speicher, Bandbreite und Latenz zu Netzwerk und Speichermedien.
+In der heutigen Zeit ist es leichter Module eines Systems getrennt zu skalieren, z.B. durch Cloud-Deployment, wie zum Beispiel in "Release It" von Michael Nygard dargestellt (HungerJSXX).
+
+Aber natürlich ist Skalierung keine finale Lösung für hausgemachte Performanceprobleme.
+Ungünstige Ansätze, Datenstrukturen und Algorithmen führen dazu dass unnötig Objekte erzeugt werden, benötigte Komplexität der Lösung die CPU an ihre Grenzen treibt oder mehr Speicher genutzt wird als notwendig.
+
+Um herauszufinden, wo es Flaschenhälse gibt, werden verschiedene Arten von Profiling eingesetzt, die nachfolgend kurz erläutert werden sollen.
+
+Neben dem Profiling, dass man während der Entwicklung oder des Testes durchführt wird heutzutage auch of APM (Application Performance Monitoring) in Produktivsystemen eingesetzt.
+Damit werden kontinuierlich Performance-Indikatoren gesammelt und miteinander korreliert.
+Es werden sowohl Systeminformationen wie CPU-, Netzwerk und Speicherauslastung gesammelt.
+Dazu werden die Nutzer/Client-Interaktionen überwacht, bis zu individuellem Request-Tracking mit Latenz, Laufzeit und Verweildauer in den verschiedenen Schichten des Systems.
+
+TODO picture APM
+
+Aus der Korrelation können kritische Entwicklungen rechtzeitig erkannt und gegengesteuert werden (z.B. mittels Auto-Scaling, oder Backpressure).
+Auch nach 
+
+MicroBenchmarking wie JMH ist am besten geeignet, um verschiedene Lösungen gegeneinander zu testen (HungerJSXX) und ggf. Regressionen festzustellen.
+
+== Profiling-Ansätze
+
+Es gibt verschiedenste Ansätze zum Profiling in der JVM, die sich zum einen in ihrer Genauigkeit, im Aufwand, den Leisungseinbussen im laufenden System und Integration in die JVM unterscheiden.
+
+=== Sampling
+
+Der verbreitetste Ansatz ist das Sampling, dafür muss die laufende JVM und das Programm nicht modifiziert werden. Dabei werden in regelmässigen Abständen (xxx ms) Thread-Dumps des Systems erstellt und miteinander korreliert.
+Daraus könenn zum einen Call-Chains und die Verweildauer in einzelnen Methoden abgeleitet werden. 
+
+Die Granularität der Messung bestimmt wie korrekt diese Korrelation ist, falls die Abtastfrequenz zu gering ist, können z.b. kurze Methodenaufrufe nicht erfasst werden.
+
+Ausserdem werden zum teil "false positives" ermittelt, d.h. Methoden die häufig aufgerufen werden, selbst aber nur sehr kurze Verweildauern haben, können
+
+Ein Nachteil der Methode ist dass 
+
+Diese Methode ist schnell und hat nur wenig Einfluss (10-20% ?) auf die untersuchte Anwendung.
+
+=== Instrumentation
+
+Bei der Instrumentation wird der Byte-Code der Anwendung mittels java-agent modifiziert und an
+
+=== Java Flight Recorder (JFR)
+
+Java Flight Recorder ist ein sehr nützliches Tool der Oracle JVM, es erlaubt, viele Metriken während des Programmablaufs detailliert zu protokollieren, ohne die Performance der JVM zu sehr zu beeinflussen.
+Da JFR bisher nur als kommerzielles Feature zur Verfügung stand, muss man es speziell aktivieren:
+
+`java ... -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -XX:StartFlightRecording=duration=30s,filename=my_recording.jfr -XX:FlightRecorderOptions=stackdepth=256`
+
+Diese Recordings können dann z.b. in Java Mission Control (JMC) geladen und analyisiert werden.
+
+Und dankenswerterweise auch als Flame Graphs, zum einem bequem mit dem JetBrains Plugin, das JFR Dateien lädt und als Flame-Graphs anzeigt (und noch weitere Features hat).
+
+Zum anderen kann man aus JFR Aufzeichnungen auch direkt Flame-Graphs erstellen: 
+
+TODO HIRT OSS JMC/JFR
+
+http://psy-lob-saw.blogspot.de/2017/02/flamegraphs-intro-fire-for-everyone.html
+
+=== Perf
+
+Perf ist ein (Linux) Kommandozeilentool, das System- und Funktionsaufrufe auf dem Betriebsystemlevel protokolliert.
+Es kann
+ZINE
+
+=== APM
+
+
+== Flame-Graphs
+
+=== Historie
+
+=== Tools
+
+
+==== Jetbrains Plugin
+
+nstrumentation Java Profiler & Flamegraph Visualizer 
+Quick Start 
+Use Flight Recorder to profile your program and then open flamegraph:
+Run JVM with following VM options: -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -XX:StartFlightRecording=duration=30s,filename=my_recording.jfr
+Open visualizer Tools | Flamegraph Profiler | Upload File...
+Upload my_recording.jfr
+Performance Recording 
+Plugin lets you record performance of Java program with instrumentation profiler.
+To specify methods that will be recorded open Tools | Flamegraph Profiler | Edit Configuration...
+To run program with profiler select the desired run configuration and choose Run with profiler
+Also you can configure profiler to save value of method's parameters or it's return value. This should be done if you want to see how parameters influence method's performance. To enable this option check 'Save' checkbox beside type of parameter(s) when editing pattern in configuration.
+Visualizing Results 
+You can analyze performance of your program with Flamegraph Visualizer. 
+It supports following files:
+ser files generated by Flamegraph Profiler
+jfr files generated by Flight Recorder
+Yourkit csv files. To generate csv file from a snapshot run following script: java -jar -Dexport.call.tree.cpu -Dexport.csv /lib/yjp.jar -export ~/Snapshots/.snapshot
+Files in flamegraph format
+Ways to open visualizer:
+After executing program with the profiler choose Tools | Flamegraph Profiler | Open Results... to see the result.
+To upload your .jfr or .ser file choose Tools | Flamegraph Profiler | Upload File...
+Detailed description at github.com/kornilova-l/flamegraph-visualizer
+
+
+=== Beispiel
+
+Arten von Profiling
+* JFR, Sampling, ...
+
+Live tracking, APM ?
+
+* JFR
+* Netflix
+* IntellJ Plugin
+* Perf
+
+== Referenzen
+
+* https://en.wikipedia.org/wiki/Brendan_Gregg
+* FlameGraphs-Intro: http://www.brendangregg.com/flamegraphs.html
+* FlameGraphs-GitHub https://github.com/brendangregg/FlameGraph
+* FlameGraphs-JVM https://blog.codecentric.de/en/2017/09/jvm-fire-using-flame-graphs-analyse-performance/
+* ACM: https://queue.acm.org/detail.cfm?id=2927301
+* Netflix-Flamescope: https://medium.com/netflix-techblog/netflix-flamescope-a57ca19d47bb
+* https://nodesource.com/blog/understanding-cpu-flame-graphs/
+* Video - Gregg - Visualizing Performance with Flame Graph: https://www.youtube.com/watch?v=D53T1Ejig1Q
+* Jetbrains Plugin Flamegraph Profiler: https://plugins.jetbrains.com/plugin/10305-flamegraph-profiler
+* JFR Flamegraphs: https://github.com/chrishantha/jfr-flame-graph
+
+* http://psy-lob-saw.blogspot.de/2017/02/flamegraphs-intro-fire-for-everyone.html
+* https://qconlondon.com/system/files/presentation-slides/illuminatingthejvm-qconlondon.pdf
+* http://isuru-perera.blogspot.de/2015/05/flame-graphs-with-java-flight-recordings.html
+* https://medium.com/netflix-techblog/java-in-flames-e763b3d32166
+* http://www.brendangregg.com/blog/2014-06-12/java-flame-graphs.html
+* https://github.com/brendangregg/FlameGraph/blob/master/stackcollapse-jstack.pl
+* http://www.brendangregg.com/FlameGraphs/cpuflamegraphs.html
+// * http://isuru-perera.blogspot.de/2015/05/flame-graphs-with-java-flight-recordings.html 

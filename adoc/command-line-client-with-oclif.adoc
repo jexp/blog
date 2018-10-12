@@ -1,0 +1,342 @@
+== Writing a Command-Line Database Client in 10 Minutes Using OCLIF with TypeScript
+
+This week I came across the https://engineering.salesforce.com/open-sourcing-oclif-the-cli-framework-that-powers-our-clis-21fbda99d33a["OCLIF, sOpen Source Command Line Framework"^] by SalesForce/Heroku in a medium post by Jeff Dickey.
+
+I was intrigued, it looked really easy and clean (also due to TypeScript) and I knew from past experience that there is a lot of chore and boilerplate involved in CLIs.
+The https://oclif.io/docs/[documentation^] and examples also looked realld good.
+
+I spent a good amount of time in both neo4j-shell and cypher-shell, both in Java, so I wanted to give JavaScript a try.
+
+Having used the https://github.com/neo4j/neo4j-javscript-driver[neo4j-javascript-driver^] before for graph visualization, I knew it was quite straightforward and fast.
+
+The driver sends Cypher queries via the binary Bolt protocol to the database and also handles smart routing, transactions and retries.
+
+For a pretty output I chose `ascii-table` a neat JS library to produce pretty tables for the terminal.
+
+Basically you have to provide a *bolt-url*, *username* and *password* and a *query* to run, so I imagine our client to look like this.
+
+----
+boltsh -a bolt://host:port -u neo4j -p pa55w0rd "MATCH (n:Person) RETURN n.name, n.age LIMIT 10"
+----
+
+=== Video
+
+I recorded a session of doing this coding. 
+It comes down to 15 minute runtime, mostly due to the typing.
+Feel free to watch it at 2x :)
+
+++++
+<iframe width="560" height="315" src="https://www.youtube.com/embed/H3Hq7pncPS4" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+++++
+
+=== Running a Neo4j Instance
+
+To get Neo4j running with some data, you can either install https://neo4j.com/download[Neo4j Desktop^], which is an electron app for managing databases, and create a project with a local, empty database.
+
+Or you can launch a https://neo4j.com/sandbox[Neo4j Sandbox^], and chose a "Blank Sandbox".
+Please note the server-ip address and the *bolt* port as well as *username* and *password* from the "Details Tab".
+
+In both cases after launching the "Neo4j Browser", which is just a nice React based frontend (and also uses the neo4j-javascript-driver), please enter and run in the top command-line.
+
+----
+:play movie graph
+----
+
+This gives you a slideshow, where on the 2nd page you see a huge statement to create sample data, click and run that and you should see Tom Hanks visualized with a bunch of his movies and some of the directors.
+
+image:http://guides.grails.org/neo4j-movies/img/neo4j-clickcode.png[width=400]
+image:http://guides.grails.org/neo4j-movies/img/neo4j-runcode.png[width=400]
+
+=== Getting started with OCLIF
+
+It's very straightforward, you decide if you want a multi- or single-command client and run the appropriate `npx` (npx execution thingy) command.
+
+----
+npx oclif single boltsh
+----
+
+////
+----
+? npm package name boltsh
+? command bin name the CLI will export boltsh
+? description Cypher Bolt Shell
+? author Michael Hunger @jexp
+? version 0.0.0
+? license MIT
+? node version supported >=8.0.0
+? github owner of repository (https://github.com/OWNER/repo) jexp
+? github name of repository (https://github.com/owner/REPO) boltsh
+? optional components to include yarn (npm alternative), mocha (testing framework), typescript (static typing for javascript), tslint (static analysis tool for typescript)
+----
+////
+
+This asks you a few questions about the name, license, github-repo and generates a skeleton, in our case for a single-command CLI.
+
+To see if everything worked, you can run the `./bin/run` command and should see an output like this:
+
+----
+./bin/run
+hello world from /Users/mh/d/js/boltsh/src/index.ts!
+----
+
+Ok, so we can find the code to edit in that file which is a https://oclif.io/docs/commands.html[Command^] class, nice!
+Opening it in the editor, we see that we can add a description, an usage example and start adding the https://oclif.io/docs/flags.html[flags^] mentioned above.
+
+We set all flags to required, and provide defaults for `address` and `user`.
+Then we can also add the `query` https://oclif.io/docs/flags.html[argument^], which is also required.
+
+[source]
+----
+import { Command, flags } from '@oclif/command'
+
+class Boltsh extends Command {
+  static description = 'Execute Cypher Queries via Bolt'
+
+  static examples = [
+    `$ boltsh -a bolt://localhost -u neo4j -p test "MATCH (n:Person) return n.name"
+n.name
+Keanu Reeves
+Tom Hanks
+...
+`,
+  ]
+
+  static flags = {
+    version: flags.version({ char: 'v' }),
+    help: flags.help({ char: 'h' }),
+
+    address: flags.string({ char: 'a', description: 'bolt address', required: true, default: 'bolt://localhost' }),
+    user: flags.string({ char: 'u', description: 'neo4j user', required: true, default: 'neo4j' }),
+    password: flags.string({ char: 'p', description: 'user password', required: true }),
+  }
+
+  static args = [{ name: 'query', required: true, description: 'Cypher Query to Run' }]
+
+  async run() {
+    const { args, flags } = this.parse(Boltsh)
+
+    this.log(`boltsh: ${flags.address} ${flags.user} ${args.query} from ${__filename}!`)
+  }
+}
+
+export = Boltsh
+----
+
+So we can output our inputs and give it a go.
+As a nice side-effect, the `run` command also runs the TypeScript compiler, so we don't have to do that manually.
+
+----
+./bin/run -p test "MATCH (n:Person) RETURN n.name"
+boltsh: bolt://localhost neo4j MATCH (n:Person) RETURN n.name from /Users/mh/d/js/boltsh/src/index.ts!
+----
+
+Cool, now we can add the neo4j-driver and send our query to the server:
+
+----
+yarn add neo4j-driver
+----
+
+.Add imports on top
+[source]
+----
+import * as neo4j from 'neo4j-driver'
+----
+
+You'll find the details of the https://neo4j.com/docs/api/javascript-driver/current/[Neo4j Driver API here^].
+
+1. We'll create a driver with our address, user and password, and acquire as session, which we use to run the query.
+2. Get the results and output the record-keys of the first row as headers and the values of all records as rows, all tab-separated.
+3. At the bottom we also output the total number of rows and the time taken from the result-summary.
+
+(Note that the Neo4j driver uses it's own Number type for Numbers as Javascript can't express 64 bit numbers.)
+
+[source]
+----
+async run() {
+  const { args, flags } = this.parse(Boltsh)
+
+  const driver = neo4j.v1.driver(flags.address, neo4j.v1.auth.basic(flags.user, flags.password))
+  const session = driver.session()
+  const result = await session.run(args.query)
+  session.close()
+  driver.close()
+  const records = result.records;
+  if (records.length > 0) {
+    // header
+    this.log(records[0].keys.join("\t"))
+    // rows
+    records.forEach(r => this.log(r.keys.map(k => r.get(k)).join("\t")))
+  
+    this.log(`Returned ${records.length} row(s) in ${result.summary.resultAvailableAfter.toNumber() + result.summary.resultConsumedAfter.toNumber()} ms.`)
+  } else {
+    this.log('No Results.')
+  }
+}
+----
+
+If we run our test again, it "just works". Cool!
+
+----
+./bin/run -p test "MATCH (n:Person) RETURN n.name limit 2"
+
+n.name
+Keanu Reeves
+Carrie-Anne Moss
+Returned 2 row(s) in 3 ms.
+----
+
+Now we can make it pretty with https://github.com/sorensen/ascii-table[`ascii-table`^]
+
+----
+yarn add ascii-table
+----
+
+As ascii-table doesn't come with typescript definition, the compiler would error, that's why we have to declare the module in a separate file:
+
+.src/ambient.d.ts
+----
+declare module 'ascii-table';
+----
+
+Again, add the imports, this time we add a non-required flag `-t` that switches on table mode.
+
+[source]
+----
+import * as AsciiTable from 'ascii-table'
+----
+
+Then we construct and output the `AsciiTable` instance instead of plain text when that flag is set.
+
+[source]
+----
+static flags = {
+  // ...
+  table: flags.boolean({ char: 't', description: 'Table Format' })
+}
+
+async run() {
+  const { args, flags } = this.parse(Boltsh)
+
+  const driver = neo4j.v1.driver(flags.address, neo4j.v1.auth.basic(flags.user, flags.password))
+  const session = driver.session()
+  const result = await session.run(args.query)
+  session.close()
+  driver.close()
+  const records = result.records;
+  if (records.length > 0) {
+    // extract data to be rendered
+    const data = { heading: records[0].keys, rows: records.map(r => r.keys.map(k => r.get(k))) }
+    if (flags.table) {
+      const table = AsciiTable.factory(data)
+      this.log(table.toString())
+    } else {
+      this.log(data.heading.join("\t"))
+      data.rows.forEach(r => this.log(r.join("\t")))
+    }
+    this.log(`Returned ${records.length} row(s) in ${result.summary.resultAvailableAfter.toNumber() + result.summary.resultConsumedAfter.toNumber()} ms.`)
+  } else {
+    this.log('No Results.')
+  }
+}
+----
+
+So let's give this a try and see what our table looks like:
+
+----
+./bin/run -p test -t "MATCH (n:Person) RETURN n.name limit 10"
+.--------------------.
+|       n.name       |
+|--------------------|
+| Keanu Reeves       |
+| Carrie-Anne Moss   |
+| Laurence Fishburne |
+| Hugo Weaving       |
+| Lilly Wachowski    |
+| Lana Wachowski     |
+| Joel Silver        |
+| Emil Eifrem        |
+| Charlize Theron    |
+| Al Pacino          |
+'--------------------'
+Returned 10 row(s) in 25 ms.
+----
+
+Also a more complex query looks good:
+
+.Find people return their name and birth-year and 3 of their movie titles.
+----
+./bin/run -p test -t "MATCH (n:Person)-->(m:Movie) RETURN n.name, n.born, collect(m.title)[0..3] as movies limit 10"
+.-------------------------------------------------------------------------------------.
+|       n.name       | n.born |                        movies                         |
+|--------------------|--------|-------------------------------------------------------|
+| Diane Keaton       | 1946   | Something's Gotta Give                                |
+| Christina Ricci    | 1980   | Speed Racer                                           |
+| Robert Zemeckis    | 1951   | Cast Away,The Polar Express                           |
+| Renee Zellweger    | 1969   | Jerry Maguire                                         |
+| Brooke Langton     | 1970   | The Replacements                                      |
+| Kiefer Sutherland  | 1966   | A Few Good Men,Stand By Me                            |
+| Greg Kinnear       | 1963   | As Good as It Gets,You've Got Mail                    |
+| Ed Harris          | 1950   | Apollo 13                                             |
+| Bruno Kirby        | 1949   | When Harry Met Sally                                  |
+| Laurence Fishburne | 1961   | The Matrix,The Matrix Reloaded,The Matrix Revolutions |
+'-------------------------------------------------------------------------------------'
+Returned 10 row(s) in 16 ms.
+----
+
+What's nice about OCLIF that it comes with batteries included, e.g. we can run `boltsh --help` to get a proper help page:
+
+----
+./bin/run --help
+Execute Cypher Queries via Bolt
+
+USAGE
+  $ boltsh QUERY
+
+ARGUMENTS
+  QUERY  Cypher Query to Run
+
+OPTIONS
+  -a, --address=address    (required) [default: bolt://localhost] bolt address
+  -h, --help               show CLI help
+  -p, --password=password  (required) user password
+  -u, --user=user          (required) [default: neo4j] neo4j user
+  -v, --version            show CLI version
+
+EXAMPLE
+  $ boltsh -a bolt://localhost -u neo4j -p test "MATCH (n:Person) return n.name"
+  n.name
+  Keanu Reeves
+  Tom Hanks
+  ...
+
+----
+
+In the article mentioned at the beginning, Jeff shows how to build a multi-command cli, but the code is basically the same as ours, only that you have multiple comments.
+
+Check out their https://oclif.io/docs[documentation^] and link:https://github.com/oclif?utf8=%E2%9C%93&q=example&type=&language=[examples^].
+
+OCLIF also has a plugin infrastructure, and there area already link:https://github.com/oclif?utf8=%E2%9C%93&q=plugin&type=&language=[a few plugins], like self-update. I hope we'll see more.
+
+I think OCLIF is really nicely done by the folks at Heroku, thanks a lot @JeffDickey.
+
+Cool, mission accomplished, now all that remains is to push to https://github.com/jexp/boltsh[GitHub^] and https://www.npmjs.com/package/boltsh[publish to npm^].
+
+----
+npm install -g boltsh
+  /usr/local/bin/boltsh -> /usr/local/lib/node_modules/boltsh/bin/run
+  + boltsh@0.0.0
+  added 40 packages from 24 contributors in 6.616s
+
+boltsh -t -p test "MATCH (m:Movie) RETURN m.title, m.released, m.tagline LIMIT 2"
+.----------------------------------------------------------------------------------.
+|        m.title         | m.released |                 m.tagline                  |
+|------------------------|------------|--------------------------------------------|
+| The Matrix Reloaded    | 2003       | Free your mind                             |
+| The Matrix Revolutions | 2003       | Everything that has a beginning has an end |
+'----------------------------------------------------------------------------------'
+Returned 2 row(s) in 1 ms.
+----
+
+So why don't you give it a try and built a CLI of your own.
+
+Happy Hacking

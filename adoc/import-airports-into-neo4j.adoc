@@ -1,0 +1,247 @@
+= The Airport Graph
+:img: ../img
+
+Here is how you turn a big JSON file of airports into a useful graph.
+
+Thanks a lot to https://twitter.com/MiasmaOfANerd[Vivien Giraud] for posting the dataset link on the https://neo4j.com/slack[neo4j-users Slack].
+
+https://twitter.com/MiasmaOfANerd/status/1050261564387942400
+
+The dataset is a https://gist.githubusercontent.com/386er/84a78c9dd226a9395818/raw/dbed7a575d899876bff063a3590081f40816309e/airports.json[list of airports] with some geo-information like `city`, `country` and location (longitude, latitude) as well as airport specific designations like `iata` and a list of `destination` airports.
+
+----
+{
+  "City": "Postville",
+  "DBTZ": "A",
+  "Name": "Postville Airport",
+  "Country": "Canada",
+  "IATA/FAA": "YSO",
+  "Longitude": "-59.785278",
+  "ICAO": "CCD4",
+  "Airport ID": "7252",
+  "Latitude": "54.910278",
+  "Timezone": "223",
+  "DST": "-4",
+  "destinations": [
+    "5492",
+    "188",
+    "5502"
+  ]
+},
+----
+
+For Twitter, I had to cut the import statement a bit, but it fit into a Tweet:
+
+https://twitter.com/mesirii/status/1050161136585322496
+
+Let's do this step by step:
+
+== Creating Indexes and Constraints
+
+Let's create some indexes and constraints to speed up the import process and make airports findable by name, iata or geolocation.
+
+[source,cypher]
+----
+CREATE CONSTRAINT ON (a:Airport) ASSERT a.id IS UNIQUE;
+CREATE INDEX ON :Airport(Name);
+CREATE INDEX ON :Airport(iata);
+CREATE INDEX ON :Airport(location);
+----
+
+
+== Cleaning and Importing the Data
+
+Thanks to the https://r.neo4j.com/apoc[APOC library] (my baby), we have a bunch of procedures and functions available to help us with the import.
+
+First we will use `apoc.load.jsonArray` to load the data into a stream of values, each value is a map/dict/hash/object of data.
+
+----
+WITH "https://r.neo4j.com/airports" AS url
+CALL apoc.load.jsonArray(url) yield value
+RETURN count(*) as entries, sum(size(value.destinations)) as connections
+----
+
+----
+╒═════════╤═════════════╕
+│"entries"│"connections"│
+╞═════════╪═════════════╡
+│3266     │37181        │
+└─────────┴─────────────┘
+----
+
+Next we MERGE (get-or-create) the `:Airport` node based on the `Airport ID` field.
+
+----
+MERGE (a:Airport {id:value.`Airport ID`})
+----
+
+Then we can utilize `apoc.map.clean` to get rid of unwanted keys and values that we don't want to set unchanged on our `:Airport` node, 
+in our case `["Airport ID","Latitude","Longitude","DST","Timezone","destinations","IATA/FAA"]` as keys and `["",null]`.
+That function is really handy for cleaning out data to import, we can _set its result directly as properties_ on our newly created node.
+
+Then we also set the other properties, like the geolocation: `a.location = point({latitude:toFloat(value.Latitude), longitude: toFloat(value.Longitude)})` 
+,the `iata` with a nicer name or some converted to actual numbers.
+
+----
+SET a += apoc.map.clean(apoc.convert.toMap(value),["Airport ID","Latitude","Longitude","DST","Timezone","destinations","IATA/FAA"],["",null]),
+  a.iata = value.`IATA/FAA`, a.DST = toInteger(value.DST), a.Timezone = toInteger(value.Timezone), a.location = point({latitude:toFloat(value.Latitude), longitude: toFloat(value.Longitude)})
+----
+
+Next we turn the `destinations` field into as series or rows with `UNWIND value.destinations as dest`. 
+That `dest` contains the id of our `target` airports, which we also get-or-create with `MERGE`, in case they are not there yet.
+
+In the last step we `MERGE` the `CONNECTS` relationship, note that I left off the directional arrow, so that only one relationshis is created per pair.
+
+And here is the import statement in its full beauty:
+
+[source,cypher]
+----
+WITH "https://r.neo4j.com/airports" AS url
+CALL apoc.load.jsonArray(url) yield value
+MERGE (a:Airport {id:value.`Airport ID`})
+SET a += apoc.map.clean(apoc.convert.toMap(value),["Airport ID","Latitude","Longitude","DST","Timezone","destinations","IATA/FAA"],["",null]),
+  a.iata = value.`IATA/FAA`, a.DST = toInteger(value.DST), a.Timezone = toInteger(value.Timezone), a.location = point({latitude:toFloat(value.Latitude), longitude: toFloat(value.Longitude)})
+WITH *
+UNWIND value.destinations as dest
+MERGE (b:Airport {id:dest})
+MERGE (a)-[:CONNECTS]-(b);
+----
+
+So if we look at our data visually, it looks like this:
+
+image::{img}/airports-browser.jpg[]
+
+As a bonus we can set the geographic distance between two airports as a `distance` property on the `CONNECTS` relationship.
+
+[source,cypher]
+----
+MATCH (a:Airport)-[r:CONNECTS]->(b:Airport)
+SET r.distance = distance(a.location, b.location);
+----
+
+== Visualizing the data
+
+What I always find impressive, is how the regular force-layout of a graph can already represent a map just based on connected locations or areas.
+
+In the past I saw that with world-borders or US-states being correctly aligned just by the graph layout.
+
+We have the same here, with the whole world if we pull the graph into https://neo4j.com/bloom[Neo4j Bloom]
+
+image::{img}/airports-bloom.jpg[]
+
+Bloom also allows us to use _graph patterns_ to specify a path through airports:
+
+`Airport iata JFK Airport iata ORD  Airport iata LHR`
+
+image::{img}/airports-bloom-path.jpg[]
+
+== Routing
+
+We can do some visual shortest path computation in Bloom by just selecting two nodes and choosing the "path -> shortest path" menu entry:
+
+image:{img}/airports-bloom-shortest-path.jpg[width=450]
+image:{img}/airports-bloom-shortest-path-result.jpg[width=450]
+
+Behind the scenes it just runs:
+
+[source,cypher]
+----
+MATCH (a:Airport {iata: 'CHG'}),(b:Airport {iata: 'YYT'})
+RETURN shortestPath((a)-[:CONNECTS*]-(b)) as path
+----
+
+But we can also use the `dijkstra` algorithm for routing, exposed via APOC, that takes our `distance` relationship property into account.
+
+There is another handy APOC function to take a random set of items out of a collection, for just playing around 
+
+[source,cypher]
+----
+MATCH (a:Airport)
+WITH apoc.coll.randomItems(collect(a), 2, false) as airports
+CALL apoc.algo.dijkstra(airports[0],airports[1],'CONNECTS','distance') yield path,weight
+RETURN path,weight/1000 limit 1
+----
+
+In Bloom we can add this query as a "search phrase", which then allows non-developer users to use routing like you would on a website:
+
+----
+MATCH (a0:Airport {iata:$start}),(a1:Airport {iata:$end})
+CALL apoc.algo.dijkstra(a0,a1,'CONNECTS','distance') yield path,weight
+RETURN path,weight/1000 LIMIT 1
+----
+
+image::{img}/airports-bloom-phrase.jpg[width=500]
+
+And then use it as a regular "business user".
+
+image::{img}/bloom-airports-routing.jpg[]
+
+That's it. 
+I hope you have some fun with the dataset and am looking forward to your suggestions.
+
+////
+// airports and destinations
+// thanks to https://twitter.com/MiasmaOfANerd
+// for pointing it out: https://twitter.com/MiasmaOfANerd/status/1050261564387942400
+// WITH "https://gist.githubusercontent.com/386er/84a78c9dd226a9395818/raw/dbed7a575d899876bff063a3590081f40816309e/airports.json" as url
+
+create constraint on (a:Airport) assert a.id is unique;
+create index on :Airport(Name);
+create index on :Airport(iata);
+
+WITH "https://r.neo4j.com/airports" AS url
+CALL apoc.load.jsonArray(url) yield value
+MERGE (a:Airport {id:value.`Airport ID`})
+ON CREATE SET a += apoc.map.clean(apoc.convert.toMap(value),["Airport ID","Latitude","Longitude","DST","Timezone","destinations","IATA/FAA"],["",null]),
+  a.iata = value.`IATA/FAA`, a.DST = toInteger(value.DST), a.Timezone = toInteger(value.Timezone), a.location = point({latitude:toFloat(value.Latitude), longitude: toFloat(value.Longitude)})
+WITH *
+UNWIND value.destinations as dest
+MERGE (b:Airport {id:dest})
+MERGE (a)-[:CONNECTS]-(b);
+
+// set distances for routing
+MATCH (a:Airport)-[r:CONNECTS]->(b:Airport)
+SET r.distance = distance(a.location, b.location);
+
+
+// Tweet variant
+
+WITH "https://r.neo4j.com/airports" AS url
+CALL apoc.load.jsonArray(url) yield value
+MERGE (a:Airport {id:value.`Airport ID`})
+ON CREATE SET a += apoc.convert.toMap(value)
+WITH *
+UNWIND value.destinations as dest
+MERGE (b:Airport {id:dest})
+MERGE (a)-[:CONNECTS]-(b);
+
+
+match (a:Airport)
+with apoc.coll.randomItems(collect(a), 4, false) as airports
+with airports[0] as a0 ,airports[1] as a1, airports[2] as a2, airports[3] as a3,airports
+optional match path = (a0)--(a1)--(a2)--(a3)
+return airports, path limit 1
+
+
+match (a:Airport)
+with apoc.coll.randomItems(collect(a), 2, false) as airports
+with airports, airports[0] as a0 ,airports[1] as a1
+call apoc.algo.dijkstra(a0,a1,'CONNECTS','distance') yield path,weight
+return airports,path,weight/1000 limit 1
+
+
+match (a0:Airport {iata:$start}),(a1:Airport {iata:$end})
+call apoc.algo.dijkstra(a0,a1,'CONNECTS','distance') yield path,weight
+return path,weight/1000 
+limit 3
+
+https://www.dropbox.com/s/3g4q0k93k85ah2x/bloom-airports-routing.jpg?dl=0
+// neo4j bloom
+
+// Airport connects Airport
+// Layouts the world properly
+// https://www.dropbox.com/s/o51ilv5xuj55paw/airports-bloom-1.jpg?dl=0
+
+// Airport iata JFK Airport iata ORD  Airport iata LHR
+
+////

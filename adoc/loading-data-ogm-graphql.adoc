@@ -1,0 +1,257 @@
+= Loading Graph Data for An Object Graph Mapper or GraphQL
+
+An interesting way to load complex data structures from a graph into objects is using nested pattern comprehensions in Cypher, Neo4j's query language.
+
+The approach I want to describe today, originates from experiences that gathered and improved over the years while working on _Spring Data Neo4j and Neo4j-OGM_.
+The same approach is used in the _neo4j-graphql_ integration, the Neo4j-PHP-OGM and in py2neo's OGM, the Neode Javascript OGM and probably in some more.
+
+Today we focus on loading a specific slice of data into an object network using a mapping description.
+I wrote an earlier article on https://medium.com/@mesirii/5-tips-tricks-for-fast-batched-updates-of-graph-structures-with-neo4j-and-cypher-73c7f693c8cc[efficiently writing data to the graph in batches^].
+
+As the example dataset we'll use our usual supect, the built-in movie database that you can create via the `:play movies` command in the Neo4j-Browser by executing the huge data creation statement on the 2nd slide.
+
+== Object Graph Mapping
+
+To map graph data to objects in your stack of choice, you usually need some kind of description or mapping.
+
+You could also _load the graph data directly_, so each node and relationship has an 1:1 representation as an object, which sometimes, is the best solution.
+Then you could just use the appropriate bolt driver to load node and relationship-objects and either wrap or convert them into objects of your choice as needed.
+
+At other times either constraints from your domain or use-case _require different kinds of mappings_.
+Those can then either described in mapping information that is provided externally, like a [graphql-schema with directivies^], or a JSON or XML mapping-description.
+Or you can derive it from the class data structures for the target objects, which can again contain additional annotations for type or name mapping or specific projections.
+
+.graphql schema
+----
+type Movie {
+    title: ID!
+    released: Int
+    tagline: String
+
+    actors: [Person] @relation(name:"ACTED_IN", direction:IN)
+
+    director: Person @relation(name:"DIRECTED", direction:IN)
+}
+----
+
+.Spring Data Neo4j Movie Class
+----
+@NodeEntity
+public class Movie {
+
+    @Id
+    @GeneratedValue
+	private Long id;
+
+    @Indexed
+	private String title;
+	private int released;
+	private String tagline;
+
+	@Relationship(type = "ACTED_IN", direction = Relationship.INCOMING)
+	private List<Role> roles;
+}
+----
+
+Based on that mapping information and your starting points, you then load your root entities, for example a set of users or movies and then related objects to a determined depth or all the way down.
+
+Often you need to specify a depth, because otherwise due to the connectedness of the graph you would pull the whole database over the wire and into memory.
+Sometimes your subgraphs are isolated, then it's possible to load until you reach the end.
+
+Another important bit is *what to load*.
+
+Imagine a movie with with its cast, directors, generes, but potentially millions of ratings.
+Then in most cases you don't want to load all these ratings, just the movie and its few related entities.
+Therefore it would be useful, if either the default mapping expressed that (i.e. leaves off the ratings) or you could control what parts to load or skip at loading time.
+
+Also you might not want to load all properties from the database, e.g. imagine the movie node also contained the full script or poster images, which are rarely needed on in the loaded entity and could be fetched on demand.
+
+== Different Solutions
+
+One approach, that was used in early versions of Neo4j-OGM was just to MATCH an arbitrary _variable length path pattern_ to the required depth and then return all paths.
+That requires to transport much more data over the wire, which you then have to deconstruct and sort out along the path and hydrate your objects as needed.
+Also you cannot selectively load fields for your objects.
+
+[source,cypher]
+----
+MATCH (m:Movie) WHERE ...
+MATCH path = (m)-[*..5]-()
+RETURN path
+----
+
+To match only selected parts of your object graph that wouldn't work as you have only limited control over which relationship-types and directions to load.
+And it get's trickier deeper down esp. when relationship-types and directions potentially overlap.
+
+[source,cypher]
+----
+MATCH (m:Movie) WHERE ...
+MATCH path = (m)-[:ACTED_IN|:DIRECTED|:HAS_GENRE*..5]-()
+RETURN path
+----
+
+
+The direct approach, would find the root entity and then MATCH related entities, collect each of them into lists and return the compound representation.
+Here is an example.
+
+[source,cypher]
+----
+MATCH (m:Movie) WHERE ...
+OPTIONAL MATCH (m)<-[:ACTED_IN]-(a)
+WITH m, collect(a) as actors
+OPTIONAL MATCH (m)<-[:DIRECTED]-(d)
+WITH m, actors, collect(d) as directors
+OPTIONAL MATCH (m)-[:IN_GENRE]->(g)
+RETURN m, actors, directors, collect(g) as genres
+----
+
+This only works well(ish) on the first level, for nested matches it gets quite difficult to correctly match and collect only the entities you want.
+Also all those matches and collects put additional strain on the query engine, especially for large results.
+
+*Pattern Comprehensions for the rescue.*
+
+== Pattern Comprehensions and Map Projections
+
+I wrote an https://neo4j.com/blog/cypher-graphql-neo4j-3-1-preview/[introductory blog post^] a few years ago, but here is another quick explaination.
+
+What are *pattern comprehensions*?
+
+A pattern comprehension is a subquery-like expression added to Cypher by Andrés Taylor to allow for some of the nested query capabilities of GraphQL.
+
+Similar in syntax to list comprehensions, they allow you to define a pattern (even with new variable declarations), an optional `WHERE` filter clause and a result projection expression.
+
+That projection expression can be anything, a node or relationship, a nested map or list or a scalar value.
+The result of such an pattern comprehension is always a list of the projection results.
+
+Here are some examples:
+
+.Example 1 - attributes of related entities
+[source,cypher]
+----
+MATCH (m:Movie)
+RETURN m, [(m)<-[:ACTED_IN]-(a:Person) | a.name] as actors
+----
+
+.Result 1
+----
+╒══════════════════════╤══════════════════════════════════════════╕
+│"m.title"             │"actors"                                  │
+╞══════════════════════╪══════════════════════════════════════════╡
+│"The Matrix Reloaded" │["Laurence Fishburne","Hugo Weaving","Car │
+├──────────────────────┼──────────────────────────────────────────┤
+│"The Devil's Advocate"│["Al Pacino","Charlize Theron","Keanu Ree │
+├──────────────────────┼──────────────────────────────────────────┤
+│"As Good as It Gets"  │["Helen Hunt","Jack Nicholson","Cuba Good │
+----                                                                                           
+
+.Example 2 - Filter Related Entities
+[source,cypher]
+----
+MATCH (m:Movie)
+RETURN m, [(m)<-[:ACTED_IN]-(a:Person) WHERE a.born > 1975 | a] as actors
+----
+
+.Example 3 - Filter and Map expression with several Attributes
+[source,cypher]
+----
+MATCH (m:Movie)
+RETURN m, [(m)<-[:ACTED_IN]-(a:Person) WHERE a.name STARTS WITH 'T' | {name: a.name, id:id(a), label:'Actor'}] as actors
+----
+
+.Result 3
+----
+╒════════════════╤═════════════════════════════════════════════════╕
+│"m.title"       │"actors"                                         │
+╞════════════════╪═════════════════════════════════════════════════╡
+│"The Matrix"    │[]                                               │
+├────────────────┼─────────────────────────────────────────────────┤
+│"A Few Good Men"│[{"name":"Tom Cruise","id":921,"label":"Actor"}] │
+├────────────────┼─────────────────────────────────────────────────┤
+│"You've Got Mail│[{"name":"Tom Hanks","id":976,"label":"Actor"}]  │
+----
+
+While this might seem equivalent to a `MATCH` and `collect`, the nice thing is that this *is an expression*, so _it can be used wherever expressions are allowed_.
+And as the pattern comprehension's projection is again an expression, you can also nest them.
+
+Another cool feature that was added at the same time, were *map projections*.
+
+Those allow you to take any map-like entity - nodes, relationships and maps, and use a subscript in curly braces to extract either
+
+* individual attributes like `.name`, 
+* all attributes with `.*` or 
+* add additional entries, like `label:'Actor'` or `total: count(*)`.
+
+.Map Projection Example
+[source,cypher]
+----
+MATCH (movie:Movie)<-[:ACTED_IN]-(p:Person)
+RETURN movie { .title, .released, cast: collect(p.name)} as data
+----
+
+.Result
+----
+╒═══════════════════════════════════════════════════════════════╕
+│"data"                                                         │
+╞═══════════════════════════════════════════════════════════════╡
+│{"title":"What Dreams May Come","cast":["Robin Williams",      │
+│"Annabella Sciorra","Cuba Gooding Jr.","Werner Herzog",        │
+│"Max von Sydow"],"released":1998}                              │
+├───────────────────────────────────────────────────────────────┤
+│{"title":"Something's Gotta Give","cast":["Jack Nicholson",    │
+│"Keanu Reeves","Diane Keaton"],"released":2003}                │
+├───────────────────────────────────────────────────────────────┤
+│{"title":"Johnny Mnemonic","cast":["Takeshi Kitano",           │
+│"Keanu Reeves","Ice-T","Dina Meyer"],"released":1995}          │
+----
+
+This approach can be used to only extract the attributes that you actually want to load for the mapping and skip all that are either irrelevant or huge.
+Both of which can also be fetched later on demand.
+
+== How to Use these Concepts for Data Loading
+
+Given that pattern comprehensions act like subqueries, and that their expressions, can either be map projections or again pattern comprehensions, we can nest them as needed to achieve our goals.
+The result of such an expression is basically a nested document, that then can be traversed on the client-side to hydrate your tree of objects,  while making sure to not create duplicate instances.
+
+To identify nodes (and relationships) uniquely you can either use an id-field as indicated by the mapping, or the built-in Neo4j ids (which you shouldn't expose to other systems).
+
+_What would this look like for our Movie example?_
+
+Imagine we wanted to load only `title`, `released` year and actors, directors (with their other movies) and genres for each movie we fetch.
+
+Then our generated statement (driven by the mapping information) would look something like this:
+
+[source,cypher]
+----
+MATCH (m:Movie) WHERE ...
+RETURN m { id: id(m), .title, .released,
+         actors: [(m)<-[:ACTED_IN]-(a) | a {.id, .name, .born } ], 
+         directors: [(m)<-[:DIRECTED]-(d) | d { .id, .name, .born, 
+            movies: [(d)-[:DIRECTED]->(m2) WHERE m2 <> m | m2 { id: id(m), .title, .released} ]}], 
+         genres: [(m)-[:IN_GENRE]->(g) | g { .id, .name }] } as data
+----
+
+
+This pattern can now be combined with filters when loading our root objects, e.g 
+
+* for a single entity by id,
+* multiple ones by any index lookup operation (text or ranges)
+* a pattern matching operation, or
+* even all of the entities.
+
+Additionally even at the nested pattern comprehensions we can use additional filter, that is something we use quite a lot in the https://grandstack.io[neo4j-graphql integrations] for field arguments.
+
+This was probably a lot to take it, so  make sure to try out and understand the individual parts before putting them together.
+And then go forth and load your graph data effectively.
+These tools are useful not just for folks building object graph mappers but for everyone loading specific slices of graph data.
+
+Having your query return a JSON-like document makes it often easy to consume in many stacks.
+
+== References
+
+* https://medium.com/@mesirii/5-tips-tricks-for-fast-batched-updates-of-graph-structures-with-neo4j-and-cypher-73c7f693c8cc[efficiently batching updates^]
+* https://neo4j.com/developer/cypher[Cypher Query Language^]
+* https://neo4j.com/developer/spring-data-neo4j[Spring Data Neo4j and Neo4j-OGM^]
+* https://grandstack.io[GrandStack]
+* https://neo4j.com/developer/graphql[neo4j-graphql^]
+* https://github.com/graphaware/neo4j-php-ogm[Neo4j-PHP-OGM]
+* https://py2neo.org/v4/ogm.html[py2neo's OGM^]
+* https://github.com/adam-cowley/neode[Neode Javascript OGM^]
