@@ -12,7 +12,7 @@ image::https://www.graphcore.ai/hubfs/images/alexnet_label%20logo.jpg[width=300,
 I was inspired to look into putting neural network models into the graph by https://www.graphcore.ai/posts/what-does-machine-learning-look-like[this amazing article from graphcore.ai] which features impressive visualizations of compute networks and a really interesting discussion of the topic.
 
 
-Last week, my colleague http://twitter.com/akollegger[Andreas^] pointed me to https://venturebeat.com/2017/09/07/microsoft-and-facebook-launch-open-source-project-to-make-neural-networks-portable/[the recent announcment of Facebook and Microsoft^] to open-source the ONNX "Open Neural Network Exchange" project for an interoperable AI/ML/DeepLearning format.
+My colleague http://twitter.com/akollegger[Andreas^] pointed me to https://venturebeat.com/2017/09/07/microsoft-and-facebook-launch-open-source-project-to-make-neural-networks-portable/[the recent announcment of Facebook and Microsoft^] to open-source the ONNX "Open Neural Network Exchange" project for an interoperable AI/ML/DeepLearning format.
 
 ____
 Microsoft and Facebook have announced a new open source project today that’s aimed at creating a shared model representation for neural networks across different programming frameworks. Called the Open Neural Network Exchange (ONNX), the new project will make it possible to share models across the Cognitive Toolkit, PyTorch, and Caffe2.
@@ -32,6 +32,8 @@ ONNX is supposed to help solve one of the key issues in the machine learning eco
 Using ONNX, it’s possible for Facebook to export a trained model created with PyTorch and use it with Caffe2 for inference. That’s important for taking a model created in research (something that PyTorch is good at) and bringing it to production with Caffe2. Microsoft said that it’s working on releasing a version of Cognitive Toolkit (also known as CNTK) that supports ONNX.
 ____
 ////
+
+Since then Amazon also announce ONNX support for MX-Net: https://aws.amazon.com/blogs/ai/announcing-onnx-support-for-apache-mxnet/
 
 == Installing ONNX
 

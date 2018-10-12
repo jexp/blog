@@ -9,10 +9,13 @@ This is especially effective if you return large result volumes from the graph o
 
 You can determine if a query uses the compiled or interpreted runtime by prefixing it with `EXPLAIN` or `PROFILE`.
 
-You can also force a certain runtime by using `CYPHER RUNTIME=COMPILED/INTERPRETED MATCH ....`
-If the compiled runtime cannot handle your query, it will fall-back to the interpreted runtime for execution.
+You can also force a certain runtime by using `CYPHER RUNTIME=COMPILED/SLOTTED/INTERPRETED MATCH ....`
+
+If the compiled runtime cannot handle your query, it will fall-back to the slotted runtime for execution.
 
 It might be worthwhile to examine if any of your core, critical queries can be adapted to use the compiled runtime and perhaps move some work (like aggregation) into pre- or post-processing.
+
+// Unfortuantely the compiled runtime doesn't support parameters yet.
 
 == Compiled Clauses and Operations
 
@@ -40,7 +43,6 @@ match of simple patterns with
 * untyped relationships
 * directed, undirected
 * anonymous nodes
-* `OPTIONAL MATCH`
 
 === Predicates
 
@@ -64,6 +66,7 @@ match of simple patterns with
 === Projection/Aggregation
 
 * Aggregation, but only *`count(n)`* and *`count(distinct n)`*
+* Only single aggregation keys
 * DISTINCT 
 
 === Functions
@@ -106,6 +109,7 @@ RETURN id(sender) as source, t.value, id(receiver) as target
 
 === Clauses
 
+* `OPTIONAL MATCH`
 * mutation / update queries
 * UNION (ALL)
 * LOAD CSV
