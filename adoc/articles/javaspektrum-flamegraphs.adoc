@@ -1,163 +1,447 @@
 = Heiße Bohne - Java Profiling mit Flamegraphs
+:img: ../../img
 
-Eine meiner liebsten Beschäftigungen ist das finden von Hotspots in Programmen und deren Behebung.
-So kann ich mit wenig Aufwand zu of ziemlich beeindruckenden Performance-Steigerungen beitragen und habe auch noch Spass dabei.
-Wie findet man diese Hotspots effektiv? Darum soll es in der heutigen Kolumne gehen.
+Eine meiner liebsten Beschäftigungen ist das Finden von Performance-Hotspots in Programmen und deren Behebung.
+So kann ich mit wenig Aufwand zu of ziemlich beeindruckenden Leistungssteigerungen beitragen und habe auch noch Spass dabei.
+Wie findet man diese Hotspots effektiv? 
+Darum soll es in der heutigen Kolumne gehen.
 
-Informationen aus Performance-Profilern sind oft nicht leicht zu verstehen, bzw. im Kontext zu erfassen.
-Entweder man sieht die "Hauptverdächtigen", d.h. Methoden die in Summe die meiste Zeit benötigt haben, was aber in größeren Systemen nicht so aussagekräftig ist.
+Profiler sind Tools die während der Ausführung von Programmen Ereignisse aufzeichen, wie z.B. Methodenaufrufe, Speicherallokationen, IO-Nutzung usw. und dann aggregiert darstellen.
 
-Oder man muss händisch in die Detailinformationen abtauchen, die dann nur einen spezifischen Aufrufpfad aufschlüsseln.
+Zumeist werden in Java Tools wie JVisualVM, YourKit, JProfiler genutzt, ich selbst nehme auch gern `jvmtop` für die Kommandozeile.
+Diese können Informationen entweder oberflächlich mittels "sampling" oder genauer mittels Instrumentierung erfassen.
+Beide Ansätze haben ihre Nachteile aber zum Glück gibt es Alternativen dazu.
 
-Besonders wenn sich die festgestellte Verweilzeit unterschiedlich auf die Methode selbst (self-time) und ihre Aufrufe
-verteilt, ist es nicht trivial festzustellen, an welcher Stelle jetzt die Zeit verbraucht wird.
+Informationen aus Performance-Profilern sind oft nicht leicht korrekt zu verstehen, bzw. im Kontext zu erfassen.
+// Manchmal ähnelt die Suche nach der eigentlichen Ursache der nach der Nadel im Heuhaufen.
 
-Wenn man korrektere Informationen über Aufrufhäufigkeiten und -zeiten erhalten möchte, benötigt man einen instrumentierten Profiler-Lauf, der starken Einfluss auf die Laufezeit.
-Die ansonsten genutzten "Sampling"-Profiler betrachten nur ganz viele Stacktraces, die nur an Safepoints erhalten werden können und damit ein verzerrtes Bild der Wirklichkeit zeichnen.
-Könnten wir für Java nur auch Profiler zu nutzen, die viel tiefer im System ansetzen und damit genauer arbeiten und unsere Anwendungen weniger beeinflussen.
+Oft wird Profiling-Information als Liste von Methoden (sortiert nach Verweilzeit oder Anzahl Aufrufen) dargestellt.
+Dann sieht man die globalen "Hauptverdächtigen", d.h. Methoden die in Summe über alle Aufrufe die meiste Zeit benötigt haben (eigene Zeit und die der aufgerufenen Methoden), was aber in größeren Systemen nicht so aussagekräftig ist.
+Besonders wenn sich die festgestellte Verweilzeit unterschiedlich auf die Methode selbst (self-time) und ihre Aufrufe verteilt, ist es nicht trivial festzustellen, an welcher Stelle jetzt die Zeit verbraucht wird.
 
+Den dargestellten Informationen fehlt leider oft der Kontext sowohl der der Call-Hierarchie als auch der anderen Aufrufe auf demselben Level.
+Daher gibt es alternativ die aggregierte Repräsentation der Hierarchie der Aufrufkette mit der Möglichkeit zum Drill-Down (zu den aufgerufenen Methoden) oder rückwärts zu den verschiedenen Aufrufern der aktuellen Methode.
+Dort man muss händisch in die Detailinformationen abtauchen, die dann nur _einen spezifischen_ Aufrufpfad aufschlüsseln, die besonders bei tiefen Aufrufketten leicht die Breite der Darstellung sprengen und den Vergleich zu anderen Teilbäumen nicht ermöglichen.
+
+.Methodenliste und Baumdarstellung des YourKit Profiler
+image::{img}/profiler-method-list-example.jpg[]
+
+////
+Firstly, a profiler is a tool that lets you inspect a running program and collect statistics that tell you how much resources (think memory, disk, etc.) the program is using, how long method calls are taking, how much time is spent executing each part of the code, etc.
+////
 
 // Und auch wenn das manuell noch für einen einzigen Profiler-Snapshot machbar ist, bekommt man so nur partielle Informationen.
 
-Es wäre auch viel schöner die Verteilung der Laufzeit im Sinne einer Heat-Map auf verschiedene Systemteile und Methoden auf einen Blick zu sehen und diese auch noch über mehrere Läufe vergleichbar zu machen.
-
-Eine Heat-Map stellt aber nur eine Ebene des Aufrufgraphen (Call-Graph) dar.
-Mit *Flame-Graphs* hat Brendan Gregg (performance engineer, u.a. DTrace), eine Darstellungsform gefunden, die mehreren Anforderungen gerecht wird:
-
-- Verteilung des Anteils an der Laufzeit vertikal innerhalb einer Aufrufkette
-- Verteilung des Anteils an der Laufzeit horizontal über alle parallel ablaufenden Operationen
-- farbliche Kodierung von Hotspots
-- Vergleichbarkeit mehrerer Läufe mittels konsistenter Darstellung
-- Drill Down mit interakiven SVG
-
-“Flame graphs are a visualization of profiled
-software, allowing the most frequent codepaths
-to be identified quickly and accurately.”
-
-image::
-
-Und wie gut sichtbar ist, passt der Name perfekt.
-
-Flame-Graphs können viele Aspekte (Anteile an CPU, Speicher, IO) darstellen, für die Visualisierung von Performance- und Profilinginformationen sind sie aber besonders gut geeignet.
-Daher möchte ich zunächst kurz auf die verschiedenen Arten von Profiling eingehen, bevor wir am praktischen Beispiel zeigen, wie man jeweils Flame-Graphen für diese Ansätze erzeugen kann.
-
 == Flame Graphs
 
-todo more detail?
+Es wäre viel schöner die Verteilung der Laufzeit auf verschiedene Systemteile und Methoden wie in einer Heatmap  auf einen Blick zu sehen, und diese auch noch über mehrere Läufe vergleichbar zu machen.
+
+Eine Heatmap stellt aber nur eine Ebene des Aufrufgraphen (Call-Graph) dar.
+
+Mit *Flame-Graphs* hat Brendan Gregg (performance engineer, u.a. DTrace), eine geeignetere Darstellungsform gefunden:
+
+[quote,author=Brendan Gregg]
+____
+Ein Flame Graph ist eine Visualisierung von Profiler-Informationen, die es erlaubt häufig durchlaufene Code-Pfade schnell und korrekt zu identifizieren.
+____
+
+=== Darstellung
+
+- Verteilung des Anteils an der Laufzeit horizontal über alle parallel ablaufenden Operationen
+- Verteilung des Anteils an der Laufzeit vertikal innerhalb einer Aufrufkette
+- farbliche Kodierung von Hotspots
+- Vergleichbarkeit mehrerer Läufe mittels konsistenter Darstellung (alphabetische Sortierung)
+- Drill Down mit interaktivem SVG
+
+// TODO simpler?
+.Beispiel Flamegraph
+image::https://blog.codecentric.de/files/2017/09/flamegraph-spring-boot.png[]
+
+Offensichtlich ist der Name auch sehr passend.
+
+Flame-Graphs können viele Aspekte (Anteile an CPU, Speicher, IO) darstellen, für die Visualisierung von Performance- und Profilinginformationen sind sie aber besonders gut geeignet.
+Wenn man heute nach Flame Graphs sucht, findet man, dass sie überall genutzt werden, von Rails und Node Anwendungen über Haskell-Compiler-Analysen, GPU-Treiber bis zu Datenbankabfragen,
+
+// Flame Graphs in MSFT Windows Performance Analyzer (WPA)
+
+=== Erläuterung
 
 Flame-Graphs stellen Anteile des Verbrauchs einer Resource dar, wobei horizontal der Anteil and der Gesamtlaufzeit und vertikal der Anteil innerhalb einer Aufrufkette dargestellt wird.
 Horizontale Blöcke sind alphabetisch sortiert, um die Stack-Frames soweit wie möglich zusammenzuführen.
 Damit können auch nebeläufige Programme über alle Threads gut analysiert werden.
-Jedes Rechteck ist ein "Stack-Frame", das oberste Element sind die Methoden die die eigentliche Arbeit ausführen, und nicht nur weiterdelegieren.
+Jedes Rechteck ist ein "Stack-Frame", das oberste Element sind die Methoden, die die eigentliche Arbeit ausführen, und nicht nur weiterdelegieren.
 Die Blöcke im "Fundament" sind die Ausgangpunkte für Aufrufe z.B. "main" oder Einsprungspunkte für Threads (z.B. Socket Listeners).
 Die Breite der Blöcke stellt die Aufrufhäufigkeit jedes Stackframes dar, die proportional zur Laufzeit sind.
 
 Sie sind interaktive SVG Darstellungen die Detailinformationen per mouse-over darstellen und auch das Hereinzoomen in einen bestimmten "Gipfel" erlauben.
+Die Farben werden zufällig aus einer Palette gewählt, können aber angepasst werden.
 
-Das verarbeitete Eingabeformat ist eine semikolon-separierte Liste von Stack-Frames, deren Vorkommenshäufigkeit den Anteil an der Laufzeit repräsentiert.
+////
+The collapsed stacks format is itself an aggregation with no view on timing. So the order from left to right is only about merging, not time or anything else. We can see that stacks which share a common parent naturally aggregate under that parent. The width of each frame is it's relative total-time share. It's self-time share is it's top exposure, or how much of it is not covered by it's callees, the frames on top of it.
+////
 
-TODO simples beispiel ausgabe von point?
+=== Interpretation
 
->>> The x-axis shows the stack profile population, sorted alphabetically (it is not the passage of time), and the y-axis shows stack depth. Each rectangle represents a stack frame. The wider a frame is is, the more often it was present in the stacks. The top edge shows what is on-CPU, and beneath it is its ancestry.
-
-Die Farben werden standardmässig zufällig aus einer Palette gewählt, können aber angepasst werden.
-
-Interpretation:
-
-...
 Große Blöcke auf der Spitze stellen finale Operationen dar, die viel Laufzeitanteil haben, also potentielle Hotspots.
 Dasselbe trifft auf breite Blöcke in der Mitte zu, die viel Anteil an der Gesamtlaufzeit haben, aber eher durch ihre Komplexität (Vielzahl von Verantwortlichkeiten).
 Hohe Flammen zeigen eine große Stacktiefe an, die zumeist auch nicht vorteilhaft ist.
 // hohe Anzahl von Methodenaufrufen -> Overhead?
-...
 
-Brendan Gregg zeigt auf seinem Blog, wie man mittels `jstack` und Google's "Lightweight Java Profiler" schon Flame Graphs von Java Anwendungen erzeugen kann.
+Wenn der Flamegraph des Profils zu viele kleinteilige Informationen enthält, ist es am sinnvollsten, die interessanten Codestellen zu wiederholen.
+Desweiteren sollte, besonders für langlaufende Anwendungen, der stabile Zustand der JVM nach der Aktivierung des JIT-Compilers gemessen werden.
+// Daraus ergibt sich konsequenterweise, dass Läufe mittels JMH die besten Ergebnisse erzielen sollten, da hier sowohl Warmup und viele Wiederholungen sowie korrektes Microbenchmarking sichergestellt sind.
 
+=== Format
+
+Das verarbeitete Eingabeformat ist eine semikolon-separierte Liste von Stack-Frames, deren Vorkommenshäufigkeit den Anteil an der Laufzeit repräsentiert.
+So ein Format kann leicht aus vielen Quellen erzeugt werden.
+Neben Brendans Perl-Programmen gibt es auch z.b. Javascript Implementierungen für D3 [D3FlameGraph], die einfach in Dashboards integriert werden können.
+
+Im Folgenden nehmen wir an, dass das FlameGraph repository lokal vorliegt und sein Verzeichnis in der Umgebungsvariable `FLAMEGRAPH_DIR` zu finden ist.
+
+.FlameGraph Repository Setup
+----
+git clone https://github.com/brendangregg/FlameGraph
+export FLAMEGRAPH_DIR=`pwd`/FlameGraph
+----
+
+Nitsan Wakart zeigt auf seinem Blog, wie man sogar mittels einfachen Bordmitteln wie `jstack` schon Flame Graphs von Java Anwendungen erzeugen kann.
+Das ist aber nicht zu empfehlen, es gibt andere, viel bessere, Möglichkeiten.
+
+.Flamegraphs mittels jstack erzeugen
+----
+for i in {1..100}; do
+  jstack <pid> >> traces.txt;
+  sleep 0.1;
+done
+cat traces.txt | $FLAMEGRAPH_DIR/stackcollapse-jstack.pl | \
+  $FLAMEGRAPH_DIR/flamegraph.pl --color=green > jstack-flames.svg
+----
+
+////
 Java Flight Recorder generiert ebenso detaillierte Stacktraces.
 xxxx nutzt den JFR Parser von Marcus Hirt, um die relevanten Informationen für Flame-Graphs zu extrahieren.
+////
 
-== Intro Profiling
+=== Kombinierte Stacktraces
 
-Wir alle wissen dass "premature optimization" nicht sinnvoll ist. 
-Sinnvoll strukturierte Systeme machen es viel leichter Hotspots einzugrenzen und diese dann lokal zu optimieren.
+Usprünglich gab es das Problem, dass man entweder nur OS oder JVM Traces erhalten konnte, für ein ganzheitliches Bild einer Anwendung ist es aber notwendig beide Quellen zu korrelieren.
+Daher nutzten verschiedene Tools Workarounds, um diese miteinander zu verbinden.
 
-Die Leistung von Anwendungen wird durch viele Umgebungsparameter begrenzt - Kapazität von CPU, Speicher, Bandbreite und Latenz zu Netzwerk und Speichermedien.
-In der heutigen Zeit ist es leichter Module eines Systems getrennt zu skalieren, z.B. durch Cloud-Deployment, wie zum Beispiel in "Release It" von Michael Nygard dargestellt (HungerJSXX).
+Im OS enthält das FramePointer Register die Adresse des letzten Methodenaufrufs im Call-Stack und wird von System-Profilern zum Tracing benutzt.
+Virtuelle Maschinen wie die JVM berechnen die Adressen für Aufrufe vom StackPointer und brauchen daher dieses Register nicht und nutzen es für andere Zwecke.
+Seit dem JDK 8u60 gibt es die HotSpot Option `-XX:+PreserveFramePointer` relevante, die HotSpot verbietet, das FramePointer Register zu überschreiben.
+Damit ist die Korrelation wieder möglich, kann aber zu Leisungseinbussen führen, wenn die JIT-Optimierungen ein zusätzliches Register benötigt hätten.
 
-Aber natürlich ist Skalierung keine finale Lösung für hausgemachte Performanceprobleme.
-Ungünstige Ansätze, Datenstrukturen und Algorithmen führen dazu dass unnötig Objekte erzeugt werden, benötigte Komplexität der Lösung die CPU an ihre Grenzen treibt oder mehr Speicher genutzt wird als notwendig.
+.Beispiel für kombinierte Stacktraces
+image::http://www.brendangregg.com/FlameGraphs/cpu-mixedmode-flamegraph-java.svg[]
 
-Um herauszufinden, wo es Flaschenhälse gibt, werden verschiedene Arten von Profiling eingesetzt, die nachfolgend kurz erläutert werden sollen.
-
-Neben dem Profiling, dass man während der Entwicklung oder des Testes durchführt wird heutzutage auch of APM (Application Performance Monitoring) in Produktivsystemen eingesetzt.
-Damit werden kontinuierlich Performance-Indikatoren gesammelt und miteinander korreliert.
-Es werden sowohl Systeminformationen wie CPU-, Netzwerk und Speicherauslastung gesammelt.
-Dazu werden die Nutzer/Client-Interaktionen überwacht, bis zu individuellem Request-Tracking mit Latenz, Laufzeit und Verweildauer in den verschiedenen Schichten des Systems.
-
-TODO picture APM
-
-Aus der Korrelation können kritische Entwicklungen rechtzeitig erkannt und gegengesteuert werden (z.B. mittels Auto-Scaling, oder Backpressure).
-Auch nach 
-
-MicroBenchmarking wie JMH ist am besten geeignet, um verschiedene Lösungen gegeneinander zu testen (HungerJSXX) und ggf. Regressionen festzustellen.
+Ich möchte zunächst kurz auf die verschiedenen Arten von Profiling eingehen, bevor wir am praktischen Beispiel zeigen, wie man jeweils Flame-Graphen für diese Ansätze erzeugen kann.
 
 == Profiling-Ansätze
 
-Es gibt verschiedenste Ansätze zum Profiling in der JVM, die sich zum einen in ihrer Genauigkeit, im Aufwand, den Leisungseinbussen im laufenden System und Integration in die JVM unterscheiden.
+Wir alle wissen dass "Vorzeitige Optimierung" nicht sinnvoll ist. 
+Sinnvoll strukturierte Systeme machen es viel leichter Hotspots einzugrenzen, und diese dann lokal zu optimieren.
+
+Die Leistung von Anwendungen wird durch viele Umgebungsparameter begrenzt - Kapazität von CPU, Speicher, Bandbreite und Latenz zu Netzwerk und Speichermedien.
+In der heutigen Zeit ist es leichter Module eines Systems getrennt zu skalieren, z.B. durch Deployment auf skalierbaren Resourcen (z.B. Cloud), wie in "Release It" von Michael Nygard dargestellt (HungerJSXX).
+
+Aber natürlich ist Skalierung keine finale Lösung für hausgemachte Performanceprobleme.
+Ungünstige Ansätze, Datenstrukturen und Algorithmen führen dazu dass unnötig Objekte erzeugt werden, die benötigte Komplexität der Lösung die CPU an ihre Grenzen treibt oder mehr Speicher genutzt wird als notwendig.
+
+Um herauszufinden, wo es Engpässe gibt, werden verschiedene Arten von Profiling eingesetzt, die nachfolgend kurz erläutert werden sollen.
+
+Die Ansätze zum Profiling in der JVM, unterscheiden sich in ihrer Genauigkeit, im Aufwand, den Leisungseinbussen im laufenden System und JVM-Integration.
 
 === Sampling
 
-Der verbreitetste Ansatz ist das Sampling, dafür muss die laufende JVM und das Programm nicht modifiziert werden. Dabei werden in regelmässigen Abständen (xxx ms) Thread-Dumps des Systems erstellt und miteinander korreliert.
+Die _Sampling-Profiler_ arbeiten "von aussen" und aggregieren nur sehr viele Stacktraces.
 Daraus könenn zum einen Call-Chains und die Verweildauer in einzelnen Methoden abgeleitet werden. 
-
 Die Granularität der Messung bestimmt wie korrekt diese Korrelation ist, falls die Abtastfrequenz zu gering ist, können z.b. kurze Methodenaufrufe nicht erfasst werden.
 
-Ausserdem werden zum teil "false positives" ermittelt, d.h. Methoden die häufig aufgerufen werden, selbst aber nur sehr kurze Verweildauern haben, können
+Offizielle Stacktraces können *nur an Safepoints erstellt werden* und zeichnen damit ein verzerrtes Bild der Wirklichkeit.
+Safepoints sind stellen die die JVM einfügt um "sicher" bestimmte Operationen auszuführen, wie z.B. Initialisierung von GarbageCollection.
+Abhängig vom eigenen Code (z.B keine Safepoints in "HotLoops") und anderen Systembestandteilen (z.B. Profiler) können Safepoints auch an verschiedenen Stellen landen.
+Das macht die Korrektheit und Vergleichbarkeit von Messungen schwierig.
 
-Ein Nachteil der Methode ist dass 
+Die Samplingfrequenz und das Erreichen der Safepoints stellt hier die Grenze der Genauigkeit dar.
+Zum Beispiel können häufig gerufene Methoden, wie `hashCode` oder `equals` als Hotspots auftauchen, weil die Threads in aufeinanderfolgenden Snapshots "schon wieder" in diesen Methoden stecken.
+Dabei ist nur der gesamte Code der zwischenzeitlich aufgerufen wurde, unsichtbar. 
+Dessen Laufzeit wird dann fälschlicherweise mit zu den "Indizienmethoden" hinzugerechnet, die somit viel zu hohe Laufzeitanteile ausgewiesen bekämen.
 
-Diese Methode ist schnell und hat nur wenig Einfluss (10-20% ?) auf die untersuchte Anwendung.
+Ausserdem wird oft in Stacktraces angzeigt, welcher Code als nächstes auf der CPU laufen soll (gescheduled) aber nicht was jetzt gerade läuft.
+Daher sind oft Operationen häufiger zu sehen, als sie in Wirklichkeit gerade aktiv sind.
 
-=== Instrumentation
+=== Instrumentierung
 
-Bei der Instrumentation wird der Byte-Code der Anwendung mittels java-agent modifiziert und an
+Wenn man korrektere Informationen über Aufrufhäufigkeiten und -zeiten erhalten möchte, benötigt man einen _instrumentierten Profiler-Lauf_, der dann aber starken Einfluss auf die Laufzeit hat.
+Dabei wird der Bytecode von Klassen und Methoden mittels eines Java-Agents beim Laden mit spezifischen Tracing Aufrufen versehen, die für den Profiler das Betreten und Verlassen bzw. Instanziierung aufzeichnen.
+Durch die Veränderung des Bytecodes wird auch das Verhalten des JIT-Compilers beeinflusst z.B. Verhinderung von Inlining durch Vergrößerung von Methoden.
+
+=== AsyncGetCallTrace
+
+Können wir stattdessen Ansätze für Java Profiler nutzen, die viel tiefer im System ansetzen und damit genauer arbeiten und unsere Anwendungen weniger beeinflussen?
+`AsyncGetCallTrace` ist eine "unoffizielle" Methode in der JVM, um Stacktraces auch ausserhalb von Safepoints in einem Interrupt auszulesen [Mason].
+Ihre Nutzung ist zwar mit diversen Einschränkungen verbunden, kann aber für Profiling eingsetzt werden.
+Diese Methode wird von heute von diversen Profiling Tools unterstützt, wie z.b. Java Flight Recorder, Async Profiler, Honest Profiler oder Lightweight Java Profiler.
+
+=== APM & Tracing
+
+Neben dem Profiling, dass man während der Entwicklung oder des Testes durchführt, wird heutzutage auch of APM (Application Performance Monitoring) in Produktivsystemen eingesetzt.
+Damit werden kontinuierlich Performance-Indikatoren des Betriebsystems und der Anwendung gesammelt und miteinander korreliert.
+
+Dazu werden die Nutzer/Client-Interaktionen überwacht, bis zu individuellem Request-Tracking mit Latenz, Laufzeit und Verweildauer in den verschiedenen Schichten des Systems.
+Im Unterschied zum Profiling erfolgt das auf einem höheren Level und auch nur mit sehr geringen Samplingraten (z.B. 0.1% aller Aufrufe).
+Damit können Probleme wie Engpässe oder sich aufstauende Aufrufe wegen einer Verzögerung an anderer Stelle proaktiv erkannt und angegangen oder zumindest im Post-Mortem analysiert werden.
+Bekannte Vertreter dieser Kategorie sind NewRelic, Dynatrace, und seit neuestem Instana, das besonders wenig Overhead beim Monitoring verursachen soll.
+Tools wie Zipkin und Jaeger, die die OpenTracing Spezifikation implementieren, spezialisieren sich zumeist auf die Aufrufverfolgung. 
+
+=== JMH
+
+Sofern wir einen Laufzeitvergleich für dedizierte, kleinere Systembestandteile machen wollen, ist MicroBenchmarking mittels JMH [HungerXX] das Mittel der Wahl, mit dem alternative Implementierungen gemessen und verglichen und Regressionen festgestellt werden können.
+JMH Benchmarks können sehr gut mit der Erzeugung von Flamegraphs kombiniert werden, da sie fokussiert auf einen Teilaspekt des Systems laufen und nach dem Aufwärmen einen stabilen Systemzustand erreicht haben, in dem dann viele Wiederholungen ausgeführt werden.
+Somit werden Problembereiche in der Visualisierung besonders hervorgehoben.
 
 === Java Flight Recorder (JFR)
 
-Java Flight Recorder ist ein sehr nützliches Tool der Oracle JVM, es erlaubt, viele Metriken während des Programmablaufs detailliert zu protokollieren, ohne die Performance der JVM zu sehr zu beeinflussen.
-Da JFR bisher nur als kommerzielles Feature zur Verfügung stand, muss man es speziell aktivieren:
+Java Flight Recorder ist ein sehr nützliches Tool ursprünglich nur in der Oracle JVM nutzbar, seit Java 11 auch in OpenJDK (JEP-328).
+Es erlaubt, viele Metriken während des Programmablaufs detailliert zu protokollieren, ohne die Performance der JVM zu sehr zu beeinflussen.
+
+Da JFR bisher nur als kommerzielles Feature zur Verfügung stand, musste man es speziell aktivieren (ab OpenJDK 11 fällt das weg):
 
 `java ... -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -XX:StartFlightRecording=duration=30s,filename=my_recording.jfr -XX:FlightRecorderOptions=stackdepth=256`
 
-Diese Recordings können dann z.b. in Java Mission Control (JMC) geladen und analyisiert werden.
+Es kann auch mittels `jcmd` dynamisch aufgerufen werden.
 
-Und dankenswerterweise auch als Flame Graphs, zum einem bequem mit dem JetBrains Plugin, das JFR Dateien lädt und als Flame-Graphs anzeigt (und noch weitere Features hat).
+.JFR via JCMD kontrollieren
+----
+jcmd <pid> JFR.start
+jcmd <pid> JFR.dump filename=my_recording.jfr
+jcmd <pid> JFR.stop
+----
 
-Zum anderen kann man aus JFR Aufzeichnungen auch direkt Flame-Graphs erstellen: 
+Diese Aufzeichnungen können dann z.b. in Java Mission Control (JMC) geladen und analysiert werden und praktischerweise auch als Flame Graphs visualisiert.
+Zum einem bequem mit einem JetBrains Plugin, das JFR Dateien lädt und als Flame-Graphs anzeigt (und noch weitere Features hat).
 
-TODO HIRT OSS JMC/JFR
+Zum anderen kann man aus JFR Aufzeichnungen mittles [jfr-flame-graph] auch direkt Flame-Graphs erstellen: 
 
-http://psy-lob-saw.blogspot.de/2017/02/flamegraphs-intro-fire-for-everyone.html
+// java -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -XX:FlightRecorderOptions=defaultrecording=true,settings=profile,disk=true,repository=./tmp,dumponexit=true,dumponexitpath=./
+
+.Flamegraphs aus JFR Aufzeichnungen erzeugen
+----
+git clone https://github.com/chrishantha/jfr-flame-graph
+cd jfr-flame-graph
+./run.sh -i -f my_recording.jfr -o - | \
+ $FLAMEGRAPH_DIR/flamegraph.pl > /tmp/flamegraph-jfr.svg
+----
+
+// http://isuru-perera.blogspot.com/2015/09/java-mixed-mode-flame-graphs.html
+
+// TODO HIRT OSS JMC/JFR
+
+// http://psy-lob-saw.blogspot.de/2017/02/flamegraphs-intro-fire-for-everyone.html
 
 === Perf
 
-Perf ist ein (Linux) Kommandozeilentool, das System- und Funktionsaufrufe auf dem Betriebsystemlevel protokolliert.
-Es kann
-ZINE
+Perf ist ein Linux Kommandozeilentool, das System- und Funktionsaufrufe und andere Ereignisse sauf dem Betriebsystemlevel protokolliert.
+Es kann mittels PID mit Prozessen verknüpft werden und sammelt dann für eine gewisse Zeit oder Anzahl diese Aufrufe.
+Diese können entweder interaktiv dargestellt (perf-top), oder für spätere Auswertung in Dateien geschrieben werden.
+Die gesammelten Samples können dann mittels eines Scripts in einen Flamegraph (SVG) gerendert werden
 
-=== APM
+Auch unabhängig von Java ist `perf` sehr nützlich um auf Linux Systemen festzustellen, wodurch aktuell Resourcen verbraucht werden.
 
+----
+// Interaktive Anzeige von Funktions und Systemaufrufen
+perf top <pid>
 
-== Flame-Graphs
+// Aufzeichnen von Events
+perf record -e <event> -ag
 
-=== Historie
+// Anzeigen von aufgezeichneten Events
+perf report 
 
-=== Tools
+// Textuelle Ausgabe der Aufzeichnungen, z.B. als Flamegraph
+perf script | $FLAMEGRAPH_DIR/stackcollapse-perf.pl | \
+  $FLAMEGRAPH_DIR/flamegraph.pl > /tmp/flamegraph.svg
+----
 
+image::perf-top[] // TODO
 
+Julia Evans hat in ihrem Perf-ZINE kompakt und anschaulich die häufigsten Nutzungsszenarien von perf dargestellt.
+
+image::https://jvns.ca/images/perf-zine-cover.jpg[]
+
+Für eine korrekte Zuordnung von JVM Aufrufen/Threads kann zusätzlicher JVM-Agent (perf-map-agent) integriert werden, dann bekommt man in einer Aufzeichnung sowohl die OS, als auch die JVM Traces.
+
+=== Perf Map Agent
+
+// Um diese mit den Betriebssystemaufrufen zu kombinieren benötigt man noch den Profiler-Agent: `perf-map-agent`.
+
+Perf-Map-Agent benutzt Betriebssystemtools (`dtrace` in OSX, `perf` in Linux), um native Stacktraces des OS mit denen der JVM zu korrelieren, indem Speicheradressen zu Java-Methodennamen gemappt werden.
+Das ist besonders nützlich ist, wenn sich der Hotspot in nativem Code des JDK oder einer Bibliothek befindet.
+
+Man muss zwar perf-map-agent selbst compilieren aber das ist relativ einfach.
+
+----
+export JAVA_HOME=/path/to/java-home
+
+git clone https://github.com/brendangregg/FlameGraph.git
+export FLAMEGRAPH_DIR=`pwd`/FlameGraph
+
+git clone https://github.com/jvm-profiling-tools/perf-map-agent.git
+cd perf-map-agent
+cmake . && make
+----
+
+Dann kann man es mittels der entsprechenden tools im `bin` Verzeichnis laufen lassen, z.b. um eine `top` Anzeige zu bekommen oder halt einen Flamegraph:
+Die Optionen des Tools werden über Umgebungsvariablen kontrolliert, z.B. `DTRACE_FLAME_OUTPUT`, `DTRACE_SECONDS` oder Sampling-Frequenz `DTRACE_FREQ`, ebenso für `perf`.
+
+////
+[%autowidth,opts=header,cols="m,m,a"]
+|===
+| Unix | OSX | Beschreibung
+| perf-java-flames | dtrace-java-flames | Flamegraph erzeugen
+| perf-java-record-stack | dtrace-java-record-stack | Flamegraph erzeugen
+| perf-java-top || iteraktive "top" Anzeige
+| perf-java-report-stack | | Zusammenfassende Anzeige am Ende
+2*|FLAMEGRAPH_DIR | Verzeichnis für das Flamegraph Repository
+2*| PERF_MAP_OPTIONS | Zusätzliche Optionen für das Tool
+| PERF_RECORD_SECONDS | DTRACE_SECONDS | Dauer des Profilierungvorgangs
+| PERF_RECORD_FREQ | DTRACE_FREQ | Samplingfrequenz
+| PERF_FLAME_OUTPUT | DTRACE_FLAME_OUTPUT | Dateiname für Flamegraph
+| PERF_JAVA_TMP | DTRACE_JAVA_TMP | Temp-Verzeichnis, default: `/tmp`
+// | PERF_DATA_FILE | DTRACE_DATA_FILE | Temp-Verzeichnis, default: `type-<pid>.data`
+|===
+////
+
+.Erzeugung eines Flamegraphs unter OSX
+----
+export DTRACE_FLAME_OUTPUT=/tmp/flamegraph.svg
+bin/dtrace-java-flames <PID>
+open -a "Google Chrome" /tmp/flamegraph.svg
+----
+
+Wenn möglich sollte man die eigene Anwendung mit `-XX:+PreserveFramePointer` (ab Java 8u60) laufen lassen.
+
+=== Async Profiler
+
+Wie schon gesagt, benutzt Async Profiler die `AsyncGetCallTrace` API, um Stacktraces zu sammeln. 
+Der Profiler funktioniert sowohl mit Oracle's als auch mit OpenJDK basierten JVMs.
+
+Neben dem Tracing von Aufrufen können aktuelle Versionen des Profilers auch CPU-Nutzung, Cache/Branch-Misses, Seitenfehler, Kontextwechsel, Speicherallokationen, Locking und andere Ereignisse aufzeichnen.
+Auch hier werden Traces aus der JVM und dem Kernel korreliert, ohne aber Namens-zu-Adress Auflösung betreiben zu müssen. 
+Das spart Aufwand und ist kompatibler mit alten JVM Versionen und funktioniert auch im JVM Interpretermodus.
+
+Auch die Allokation von größeren Speichermengen kann getrackt werden, indem auf TLAB (Translation Look Aside Buffer) Allokations-Ereignisse der Hotspot JVM (ab 7u40) reagiert wird.
+Um hier den Aufwand zu minimieren, wird nur ein Sampling genutzt, dessen Genauigkeit aber in der Regel ausreicht.
+
+////
+
+This project is a low overhead sampling profiler for Java that does not suffer from Safepoint bias problem. It features HotSpot-specific APIs to collect stack traces and to track memory allocations. The profiler works with OpenJDK, Oracle JDK and other Java runtimes based on HotSpot JVM.
+
+async-profiler can trace the following kinds of events:
+
+CPU cycles
+Hardware and Software performance counters like cache misses, branch misses, page faults, context switches etc.
+Allocations in Java Heap
+Contented lock attempts, including both Java object monitors and ReentrantLocks
+
+CPU profiling
+In this mode profiler collects stack trace samples that include Java methods, native calls, JVM code and kernel functions.
+
+The general approach is receiving call stacks generated by perf_events and matching them up with call stacks generated by AsyncGetCallTrace, in order to produce an accurate profile of both Java and native code. Additionally, async-profiler provides a workaround to recover stack traces in some corner cases where AsyncGetCallTrace fails.
+
+This approach has the following advantages compared to using perf_events directly with a Java agent that translates addresses to Java method names:
+
+Works on older Java versions because it doesn't require -XX:+PreserveFramePointer, which is only available in JDK 8u60 and later.
+
+Does not introduce the performance overhead from -XX:+PreserveFramePointer, which can in rare cases be as high as 10%.
+
+Does not require generating a map file to map Java code addresses to method names.
+
+Works with interpreter frames.
+
+Does not require writing out a perf.data file for further processing in user space scripts.
+
+ALLOCATION profiling
+Instead of detecting CPU-consuming code, the profiler can be configured to collect call sites where the largest amount of heap memory is allocated.
+
+async-profiler does not use intrusive techniques like bytecode instrumentation or expensive DTrace probes which have significant performance impact. It also does not affect Escape Analysis or prevent from JIT optimizations like allocation elimination. Only actual heap allocations are measured.
+
+The profiler features TLAB-driven sampling. It relies on HotSpot-specific callbacks to receive two kinds of notifications:
+
+when an object is allocated in a newly created TLAB;
+when an object is allocated on a slow path outside TLAB.
+This means not each allocation is counted, but only allocations every N kB, where N is the average size of TLAB. This makes heap sampling very cheap and suitable for production. On the other hand, the collected data may be incomplete, though in practice it will often reflect the top allocation sources.
+
+Unlike Java Mission Control which uses similar approach, async-profiler does not require Java Flight Recorder or any other JDK commercial feature. It is completely based on open source technologies and it works with OpenJDK.
+
+The minimum supported JDK version is 7u40 where the TLAB callbacks appeared.
+
+Heap profiler requires HotSpot debug symbols. Oracle JDK already has them embedded in libjvm.so, but in OpenJDK builds they are typically shipped in a separate package. For example, to install OpenJDK debug symbols on Debian / Ubuntu, run
+////
+
+Nachdem dem Download der aktuellen Version von [AsyncProfiler] kann man Java Anwendungen direkt mittels `./profiler.sh -d 60 -f /tmp/flamegraph.svg <PID>` analysieren und interaktiv visualisieren.
+
+=== Honest Profiler
+
+Auch Honest Profiler basiert auf den Ideen und sogar dem Code, den Jeremy Mason bei Google zum leichtgewichtigen Profiling von Java Anwendungen 2013 veröffentlicht hat.
+Die mittels `AsyncGetCallTrace` gesammelten Stacktraces werden in einen nicht-blockierenden, allokationsfreien Ringpuffer (wegen der Einschränkungen des Callbacks) kopiert und dort von einem zweiten Thread gelesen und in Dateien geschrieben.
+Aus diesen Reports kann dann das Stacktrace-Format für Flamegraphs erzeugt werden.
+
+----
+java -agentpath:$HPL_HOME/liblagent.so=host=localhost,port=4242,logPath=/tmp/tracing.hpl my.Application
+
+// Start/Stop der Aufzeichnung über Kontroll-Port
+echo start | nc localhost 4242
+echo stop | nc localhost 4242
+
+// Flamegraph Format erzeugen
+java -cp honest-profiler.jar com.insightfullogic.honest_profiler.ports.console.FlameGraphDumperApplication /tmp/tracing.hpl /tmp/traces.cstk
+----
+
+////
+Honest Profiler has two main benefits over other sampling profilers on the JVM:
+
+It accurately profiles applications, avoiding an inherent bias towards places that have safepoints.
+It profiles applications with significantly lower overhead than traditional profiling techniques, making it suitable for use in production.
+NB: Honest Profiler relies on an internal API within the SUN/Oracle/OpenJDK JVM. We make no guarantees about it working on other JVMs.
+
+It's a well known deficiency of most existing sampling Java profilers that their collection of stack traces has to happen at a safe point. This is the case for profilers such as the visualvm sampling profiler, which uses the SUN/Oracle management agent to gather its stack traces. The problem with this approach is that it introduces both a sample bias since not every point in the program is a safepoint and also that it introduces an overhead of how long it takes the JVM to reach a safepoint.
+
+Honest Profiler gets around this problem by having its own sampling agent that uses UNIX Operating System signals and an API designed for the Oracle Performance Studio product in order to efficiently and accurately profile.
+
+Honest profiler takes the same approach outlined by Jeremy Manson where calls are made to the AsyncGetCallTrace jvm method which avoids the need for threads to reach a safe point in order to read their call trace. Consequently it avoids a number of profiler accuracy issues that other sampling profilers suffer from.
+
+The downside of using this method is that the code in your async callback has horrific restrictions on it. What honest profiler does is copy the current stack trace into a non-blocking, allocation free, circular MPSC queue. These stack traces are then read by another thread which writes out the log file and looks up information about useful things like methods names.
+
+Based upon code originally open sourced by Jeremy Manson/Google: http://jeremymanson.blogspot.co.uk/2013/07/lightweight-asynchronous-sampling.html
+
+To collect with Honest-Profiler I start my JVM with the following parameter:
+-agentpath:$HONEST_PROFILER_HOME/liblagent.so=host=localhost,port=4242,logPath=$PWD/netty.hpl
+Then, when I feel the time is right, I can start and stop the profile collection
+echo start | nc localhost 4242
+echo stop | nc localhost 4242
+To convert the binary format into collapsed stacks I need to use a helper class in the honest-profiler.jar:
+java -cp $HONEST_PROFILER_HOME/honest-profiler.jar com.insightfullogic.honest_profiler.ports.console.FlameGraphDumperApplication netty.hpl netty.cstk
+////
+
+=== Flamescope
+
+Da ein Flamegraph immer eine gesamte Profiling-Sitzung darstellt, sind kurze Fluktuationen von Ereignishäufigkeiten unsichtbar.
+Netflix hat mit [Flamescope] ein Tool veröffentlicht, dass diese visualisiert und es erlaubt, partielle, interessante Zeiträume als Flamegraph anzuzeigen.
+
+Dazu wird die Ereignishäufigkeit in der X-Achse auf eine gröbere Zeiteinheit, z.B. Sekunden abgebildet, und auf der Y-Achse sieht man deren Unterteilung, z.B: Millisekunden. 
+Damit kann man visuell die Häufung von Ereignissen anhand der Färbung gut identifizieren und dann Teilbereiche für die Untersuchung selektieren.
+
+image::https://cdn-images-1.medium.com/max/1080/1*v9ooXXqmObcOOWYo87NxjQ.png[]
+
+////
 ==== Jetbrains Plugin
 
-nstrumentation Java Profiler & Flamegraph Visualizer 
+
+----
+Instrumentation Java Profiler & Flamegraph Visualizer 
 Quick Start 
 Use Flight Recorder to profile your program and then open flamegraph:
 Run JVM with following VM options: -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -XX:StartFlightRecording=duration=30s,filename=my_recording.jfr
@@ -179,38 +463,167 @@ Ways to open visualizer:
 After executing program with the profiler choose Tools | Flamegraph Profiler | Open Results... to see the result.
 To upload your .jfr or .ser file choose Tools | Flamegraph Profiler | Upload File...
 Detailed description at github.com/kornilova-l/flamegraph-visualizer
+----
+////
 
+== IntelliJ Integration
 
-=== Beispiel
+Seit der Version 2018.3 hat IntelliJ diese Funktionalität schon integriert.
+Zumindest auf Linux und OSX (Windows geplant) kann sowohl Programmläufe und Tests mit Async-Profiler durchführen, als auch schon laufende Programme analysieren.
+Dabei werden, wie schon erläutert sowohl JVM als auch OS Aufrufe protokolliert, in Häufigkeit, Zeit und Speichernutzung.
+Schon existierende Dumps von Async-Profiler können auch importiert werden.
 
-Arten von Profiling
-* JFR, Sampling, ...
+image::https://d3nmt5vlzunoa1.cloudfront.net/idea/files/2018/09/ProfilerRun.png[]
 
-Live tracking, APM ?
+Die Ergebnisse des Profilers sind dann gleich als Flamegraphs, Aufrufbäume und Methodenlisten verfügbar.
+Trotz der gewöhnungsbedürftigen Interaktion mit der Visualiserung kann man scrollen, vergrößern und sich mittels Doppelklick auf Ausschnitte fokussieren.
+Es kann auch interakiv nach Methodennamen gesucht oder zum Quellcode gesprungen werden.
 
-* JFR
-* Netflix
-* IntellJ Plugin
-* Perf
+image::https://d3nmt5vlzunoa1.cloudfront.net/idea/files/2018/09/Profiler.png[]
+
+== Praktisches Beispiel: Methodenreferenzen
+
+Als ich mit einem Kollegen vor einigen Tagen ein Refactoring in den Neo4j-Graph-Algorithmen diskutierten, stellten wir in unseren JMH Tests eine massive Verschlechterung der Performance fest.
+
+In einer Schleife, die bei der Berechung des PageRank-Algorithmus' viele Millionen Mal durchlaufen wurde, benutzten wir einen Callback für jede Kante eines Knoten.
+Diesen Callback hatten wir im Rahmen einer Erweiterung auf eine gewichtete Variante von einem `this` erst auf eine Lambda-Funktion und dann auf eine Methodenreferenz `this::accept` umgestellt.
+
+[source,java]
+----
+class ComputeTask {
+  int[] batch;
+  void run() {
+     for (int node : batch) {
+        graph.eachRelationship(node, OUTGOING, <callback>)
+     }
+  }
+}
+----
+
+.Lambda
+[source,java]
+----
+graph.eachRelationship(node, OUTGOING, (source, target, weight) -> { compute-code })
+----
+
+.Inner Class
+[source,java]
+----
+class ComputeTask {
+
+  void run() {
+     for (int node : batch) {
+       ... graph.eachRelationship(node, OUTGOING, new RelationshipConsumer() {
+           public void accept(int source, int target, double weight) {
+              compute-code
+           }    
+       });
+    }
+  }
+}
+----
+
+.Methodenreferenz
+[source,java]
+----
+class ComputeTask {
+
+   void run() {
+      for (int node : batch) {
+         graph.eachRelationship(node, OUTGOING, this::accept)
+      }
+   }
+   
+   private void accept(int source, int target, double weight) {
+      compute-code
+   }
+}
+----
+
+image::{img}/profiler-flamegraph-problem.png[]
+
+Dank der Integration von Async-Profiler, konnten wir in den Flamegraphs feststellen, dass ein großer Anteil der Zeit in `linkTargetMethod` und `getLambda` verbraucht wurden.
+Ich war eigentlich der Auffassung, dass Methodenreferenzen immer effizient sind und ihre Methodhandles von der JVM gecached werden.
+
+Dass scheint aber nur der Fall zu sein für statische Methoden bzw. Code, der keine Closure um lokale Variablen oder sogar (wie in unserem Fall) Felder der Klasse darstellt.
+In einer Twitter Diskussion mit Martin Thompson, Heinz Kabutz und Richard Warburton wurde dieser Fakt noch einmal klargestellt.
+Schon alleine die `this::accept` Referenz vor die Schleife zu ziehen, gab uns unsere Performance zurück.
+
+.Methodenreferenz als Variable vor der Schleife
+[source,java]
+----
+class ComputeTask {
+
+   void run() {
+      RelationshipConsumer callback = this::accept;
+      for (int node : batch) {
+         graph.eachRelationship(node, OUTGOING, callback)
+      }
+   }
+
+   private void accept(int source, int target, double weight) {
+      compute-code
+   }
+}
+----
+
+image::{img}/profiler-flamegraph-fixed.png[]
+
+Zum Schluss sind wir dann sogar auf das "konservative" Implementieren des Interfaces im `ComputeTask` zurückgegangen.
+
+.Interface implementiert
+[source,java]
+----
+class ComputeTask implements RelationshipConsumer {
+
+   ... graph.eachRelationship(node, OUTGOING, this)
+
+   public void accept(int source, int target, double weight) {
+      compute-code
+   }
+}
+----
+
+Als einen positiven Seiteneffekt [IDEA-ISSUE] unseres Detektivspiels gibt es in IntelliJ in Zukunft eine Inspection die vor solchen Methodenreferenzen in Schleifenkörpern warnt.
+
+== Fazit
+
+Jenseits der klassischen Profiler gibt es heute eine Menge von Tools, die tieferen und genaueren Einblick in die internen Abläufe in und zwischen JVM und Betriebssystem geben können.
+Visualisierungen wie Flamegraphs lassen Probleme und deren Ursachen direkter erkennen.
+Es ist relative einfach, diese Tools in eigene Messungen oder Benchmark-Builds zu integrieren, und so immer eine aktuelle Sicht hinter die Kulissen des eigenen Systems zu haben.
+Für Neo4j haben wir das seit ca. 2 Jahren mit viel Erfolg im Einsatz.
 
 == Referenzen
 
 * https://en.wikipedia.org/wiki/Brendan_Gregg
-* FlameGraphs-Intro: http://www.brendangregg.com/flamegraphs.html
-* FlameGraphs-GitHub https://github.com/brendangregg/FlameGraph
-* FlameGraphs-JVM https://blog.codecentric.de/en/2017/09/jvm-fire-using-flame-graphs-analyse-performance/
 * ACM: https://queue.acm.org/detail.cfm?id=2927301
-* Netflix-Flamescope: https://medium.com/netflix-techblog/netflix-flamescope-a57ca19d47bb
-* https://nodesource.com/blog/understanding-cpu-flame-graphs/
-* Video - Gregg - Visualizing Performance with Flame Graph: https://www.youtube.com/watch?v=D53T1Ejig1Q
-* Jetbrains Plugin Flamegraph Profiler: https://plugins.jetbrains.com/plugin/10305-flamegraph-profiler
-* JFR Flamegraphs: https://github.com/chrishantha/jfr-flame-graph
-
-* http://psy-lob-saw.blogspot.de/2017/02/flamegraphs-intro-fire-for-everyone.html
-* https://qconlondon.com/system/files/presentation-slides/illuminatingthejvm-qconlondon.pdf
-* http://isuru-perera.blogspot.de/2015/05/flame-graphs-with-java-flight-recordings.html
-* https://medium.com/netflix-techblog/java-in-flames-e763b3d32166
+* [FG-Intro]: http://www.brendangregg.com/flamegraphs.html
+* [FGGitHub] https://github.com/brendangregg/FlameGraph
+* [FGVideo] https://www.youtube.com/watch?v=D53T1Ejig1Q
 * http://www.brendangregg.com/blog/2014-06-12/java-flame-graphs.html
-* https://github.com/brendangregg/FlameGraph/blob/master/stackcollapse-jstack.pl
 * http://www.brendangregg.com/FlameGraphs/cpuflamegraphs.html
-// * http://isuru-perera.blogspot.de/2015/05/flame-graphs-with-java-flight-recordings.html 
+
+* [PreserveFramePointer] https://www.infoq.com/news/2015/08/JVM-Option-mixed-mode-profiles
+* [Mason] http://jeremymanson.blogspot.com/2010/07/why-many-profilers-have-serious.html
+* [WakartSafepoint]: http://psy-lob-saw.blogspot.com/2016/02/why-most-sampling-java-profilers-are.html
+
+* [WakartFGIntro] http://psy-lob-saw.blogspot.de/2017/02/flamegraphs-intro-fire-for-everyone.html
+* [WakartFGPreso] https://qconlondon.com/system/files/presentation-slides/illuminatingthejvm-qconlondon.pdf
+* [FGCodeCentric] https://blog.codecentric.de/en/2017/09/jvm-fire-using-flame-graphs-analyse-performance/
+// * https://nodesource.com/blog/understanding-cpu-flame-graphs/
+* [NetFlixFGDeepDive] https://medium.com/netflix-techblog/java-in-flames-e763b3d32166
+
+* [JFR Flamegraphs] https://github.com/chrishantha/jfr-flame-graph
+* [JEP-328] http://openjdk.java.net/jeps/328
+
+* [Perf-ZINE] https://jvns.ca/zines/#perf
+* [perf-map-agent] https://github.com/jvm-profiling-tools/perf-map-agent
+* [Async-Profiler] https://github.com/jvm-profiling-tools/async-profiler
+
+* [Netflix-Flamescope] https://medium.com/netflix-techblog/netflix-flamescope-a57ca19d47bb
+* [D3-FlameGraph] https://github.com/spiermar/d3-flame-graph
+* [JB Plugin FG Profiler]: https://plugins.jetbrains.com/plugin/10305-flamegraph-profiler
+* IDEA-EAP: https://blog.jetbrains.com/idea/2018/09/intellij-idea-2018-3-eap-git-submodules-jvm-profiler-macos-and-linux-and-more/
+* [jfr-flame-graph] http://isuru-perera.blogspot.de/2015/05/flame-graphs-with-java-flight-recordings.html
+* [IDEA-ISSUE] https://youtrack.jetbrains.com/issue/IDEA-199810
+* [Twitter Diskussion Method Referenzen] https://twitter.com/mesirii/status/1047048557000314882
