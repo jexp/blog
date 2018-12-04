@@ -1,6 +1,7 @@
 // https://colab.research.google.com/drive/1AMwmd4oM-6WV0pNuXFNFwDK447VkMkc8#scrollTo=dBa80xp7m3-x
 = TagOverflow - Correlating Tags in Stackoverflow
-:img: ../img
+//:img: ../img
+:img: https://github.com/jexp/blog/raw/gh-pages/img
 
 You can correlate and categorize the _tags_ of StackOverflow based on the questions they are attached to.
 In this post I want to show how to use the Jaccard and Overlap procedures in the Neo4j-Graph-Algorithms library to achieve that.
@@ -31,7 +32,7 @@ Then the Neo4j Graph Database of StackOverflow was ready to be used.
 
 It's all documented in the https://github.com/neo4j-examples/neo4j-stackoverflow-import[GitHub repository], we already covered the process a while ago at https://neo4j.com/blog/import-10m-stack-overflow-questions/[the 10M question celebration].
 
-Our test instance is currently available at: https://stackdata.neo4jlabs.com/browser/ with user "stackoverflow" and password "stackoverflow" for a read-only user.
+Our test instance is currently available at a Neo4j Cloud instance: https://1cec42ea.databases.neo4j.io/browser/ with user "stackoverflow" and password "stackoverflow" for a read-only user.
 
 == Data Exploration
 
@@ -77,9 +78,9 @@ Of course their use is a power law distribution, our top 20 tags have way more u
 [source,cypher]
 ----
 tag_usage_query = """
-"MATCH (t:Tag) 
- RETURN t.name as tag, size((t)<-[:TAGGED]-()) as deg 
- ORDER BY deg DESC LIMIT 20"
+MATCH (t:Tag) 
+RETURN t.name as tag, size((t)<-[:TAGGED]-()) as deg 
+ORDER BY deg DESC LIMIT 20
 """
 tag_usage = graph.run(tag_usage_query).to_data_frame()
 ----
@@ -138,7 +139,7 @@ MATCH (q:Question)-[t:TAGGED]->(tag:Tag {name:"ruby"}),
 (q)-[:TAGGED]->(other:Tag)
 WITH tag,other, count(*) as freq
 ORDER BY freq DESC LIMIT 50
-RETURN tag, other, apoc.create.vRelationship(tag,'SIMILAR',{freq:freq}, other)
+RETURN tag, other, apoc.create.vRelationship(tag,'SIMILAR',{freq:freq}, other);
 ----
 
 image::https://i.imgur.com/Mvzfe2Z.jpg[]
@@ -345,14 +346,14 @@ GRAPHISTRY = {
 
 
 NEO4J = {
-    'uri': "bolt://stackdata.neo4jlabs.com:80", 
+    'uri': "bolt://1cec42ea.databases.neo4j.io", 
     'auth': ("stackoverflow", "stackoverflow")
 }
 
 n4g = Neo4Graphistry(GRAPHISTRY, NEO4J)
 
 g = n4g.cypher2graphistry("""\
-MATCH p=(t1:Tag)-[r:SIMILAR]->(t2:Tag) WHERE exists(t1.pagerank) and exists(t2.pagerank) RETURN p limit 5
+MATCH p=(t1:Tag)-[r:SIMILAR]->(t2:Tag) WHERE exists(t1.pagerank) and exists(t2.pagerank) RETURN p limit 10000
 """)
 
 g.plot()
@@ -362,3 +363,7 @@ image::{img}/so-graphistry.jpg[]
 
 == Summary
 
+This only touched the surface of what's possible with a graph model, graph algorithms and visualization. 
+I hope I inspired you to play around with the data and dataset.
+
+Please let me know what else you'd love to do with this, I definitely have a lot more ideas.
