@@ -2,9 +2,9 @@
 = TagOverflow - Correlating Tags in Stackoverflow
 :img: ../img
 
-You can correlate and categorize the tags of StackOverflow based on the questions they are attached to.
+You can correlate and categorize the _tags_ of StackOverflow based on the questions they are attached to.
 In this post I want to show how to use the Jaccard and Overlap procedures in the Neo4j-Graph-Algorithms library to achieve that.
-We imported the whole dump of StackOverflow into Neo4j, ran the algorithms and then visualized the results using Neo4j Bloom and Graphistry.
+We imported the whole dump of StackOverflow into Neo4j, ran the algorithms and then visualized the results using Neo4j Bloom and the large graph visualization tool Graphistry.
 
 In September we had the opportunity of running the GraphConnect "Buzzword-Bingo" GraphHack in the offices of StackOverflow in New York which was really cool.
 I was impressed that the folks there really went through with what Joel Spolsky published many years ago as a better office layout for software companies (and probably other companies too).
@@ -14,27 +14,32 @@ image::[]
 
 == Data Model and Import
 
-The StackOverflow data model is pretty straightforward, _Users posting Questions and Answers_, one of which is _accepted_.
-Each question is also _tagged with one or more Tags_.
+The StackOverflow data model is pretty straightforward, _Users posting Questions_ and _Answers_, one of which is _accepted_.
+Each question is also _tagged_ with one or more _Tags_.
 
 image::{img}/stackoverflow-model.jpg[]
 
 For the import we:
 
-1. download the StackOverflow dump from the internet archive
-2. extract it using 7zip
-3. convert the XML files we're interested in into CSV's for nodes and relationships
-4. import the data using the neo4j bulk importer
-5. create some indexes and constraints
+1. downloaded the StackOverflow dump from the internet archive
+2. extracted it using 7zip
+3. converted the XML files we're interested in into CSV's for nodes and relationships
+4. import the data using the Neo4j bulk importer in a few minutes
+5. create some indexes and constraints in another few minutes
 
-It's all documented in my https://github.com/neo4j-examples/neo4j-stackoverflow-import[GitHub repository].
+Then the Neo4j Graph Database of StackOverflow was ready to be used.
+
+It's all documented in the https://github.com/neo4j-examples/neo4j-stackoverflow-import[GitHub repository], we already covered the process a while ago at https://neo4j.com/blog/import-10m-stack-overflow-questions/[the 10M question celebration].
+
+Our test instance is currently available at: https://stackdata.neo4jlabs.com/browser/ with user "stackoverflow" and password "stackoverflow" for a read-only user.
 
 == Data Exploration
 
 We used https://colab.research.google.com/drive/1AMwmd4oM-6WV0pNuXFNFwDK447VkMkc8[Google's Colab Notebooks] to work within the Hackathon team which worked really well.
 It's like Google docs for Python Notebooks, i.e. you have customizable sharing settings and everyone can edit and run cells from their own computer.
+Thanks to Leo from Graphistry for reminding me of that really cool tool.
 
-We use the http://py2neo.org[py2neo library] which builds upon the neo4j python driver driver and has some nice support for pandas and numpy.
+We connected to Neo4j using the http://py2neo.org[py2neo library] which builds upon the Neo4j Python driver driver and has some nice support for Pandas and Numpy.
 
 For data exploration we first ran a query that showed how much data of each type we had in our graph.
 
@@ -65,25 +70,42 @@ Or as chart:
 image::{img}/so-cardinalities.png[]
 
 Today we're not interested in users, questions and answers, just their tags.
-So we have 52445 Tags, that's quite a bit.
+So we have 52445 Tags, that's quite a bit, more than I expected.
 
-== Tag Correlations
-
-Similar to people, Tags cluster as well.
-Oftentimes you have a main category like _`javascript`, `ruby` or `neo4j` and then a lot of related tags.
-Some only valid within that main category like `neo4j` + `cypher`, some from other areas, e.g. `neo4j` + `javascript`.
-
-image::https://i.imgur.com/QULxXvb.jpg[width=250]
-
-Let's just run a co-ocurrence query for the `ruby` tag ordered by frequency.
+Of course their use is a power law distribution, our top 20 tags have way more use than the next ones combined.
 
 [source,cypher]
 ----
-match (q:Question)-[t:TAGGED]->(tag:Tag {name:$tagName}),
+tag_usage_query = """
+"MATCH (t:Tag) 
+ RETURN t.name as tag, size((t)<-[:TAGGED]-()) as deg 
+ ORDER BY deg DESC LIMIT 20"
+"""
+tag_usage = graph.run(tag_usage_query).to_data_frame()
+----
+
+And render it the same way to a chart.
+
+image::{img}/so-tag-usage.png[]
+
+
+== Tag Correlations
+
+Similar to people and other things in preferential attached networks, Tags cluster as well.
+Often, you have a main category like `javascript`, `ruby` or `neo4j` and then a lot of related tags.
+Some only valid within that main category like `cypher` is part of `neo4j`, some from other, parallel areas, e.g. `neo4j` and `javascript`.
+
+image::https://i.imgur.com/QULxXvb.jpg[width=250]
+
+If we ran a co-ocurrence query for the `ruby` tag ordered by frequency.
+
+[source,cypher]
+----
+MATCH (q:Question)-[t:TAGGED]->(tag:Tag {name:$tagName}),
 (q)-[:TAGGED]->(other:Tag)
-with tag,other, count(*) as freq
-order by freq desc limit 15
-return other.name, freq
+WITH tag,other, count(*) AS freq
+ORDER BY freq desc LIMIT 15
+RETURN other.name, freq
 ----
 
 [%autowidth,opts="header"]
@@ -106,22 +128,22 @@ return other.name, freq
 | 2947 | nokogiri
 |===
 
-You see that the results make sense, many of those tags are either major ruby projects or libraries.
+You'd see that the results make sense, many of those tags are either major ruby projects or libraries.
 
-We can also render them as virtual relationships in Neo4j Browser, by using the `apoc.create.vRelationship` function on our aggregated data to represent a `SIMILAR` relationship with the count as a property.
+We could also render these correlations as virtual relationships in Neo4j Browser, by using the `apoc.create.vRelationship` function on our aggregated data to represent a `SIMILAR` relationship with the `count` as a property.
 
 [source,cypher]
 ----
-match (q:Question)-[t:TAGGED]->(tag:Tag {name:"ruby"}),
+MATCH (q:Question)-[t:TAGGED]->(tag:Tag {name:"ruby"}),
 (q)-[:TAGGED]->(other:Tag)
-with tag,other, count(*) as freq
-order by freq desc limit 50
-return tag, other, apoc.create.vRelationship(tag,'SIMILAR',{freq:freq}, other)
+WITH tag,other, count(*) as freq
+ORDER BY freq DESC LIMIT 50
+RETURN tag, other, apoc.create.vRelationship(tag,'SIMILAR',{freq:freq}, other)
 ----
 
 image::https://i.imgur.com/Mvzfe2Z.jpg[]
 
-Next we want to see how frequently are those other tags used, by looking at their degrees.
+Next we wanted to see how frequently are those _other tags_ used, by looking at their degrees.
 
 [source,cypher]
 ----
@@ -147,49 +169,73 @@ order by freq desc limit 10
 | 6371 | 3967 | gem
 |===
 
-So you see that `rails`,`arrays` and `javascript` have really high usage.
-For rails it's because it's so popular, the other two tags are also used independently of Ruby for other programming language questions.
+It turned out that `rails`,`arrays` and `javascript` have really high usage.
+Rails showed its popularity, the other two tags are also used independently of Ruby for other programming language questions.
 
-Let's now look at our similarity computation of tags based on the questions they are attached to.
+== Tag Similarity
 
-We are first using the https://neo4j.com/docs/graph-algorithms/current/algorithms/similarity-jaccard/[Jaccard Similarity] which is based on the intersection and the total size of two sets: 
+Then we looked at the similarity computation of tags based on the questions they were attached to.
 
----
+We started with the https://neo4j.com/docs/graph-algorithms/current/algorithms/similarity-jaccard/[Jaccard Similarity] which is based on the intersection and the total size of two sets: 
+
+----
 jaccard(A,B) = ∣A ∩ B∣ / ( ∣A∣ + ∣B∣ - ∣A ∩ B| )
 
 jaccard(A,B) = size(intersection(A,B)) / (size(B) + size(B) - size(intersection(A,B)))
 ----
 
-We can run it in Neo4j either as a function, like `RETURN algo.similarity.jaccard([1,2,3], [1,2,4,5]) AS similarity` which returns `0.4` (`2/(3+4-2)`).
-
-Or as a procedure for larger data volumes.
-There we pass in a list of maps/dictionaries where each entry has an `item` and a `categories` list.
-The procedure computes in parallel the intersections and similarities of all pairs, we can pass in additional parameters like cutoffs for minimal similarity or degree of a node (relevancy).
-
-We're going to run this on a small sample of our data to show that it works.
+We could run it in Neo4j either as a function, like 
 
 [source,cypher]
 ----
-// find 100 tags
-MATCH (tag:Tag) WITH tag LIMIT 100
-MATCH (q:Question)-[:TAGGED]->(tag)
-// find 1M tagged questions for those
-WITH * LIMIT 1000000
-// create the entry per item (tag) with its categories (questions)
-WITH {item:id(tag), categories: collect(id(q))} as userData
-WITH collect(userData) as data
+RETURN algo.similarity.jaccard([1,2,3], [1,2,4,5]) AS similarity
+----
 
-// pass the data to the algorithm
-CALL algo.similarity.jaccard.stream(data, {top:100,topK:5,similarityCutoff:0.1, degreeCutoff:50})
+Which returns `0.4` (i.e. `2/(3+4-2)`).
+
+Or as a procedure for larger data volumes.
+There we would pass in a list of maps/dictionaries where each entry has an `item` value and a `categories` list, e.g. `[{item:1, categories:[1,2,3]},{item:2, categories:[2,3,4]}]`.
+The procedure then computes the intersections and similarities of all pairs in parallel.
+We can pass in additional parameters like cutoffs for minimal similarity or degree of a node (relevancy), the details are documented in the documentation linked above.
+
+We were running this on a small sample of our data to show that it worked.
+
+[source,cypher]
+----
+// find 100 tags with more than 50 questions
+MATCH (tag:Tag) WHERE size((tag)<-[:TAGGED]-()) > 50 WITH tag LIMIT 100
+MATCH (q:Question)-[:TAGGED]->(tag)
+// find 3M tagged questions for those
+WITH * LIMIT 3000000
+// create the entry per item (tag) with its categories (questions)
+WITH {item:id(tag), categories: collect(id(q))} as entry
+WITH collect(entry) as entries
+
+// pass the entries to the algorithm, find the top 3 most similar items to each entry
+CALL algo.similarity.jaccard.stream(entries, {topK:3})
 YIELD item1, item2, count1, count2, intersection, similarity
+// return each pair once
+WHERE item1 < item2 
 // return the tag names, intersections and similarities ordered by highest simillarity
 RETURN algo.getNodeById(item1).name AS firstTag, algo.getNodeById(item2).name AS secondTag, intersection, similarity
 ORDER BY similarity DESC LIMIT 50;
 ----
 
+[%autowidth,opts="header"]
+|===
+| firstTag | intersection | secondTag | similarity
+| html | 183523 | css | 0.211302
+| html | 310519 | javascript | 0.145369
+| javascript | 83489 | css | 0.044600
+| .net | 3195 | javascript | 0.001643
+| .net | 1591 | html | 0.001525
+| .net | 140 | css | 0.000253
+|===
+
+
 == Global Correlations
 
-We now run the Similarity computation on the whole dataset, limited to relevant tags that have at least 100 questions, in total 17000 tag-nodes, i.e. 292 Million comparisons (17k^2).
+We then ran the similarity computation on the whole dataset, limited to relevant tags that have at least 100 questions, in total 17000 tag-nodes, i.e. 292 Million comparisons (17k^2).
 
 [source,cypher]
 ----
@@ -198,18 +244,18 @@ MATCH (tag:Tag) WHERE size((tag)<-[:TAGGED]-()) > 100 WITH tag
 // get the questions
 MATCH (q:Question)-[:TAGGED]->(tag)
 // create dict with tag as item and questions as categories
-WITH {item:id(tag), categories: collect(id(q))} as userData
-WITH collect(userData) as data
+WITH {item:id(tag), categories: collect(id(q))} as entry
+WITH collect(entry) as entries
 // run jaccard, write back results
-CALL algo.similarity.jaccard(data,  {topK:5,similarityCutoff:0.1, degreeCutoff:50, write:true})
+CALL algo.similarity.jaccard(entries, {topK:5,similarityCutoff:0.1, degreeCutoff:50, write:true})
 YIELD nodes, similarityPairs, write, writeRelationshipType, writeProperty, min, max, mean, stdDev, p25, p50, p75, p90, p95, p99, p999, p100
 
 RETURN *;
 ----
 
-On our shared test machine it runs for 13 minutes to compute the data, on dedicated hardware it would be faster.
+On our contended shared test machine it ran for 13 minutes to compute the data, on dedicated hardware it would be faster.
 
-With the min-similarity of 0.1 and writing only the 5 most similar neighbours, we create 2864 `SIMILAR` relationships that we can then use to run other graph algorithms on top.
+With the quite high min-similarity of 0.1 and writing only the 5 most similar neighbours, we create 2864 `SIMILAR` relationships that we can then use to run other graph algorithms on top.
 
 .Boundaries
 [%autowidth,opts="header"]
@@ -225,10 +271,18 @@ With the min-similarity of 0.1 and writing only the 5 most similar neighbours, w
 | 0.11612749099731445 | 0.14028024673461914 | 0.18978071212768555 | 0.25652265548706055 | 0.31351423263549805 | 0.441861629486084 | 0.7177920341491699 | 0.7578158378601074
 |===
 
+In the visualization we saw that we only created "very tight" groups of similarities, like `scheme<->racket` or `sed<->awk`, or some small clusters around each of rdf, hadoop, flash and quickbooks!
+
 image::https://i.imgur.com/zoYzfWA.jpg[]
 
-Now we can use the newly created relationships to run other algorithms, for instance something straightforward as shortest path.
-I.e. how are tags connected transitively.
+So we re-ran the computation with a lower similarity cutoff of 0.01, 
+
+TODO ...
+
+== Utilize Similiarity Relationships
+
+Now we used the newly created relationships to run other algorithms, for instance something straightforward as shortest path.
+I.e. how were correlated tags connected transitively.
 
 [source,cypher]
 ----
@@ -238,14 +292,18 @@ return [n IN nodes(path) | n.name] as nodes
 
 TODO image
 
-Besides that we can also quickly run other graph algorithms on our inferred graph.
+Besides that we also quickly ran other graph algorithms on our inferred graph and wrote the results back to our database.
 
+[source,cypher]
 ----
 call algo.pageRank('Tag','SIMILAR');
 call algo.labelPropagation('Tag','SIMILAR');
 call algo.betweenness('Tag','SIMILAR');
 ----
 
+Now our tags also carried `pagerank`, `partition`, `centrality` attributes that captured their relevance and place in our graph.
+
+[source,cypher]
 ----
 match (t:Tag) return t limit 5;
 ----
@@ -260,20 +318,47 @@ match (t:Tag) return t limit 5;
 
 == Visualization
 
-Now that the nodes of our graph
+Now that the nodes of our graph were enriched with graph metrics, we could visualize them, e.g. with our https://medium.com/neo4j/graph-visualization-with-neo4j-using-neovis-js-a2ecaaa7c379[NeoVis.js Javascript library].
 
-image::{img}/so-neovis.png[]
+For instance the similarity graph surrounding the `javascript` tag.
+
+image::{img}/so-neovis.jpg[]
+
+You can https://raw.githack.com/neo4j-examples/neo4j-stackoverflow-import/master/tagoverflow-viz.html[try it live here] and find the https://github.com/neo4j-examples/neo4j-stackoverflow-import/blob/master/tagoverflow-viz.html[source on GitHub].
+
 
 === Visualization: Graphistry
 
-Fortunately Leo Meyerov?? the CEO and Founder of Graphistry a high performance, GPU-based graph visualization toolkit was at the Hackathon as well.
-While we were looking at the similarities, Leo build a small wrapper around the python driver to pull nodes and relationships from a Cypher query into a DataFrame for Graphistry and bind its columns as required.
+Fortunately Leo Meyerovich, the CEO and Founder of Graphistry, a high performance, GPU-based graph visualization toolkit was at the Hackathon as well.
+While we were looking at the similarities, Leo build a small wrapper around the Neo4j Python driver to pull nodes and relationships from a Cypher query into a DataFrame for Graphistry and bind its columns as required.
 
 The code for that is in the notebook, you'll need a Graphistry Key though.
 
-Below you see the Graphistry UI and a visualization of our Network:
+Below you see the Graphistry UI and a visualization of our Network with this query:
 
-image::{img}/so-graphistry.png[]
+----
+GRAPHISTRY = {
+    'server': 'labs.graphistry.com',
+    'api': 2,
+    'key': 'xxxx'
+}
+
+
+NEO4J = {
+    'uri': "bolt://stackdata.neo4jlabs.com:80", 
+    'auth': ("stackoverflow", "stackoverflow")
+}
+
+n4g = Neo4Graphistry(GRAPHISTRY, NEO4J)
+
+g = n4g.cypher2graphistry("""\
+MATCH p=(t1:Tag)-[r:SIMILAR]->(t2:Tag) WHERE exists(t1.pagerank) and exists(t2.pagerank) RETURN p limit 5
+""")
+
+g.plot()
+----
+
+image::{img}/so-graphistry.jpg[]
 
 == Summary
 

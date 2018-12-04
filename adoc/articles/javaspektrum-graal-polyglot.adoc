@@ -56,6 +56,7 @@ Beim Download der Graal-VM ist JavaScript und LLVM Unterstützung schon enthalte
 
 Die Bibliotheken und Laufzeitumgebungen für Ruby, Python, R können über das Kommandozeilentool `gu` (Graal Updater) installiert werden.
 
+.Installation GraalVM mit sdkman und Zusatzsprachen mit gu
 ----
 sdk use java 1.0.0-rc9-graal
 gu install ruby python R 
@@ -187,6 +188,7 @@ JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+EnableJVMCI -XX:+UseJVMCICompil
 
 In der GraalVM mit installierten dynamischen Sprachen kann ich auch folgenden Test ausführen, ohne die Abhängigkeiten in den Klassenpfad setzen zu müssen.
 
+.Testprogramm in Java für alle unterstützten Sprachen
 [source,java]
 ----
 import org.graalvm.polyglot.*;
@@ -209,6 +211,8 @@ Die Integration von Java kann direkt erfolgen, wenn man `---jvm` nutzt.
 
 In der `polyglot` API stehen `eval` zum Ausführen, `export` und `import` zum Bereitstellen bzw. zur Nutzung von Variablen zur Verfügung.
 
+
+.Polyglottes JavaScript Programm das Java Klassen direkt benutzt
 [source,javascript]
 ----
 // Ausführung: js --jvm --polyglot test.js
@@ -220,12 +224,19 @@ console.log(a)
 
 Hier sehen wir den Aufruf von "R" Code in Graal-Python
 
-.graalpython --polyglot --jvm polyglot.py
+.polyglot.py
 ----
 import polyglot
-rcode = "paste('Graal',1.0, 'RC', c(1:9), sep=' ')"
+rcode = "paste('Graal 1.0', 'RC', c(1:9), sep=' ')"
 versions = polyglot.eval(string=rcode, language="R")
 print("Available Versions of Graal", versions)
+----
+
+.Ausführung des polyglotten Python Programms
+----
+$JAVA_HOME/bin/graalpython --polyglot --jvm polyglot.py
+Available Versions of Graal ['Graal 1.0 RC 1', 'Graal 1.0 RC 2', 'Graal 1.0 RC 3', 'Graal 1.0 RC 4', 
+'Graal 1.0 RC 5', 'Graal 1.0 RC 6', 'Graal 1.0 RC 7', 'Graal 1.0 RC 8', 'Graal 1.0 RC 9']
 ----
 
 Und umgekehrt den Aufruf einer Python-Funktion in FastR.
@@ -244,12 +255,15 @@ fac <- eval.polyglot("python",pycode)
 print(fac(5))
 ----
 
+.Ausführung des polyglotten R Programms
 ----
 $JAVA_HOME/bin/Rscript --polyglot polyglot.r
 [1] 120
 ----
 
-Ein nettes Beispiel aus der Graal Dokumentation, ist eine mehrsprachige Shell, die erstaunlich gut funktioniert.
+Ein nettes Beispiel aus der Graal Dokumentation, ist eine mehrsprachige, interaktive Shell, die erstaunlich gut funktioniert.
+Für die verfügbaren Sprachen kann man Fragmente eingeben, die dann direkt ausgeführt werden.
+Mit Eingabe des Sprachnamens wird die Sprache gewechselt.
 
 .Shell.java
 [source,java]
@@ -302,21 +316,22 @@ image::{img}/graal-chrome-debugger.jpg[]
 
 Mittels `--cpusampler --cpusampler.Mode=statements` erhält man CPU Samples für das eigene Programm.
 
+.Ausgabe CPU Samples
 ----
- ------------------------------------------------------------------------------------------------
+ --------------------------------------------------------------------------------------------
  Sampling Histogram. Recorded 39 samples with period 1ms
    Self Time: Time spent on the top of the stack.
    Total Time: Time the location spent on the stack. 
    Opt %: Percent of time spent in compiled and therfore non-interpreted code.
- ------------------------------------------------------------------------------------------------
+ --------------------------------------------------------------------------------------------
   Thread: Thread[main,5,main]
-  Name       |      Total Time     |  Opt % ||       Self Time     |  Opt % | Location             
- ------------------------------------------------------------------------------------------------
-  :program~6 |         21ms  53.8% |   0.0% ||         21ms  53.8% |   0.0% | test.js~6:117-189 
-  :program~4 |         10ms  25.6% |   0.0% ||         10ms  25.6% |   0.0% | test.js~4:65-110 
-  :program~7 |          8ms  20.5% |   0.0% ||          8ms  20.5% |   0.0% | test.js~7:191-204 
-  :program   |         39ms 100.0% |   0.0% ||          0ms   0.0% |   0.0% | test.js~1-7:0-204 
- ------------------------------------------------------------------------------------------------
+  Name       |      Total Time     |  Opt % ||   Self Time     |  Opt % | Location             
+ --------------------------------------------------------------------------------------------
+  :program~6 |         21ms  53.8% |   0.0% ||     21ms  53.8% |   0.0% | test.js~6:117-189 
+  :program~4 |         10ms  25.6% |   0.0% ||     10ms  25.6% |   0.0% | test.js~4:65-110 
+  :program~7 |          8ms  20.5% |   0.0% ||      8ms  20.5% |   0.0% | test.js~7:191-204 
+  :program   |         39ms 100.0% |   0.0% ||      0ms   0.0% |   0.0% | test.js~1-7:0-204 
+ --------------------------------------------------------------------------------------------
 ----
 
 Wer unter die Haube schauen möchte, kann sich den Operationsbaum von Graal in einer Netzwerkdarstellung im [Ideal] Visualisierungswerkzeug anzeigen lassen.
@@ -372,6 +387,7 @@ responseCode = responseValue.asLong()
 print(responseCode)
 ----
 
+.Mit clang LLVM Bitcode erzeugen und "CurlTest" Programm mittles Groovy ausführen
 ----
 clang -c -O1 -emit-llvm use-curl.c
 groovy CurlTest.groovy
@@ -391,6 +407,7 @@ Normalerweise müssen die in einer JVM Sprache geschrieben werden, aber dank der
 
 Hier ist der Kern der Implementierung zu sehen:
 
+.PolyglotFunctions.java
 [source,java]
 ----
 @Context GraphDatabase graphDb;
@@ -417,13 +434,16 @@ public Object run(String name, Map<String,Object> args) {
 
 Wenn man jetzt Neo4j mittels GraalVM oder OpenJDK 11 mit den genannten Optionen ausführt, können diese Prozeduren genutzt werden, um z.B. dynamisch Funktionen in JavaScript, R, Ruby oder Python zu definieren und zu nutzen.
 
+.Polyglotte Funktion von Neo4j's Cypher anlegen und aufrufen
+[source,cypher]
 ----
-call functions.define("avgFriendAge","js",
-   "const ages = db.findNode(label('Person'),'id',args.get('id')).getRelationships(type('FRIEND'))
-    .map(rel => rel.endNode().getProperty('age'))
+CALL functions.define("avgFriendAge","js",
+   "const ages = db.findNode(label('Person'),'id',args.get('id'))
+      .getRelationships(type('FRIEND'))
+      .map(rel => rel.endNode().getProperty('age'))
     ages.reduce((agg,age) => agg + age)/ages.length");
 
-call functions.run("avgFriendAge", {id:"007"});
+CALL functions.run("avgFriendAge", {id:"007"});
 ----
 
 == Ahead-of-Time Compilation (AOT)
@@ -455,7 +475,7 @@ public class Files {
 }
 ----
 
-.Binary erstellen
+.Binary erstellen mit native-image
 ----
 javac Files.java
 
@@ -491,10 +511,12 @@ time java Files .
 Total size: 13110831 
 real	0m0.230s
 
+# AOT image
 time ./files .
 Total size: 13110831 
 real	0m0.010s
 
+# Natives Unix Tool
 time du -sh .
  13M	.
 real	0m0.004s
@@ -544,8 +566,7 @@ Insgesamt bin ich von der Arbeit des Graal Teams echt beeindruckt, weiter so!
 
 == Referenzen
 
-* https://fedidat.com/510-intro-to-graal/
-
+// * https://fedidat.com/510-intro-to-graal/
 // * https://www.youtube.com/watch?v=50JxcnvJjMQ
 * [WuerthingerShelajevDeepDive] https://www.youtube.com/watch?v=a-XEZobXspo
 * [10-Things] https://medium.com/graalvm/graalvm-ten-things-12d9111f307d
