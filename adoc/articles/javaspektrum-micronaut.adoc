@@ -577,6 +577,7 @@ Bis dahin freue ich mich schon auf neue Releases udn Features und möchte jeden 
 * MicroMeet: https://github.com/jexp/neo4j-micronaut-meetup
 
 
+////
 = Teil 2: Micronaut ist ein "cloud-native" Weltbürger
 
 == Cloud Native
@@ -650,7 +651,7 @@ TODO publish with docker or to heroku?
 == Federations
 
 == Functions (AWS Lambda)
-
+////
 ////
 Ich:hello-world-lambda mh$ mn help create-federation
 | Command: create-federation

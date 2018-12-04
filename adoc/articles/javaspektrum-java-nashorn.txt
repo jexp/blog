@@ -1,0 +1,1517 @@
+= Das Nashorn im Java-Zoo
+
+== Intro
+
+Wir alle wissen, dass Javascript ungefähr soviel mit Java gemeinsam hat wie "carpet" mit "car". 
+Man konnte schon seit langen JavaScript innerhalb von Java ausführen, aber nicht ernsthaft nutzen.
+Erst seit in Java8 "Nashorn" die "Rhino" Implementierung ersetzt, macht das Ganze richtig Spass.
+Mit welchen Techniken und Tricks dynamischer JavaScript Code effizient ausgeführt werden kann, soll Thema dieses Artikels sein.
+
+== Sprachvergleich
+
+Als Sprachen können sie verschiedener nicht sein, und neben einigen Schlüsselworten und Strukuren haben sie nur das Semikolon gemeinsam (welches in Javascript sogar weggelassen werden könnte).
+Das führt auch regelmässig zu Glaubensfrage, die für Softwareentwickler so typisch, aber nicht zielführend ist.
+
+Java ist eine objektorientierte, vererbungsbasierte, statisch getypte, compilierte und "sichere" Sprache, die zu Bytecode kompiliert wird und in Servern und Anwendungen portabel auf allen Betriebssystemen läuft. 
+
+Javascript is eine objektorientierte, prototyp-basierte, dynamische, interpretierte Sprache, deren Mächtigkeit aus der flexiblen Erweiterbarkeit von Objekten zur Laufzeit 
+und der starken Verbreitung als Browser-Scriptsprache kommt. 
+Seit einigen Jahren ist es möglich mittels Node.js (basierend auf der V8-VM) Javascript auch ausserhalb des Browsers effizient auszuführen. 
+Durch die Verbreitung als Sprache des Webs, gibt es viele Entwickler die "genug" JavaScript können, um sich durchzumogeln.
+Effizientes und wartbares JavaScript zu schreiben erfordert aber ebensoviel Erfahrung und noch mehr Disziplin als in Java.
+
+Beide Sprachen haben sehr grosse Ökosysteme, mittlerweile auch mit reichhaltiger Toolunterstützung und werden in jeder Art von Projekt eingesetzt.
+
+== Geschichtliches
+
+Im Navigator 2.0 veröffentlichte Netscape 1995 die von Brendan Eich entwickelte Scriptsprache "LiveScript".
+Die Namensänderung zu "JavaScript" kommt aus der Zeit als Netscape diese Scriptsprache enger mit Java-Applets integrieren wollte und Sun den notwendigen Integrationscode bereitstellte.
+Interessanterweise ist "JavaScript" seit der Übernahme von Sun jetzt eine Marke von Oracle!
+
+Schon relativ zeitig (1997) wurde innerhalb von Netscape der Javascript-Interpreter "Rhino" in Java implementiert, der Teil eines Java-basierten Browsers werden sollte.
+Ein Jahr später wurde diese Implementierung über Mozilla veröffentlicht.
+Seit Java6 (2006) ist Rhino ein Bestandteil der Java-Runtime.
+
+Die ersten Versionen von Rhino waren interessanterweise keine Interpreter, sondern generierten Bytecode, welcher schneller als die damaligen C/C++ Javascript Umgebungen war.
+Leider war dieser Prozess zu zeitaufwändig und speicherhungrig, so dass nachfolgend ein Interpreter die Ausführung des Javascripts übernahm.
+Den Compiler gab es noch im Hintergrund, dieser wurde aber nie weit verbreitet eingesetzt, obwohl es für serverseitiges Javascript schon interessante gewesen wäre.
+
+Mit Rhino konnte man nun von Java aus Javascript-Code interpretiert, ausführen. 
+Es konnten Variablen in den Ausführungscope gebunden und Ergebnisse zurückgeliefert werden.
+Die Integration erfolgte auch später mit der `javax.ScriptEngine` des JSR-223, welche eine einfache Integration für jedes Java-Projekt ermöglicht.
+Wenn da nicht die Performance von Rhino gewesen wäre.
+Der reine Interpreter war zu langsam, als es irgend jemand ernsthaft ausserhalb von einfachem, dynamischen Scripting für Java-Anwendungen eingesetzt hätte.
+
+Das war der gesamten Java-Community lange ein Dorn im Auge, besonders da sich so viele andere, deutlich performantere dynamische Sprachen etablierten.
+
+Mit Google's V8 hielt eine sehr moderne und schnelle C++ -basierte JavaScript Engine in Chrome Einzug, die dann als Basis von Node.js den Erfolg von JavaScript auf dem Server begründete.
+Damit gab es einen deutlichen Zugzwang auf der JVM eine ebenso performante Lösung für die Ausführung von JavaScript anzubieten.
+Das es möglich ist, haben andere Projekte wie jRuby, Groovy und Clojure schon längst bewiesen.
+
+2010 wurde ein Projekt als "Proof of Concept" für invokeDynamic gestartet, um zu zeigen dass MethodHandles die Implementierung dynamischer Sprachen auf der JVM viel einfacher und performanter machen.
+Da dieser PoC so erfolgreich war, wurde beschlossen, mit diesen Mechanismen eine neue, performante Javascript-Runtime zu entwickeln.
+Das Projekt wurde "Nashorn" genannt, als Anspielung auf "Rhino" und das JavaScript(Buch)-Nashorn und sehr zum Leidwesen englischer Muttersprachler.
+Es sollten alle modernen Ansätze für effiziente Ausführungsumgebungen für dynamische Sprachen genutzt werden, um eine zeitgemäße JavaScript-Runtime zu entwickeln.
+
+////
+Die Hauptziele waren eine maximale Kompatibilität mit der ECMAScript-262 5.1 Spezifikation und erfolgreiche Ausführung der Kompatibilitätstests.
+Der Fokus lag ganz klar auf Performance und dankenswerterweise auch auf Sicherheit.
+Über die ScriptEngine API (JSR 223) sollte eine gelungene, bidirektionale Integration zwischen Java und JavaScript erfolgen.
+Zur direkten Interaktion mit Nashorn war eine Kommandozeilenshell (jjs) bereitzustellen. 
+////
+
+////
+Um auf den JavaScript Zug aufzuspringen, hat Oracle im Rahmen der Nashorn Entwicklung das Avatar(.js) Framework aufgesetzt, das das JVM-Äquivalent von node.js darstellen sollte.
+Damit sollte es möglich werden, Node.js Projekte direkt auszuführen, die Bibliotheken des Ökosystems zu nutzen und trotzdem die Vorzüge der JVM zu geniessen.
+Durch die hohen Anforderungen dieses Projekts wurden viele der Ausnahmefälle und Performanceprobleme von Nashorn aufgedeckt und behoben.
+Leider hatte das Projekt Avatar keine Zukunft, es gab zuwenig Interesse von Nutzern und Mitentwicklern, so dass Oracle es im Februar 2015 stoppte und sich stattdessen auf native Node.js Unterstützung konzentriert.
+////
+
+Die Entwicklung von Nashorn hat seit 2010 viele Iterationen durchlaufen, seit Java 8 ist es offiziell Teil des JDK.
+Während dieser Zeit wurden verschiedene Ansätzen für die Lösung von Performance und Interoperabilitätsproblemen, die von Markus Lagergren und Attila Szegedi jeweils auf den JVM-Language-Summits vorgestellt wurden.
+Im Abschnitt "Technisches" werde ich detaillierter darauf eingehen.
+
+== Nützliches
+
+Nashorn ist eine der wenigen Javascript Runtimes, die 100% ECMAScript 5.1 compliant sind.
+Für Java 9 ist eine Unterstützung von ECMAScript 6/2015 geplant, die teilweise schon umgesetzt ist.
+Die Entwickler von Nashorn haben aber sehr deutlich gemacht, dass Javascript vom Design und der Semantik eine der schlimmsten Sprachen darstellt.
+
+[quote]
+____
+"Und wer JavaScript performant auf der JVM zu laufen bekommt, hat die potentiellen Probleme der meisten anderen dynamischen Programmiersprachen auch gleich mit gelöst" [Lagergren JLS2014]
+____
+
+Die Ausführung von Javascript auf der JVM erlaubt interessante neue Optionen, die Nutzung des breiten Ökosystems und der Klassenbibliotheken.
+Aber auch die bewährten Test-, Integrations and Deployment-Plattformen stehen zur Verfügung, so dass große Javascript-Projekte in verlässlichen Umgebungen laufen können.
+Desweiteren kann Profiling von Ausführung und Speichernutzung sowohl über Debugger, als auch über Java-Flight-Recorder wichtige Laufzeitinformationen bereitstellen.
+
+Für den Schnellstart mit Nashorn bedient man sich der mitgelieferten Shell "jjs", die im "bin" Verzeichnis des JDK/JRE zu finden ist:
+
+[source,javascript]
+----
+// JavaScript mit Kurzform für Funktionen
+[1,0].map(function(x) x*x).join("");
+
+// Konvertierung von Feldern
+var a = Java.to([1,"2","false"],"int[]");
+for(x in a) print(x) // 1,2,0
+Java.from(a) // 1,2,0
+
+// Überladung von Funktionen
+java.lang.System.out["println(double)"](12);  // 12.0
+
+// Java Klasse deklarieren, erzeugen, aufrufen
+var File = Java.type("java.io.File");
+new File("/etc/passwd").exists(); // true
+
+java.util.Array.asList(-1,1).stream()
+        .reduce(0, function(a,x) a+x); // 0
+
+// Funktionen als SAM-Parameter weitergeben
+new Thread(function() { print("new thread")});
+
+// Erweiterung von Klassen
+var r = new java.lang.Runnable
+       ({ run: function() { print('hello') }});
+// Kurzform
+var r = new java.lang.Runnable
+       { run: function() print('hello') };
+
+++[[]][+[]]+[+[]]; // 10
+----
+
+Die Einbindung in Java Programme erfolgt mittels der `javax.script.ScriptEngine` des JSR-223, von der man sich eine "nashorn" Runtime zurückgeben lässt.
+Da Nashorn nicht thread-safe ist, sollten Instanzen der ScriptEngine über `ThreadLocal` oder Pools verwaltet werden.
+
+Da bei der Entwicklung von Nashorn viel Wert auf die gute Integration von Java Typen und Mechanismen gelegt wurde, gibt es bei der Integration nur ein wenig zu beachten.
+Die meisten Java-Typen und deren Methoden, können ohne Verlust von Typinformationen direkt in Javascript genutzt werden.
+
+In Javascript können Klassen mittels `Java.extend` abgeleitet werden, neben den Typen (1 Klasse, n Interfaces) wird dann ein Javascript Objekt übergeben, dessen Properties die Funktionen und Eigenschaften enthalten, die für die Erweiterung genutzt werden können. 
+Dabei müssen alle Methoden-Overloads mit demselben Namen durch diesselbe Javascriptfunktion gehandhabt werden, welche dann aufgrund der Parameteranzahl und -typen das Dispatching selbst vornehmen muss.
+
+Alle JavaScript Objekte (also auch Felder) sind Subklassen von `ScriptObjectMirror` und implementieren das `Map` interface.
+Felder in JavaScript können aufgrund ihrer sehr eigenwilligen Semantik - sie können verschiedene Typen enthalten und auch spärlich besetzt sein - nicht direkt auf Java-Felder abgebildet werden, sondern nur mit `Java.to(array[,"int[]"])`.
+Eine Abbildung von Feldern auf das `java.util.List` Interface ist leider auch nicht möglich da dessen `boolean Collection.remove(Object)` mit der `Object Map.remove(Object)` des Map-Interfaces von `ScriptObjectMirror` kollidiert.
+
+Java-Klassen sollten mittels ihres Paketes über `var HashMap = Java.type("java.lang.HashMap")` referenziert werden.
+Es gibt auch die Möglichkeit, globale Konstanten zu nutzen, die eine Paketstruktur simulieren, wie z.b. `new java.io.File()`, aber ihre eigenen Fehlerquellen mitbringen.
+
+Java-Features wie Streams können mit Funktionen kombiniert und Java-Collections/Felder mit foreach genutzt werden.
+
+Ein cooles Gimmick ist, dass Javascript Funktionen an allen Stellen genutzt werden können, die ein Single-Abstract-Method (SAM) Interface bzw. Klasse entgegennehmen.
+
+Variablen können in den ScriptEngine-Kontext gelegt werden und Fragmente oder vollständige Skriptdateien ausgeführt werden, deren Kreationen dann ebenfalls im Kontext vorliegen.
+Für die Ausführung von in Javascript definierten Funktionen kann die `ScriptEngine` nach `Invocable` gecasted werden, um dann diese mit `invokeFunction("name",args)` auszuführen.
+
+
+[source,java]
+----
+public class Main {
+   public static void main(String[] args) throws Exception {
+       ScriptEngineManager manager = new ScriptEngineManager();
+       ScriptEngine engine = manager.getEngineByName("nashorn");
+       engine.eval("function encode(x) { return encodeURIComponent(x); }");
+       Invocable js = (Invocable)engine;
+       System.out.println(js.invokeFunction("encode", "süß"));
+   }
+}
+// s%C3%BC%C3%9F
+----
+
+
+////
+
+jjs> var r = new java.lang.Runnable({ run: function() { print('hello') }});
+jjs> var r = new java.lang.Runnable({ run: function() print('hello') });
+jjs> var r = new java.lang.Runnable{ run: function() print('hello') };
+jjs> r.run();
+
+
+n order to call a function you first have to cast the script engine to Invocable. The Invocable interface is implemented by the NashornScriptEngine implementation and defines a method invokeFunction to call a javascript function for a given name.
+
+Java objects can be passed without loosing any type information on the javascript side. Since the script runs natively on the JVM we can utilize the full power of the Java API or external libraries on nashorn.
+
+static methods can be called on the java-class Java.type objects
+
+static void fun2(Object object) {
+    System.out.println(object.getClass());
+}
+To understand how type conversations are handled under the hood, we call this method with different javascript types:
+
+MyJavaClass.fun2(123);
+// class java.lang.Integer
+
+MyJavaClass.fun2(49.99);
+// class java.lang.Double
+
+MyJavaClass.fun2(true);
+// class java.lang.Boolean
+
+MyJavaClass.fun2("hi there")
+// class java.lang.String
+
+MyJavaClass.fun2(new Number(23));
+// class jdk.nashorn.internal.objects.NativeNumber
+
+MyJavaClass.fun2(new Date());
+// class jdk.nashorn.internal.objects.NativeDate
+
+MyJavaClass.fun2(new RegExp());
+// class jdk.nashorn.internal.objects.NativeRegExp
+
+MyJavaClass.fun2({foo: 'bar'});
+// class jdk.nashorn.internal.scripts.JO4
+Primitive javascript types are converted to the appropriate java wrapper class. Instead native javascript objects are represented by internal adapter classes. Please keep in mind that classes from jdk.nashorn.internal are subject to change, so you shouldn't program against those classes in client-code:
+
+ScriptObjectMirror
+
+When passing native javascript objects to java you can utilize the class ScriptObjectMirror which is actually a java representation of the underlying javascript object. ScriptObjectMirror implements the map interface and resides inside the package jdk.nashorn.api. Classes from this package are intended to be used in client-code.
+
+The next sample changes the parameter type from Object to ScriptObjectMirror so we can extract some infos from the passed javascript object:
+
+static void fun3(ScriptObjectMirror mirror) {
+    System.out.println(mirror.getClassName() + ": " +
+        Arrays.toString(mirror.getOwnKeys(true)));
+}
+When passing an object hash to this method, the properties are accessible on the java side:
+
+MyJavaClass.fun3({
+    foo: 'bar',
+    bar: 'foo'
+});
+
+// Object: [foo, bar]
+
+We can also call member functions on javascript object from java. Let's first define a javascript type Person with properties firstName and lastName and method getFullName.
+
+function Person(firstName, lastName) {
+    this.firstName = firstName;
+    this.lastName = lastName;
+    this.getFullName = function() {
+        return this.firstName + " " + this.lastName;
+    }
+}
+The javascript method getFullName can be called on the ScriptObjectMirror via callMember().
+
+static void fun4(ScriptObjectMirror person) {
+    System.out.println("Full Name is: " + person.callMember("getFullName"));
+}
+
+Language Extensions
+
+Nashorn defines various language and API extensions to the ECMAScript standard. Let's head right into the most recent features:
+
+Typed Arrays
+
+
+
+Native javascript arrays are untyped. Nashorn enables you to use typed java arrays in javascript:
+
+var IntArray = Java.type("int[]");
+
+var array = new IntArray(5);
+array[0] = 5;
+array[1] = 4;
+array[2] = 3;
+array[3] = 2;
+array[4] = 1;
+
+try {
+    array[5] = 23;
+} catch (e) {
+    print(e.message);  // Array index out of range: 5
+}
+
+array[0] = "17";
+print(array[0]);  // 17
+
+array[0] = "wrong type";
+print(array[0]);  // 0
+
+array[0] = "17.3";
+print(array[0]);  // 17
+
+The int[] array behaves like a real java int array. But additionally Nashorn performs implicit type conversions under the hood when we're trying to add non-integer values to the array. Strings will be auto-converted to int which is quite handy.
+
+
+Collections and For Each
+
+Instead of messing around with arrays we can use any java collection. First define the java type via Java.type, then create new instances on demand.
+
+var ArrayList = Java.type('java.util.ArrayList');
+var list = new ArrayList();
+list.add('a');
+list.add('b');
+list.add('c');
+
+for each (var el in list) print(el);  // a, b, c
+In order to iterate over collections and arrays Nashorn introduces the for each statement. It works just like the foreach loop in java.
+
+Here's another collection foreach example, utilizing HashMap:
+
+var map = new java.util.HashMap();
+map.put('foo', 'val1');
+map.put('bar', 'val2');
+
+for each (var e in map.keySet()) print(e);  // foo, bar
+
+for each (var e in map.values()) print(e);  // val1, val2
+
+Lambda expressions and Streams
+
+Everyone loves lambdas and streams - so does Nashorn! Although ECMAScript 5.1 lacks the compact arrow syntax from the Java 8 lambda expressions, we can use function literals where ever lambda expressions are accepted.
+
+Extending classes
+
+Java types can simply be extended with the Java.extend extension. As you can see in the next example, you can even create multi-threaded code in your scripts:
+
+var Runnable = Java.type('java.lang.Runnable');
+var Printer = Java.extend(Runnable, {
+    run: function() {
+        print('printed from a separate thread');
+    }
+});
+
+var Thread = Java.type('java.lang.Thread');
+new Thread(new Printer()).start();
+
+new Thread(function() {
+    print('printed from another thread');
+}).start();
+
+// printed from a separate thread
+// printed from another thread
+
+Parameter overloading
+
+Methods and functions can either be called with the point notation or with the square braces notation.
+
+var System = Java.type('java.lang.System');
+System.out.println(10);              // 10
+System.out["println"](11.0);         // 11.0
+System.out["println(double)"](12);   // 12.0
+Passing the optional parameter type println(double) when calling a method with overloaded parameters determines the exact method to be called.
+
+
+Nashorn hat es sich zum Ziel gemacht, die Integration zwischen Java und Javascript so nahtlos wie möglich zu gestalten.
+Dazu erfolgt neben der transparenten Typekonvertierung in beide Richtungen, 
+Javascript Funktionen werden auf SAMS (Single Abstract Methods) für Zieltypen, z.B. in Parametern gemappt.
+Z.B. sind parameterlose Funktionen als Runnable nutzbar, Funktionen mit Rückgabewerten bzw. mehreren Parametern dann für die entsprechenden Äquivalente in java.utils.functions.* ??? . 
+
+Java Beans
+
+////
+
+// TODO: Niko Köbler zeigt, wie man React Anwendungen mit Nashorn und Ozark/MVC implementieren kann.
+// TODO: Und Adam Bien integriert JavaScript an geeigneten Stellen in Java EE Anwendungen.
+
+== Technisches
+
+Die Leistungsfähigkeit der dynamischen Runtime, setzt sich aus den Zeiten für Ausführung, Warmup, Erreichen eines stabilen Zustands und Ausführung der Laufzeitbibliotheken zusammen.
+Jeder dieser Aspekte wird im folgenden kurz beleuchtet.
+
+=== Ausführung
+
+Die JVM ist zuallererst eine *Java*-Bytecode Maschine.
+Dass heisst, sie ist dafür geschaffen, stark getypten Bytecode - möglichst mit primitiven Datentypen und Operationen - am schnellsten auszuführen und am höchsten zu optimieren (JIT, Inlining, Unrolling).
+
+Daher besteht das Hauptproblem für die Implementierung von JavaScript und anderer dynamischer Sprachen in ihrer potentiellen Dynamizität, bei JavaScript zusätzlich noch in der mangelnden Konsistenz und totalen Freiheit der Sprache.
+
+Für die Transformation von JavaScript in Java-Bytecode bedeutet dass, dass man im korrekten Ansatz jeden Wert als Objekt behandeln muss.
+Bei jeder Operation ist dann ein Typ- und Überlaufs-Checks sowie Umwandlung und Unboxing vorzunehmen, damit dann die eigentliche Operation (z.b. Addition or Methodenaufruf) ausgeführt werden kann.
+
+Nashorn war von Anfang an ein Vorzeigeprojekt für die invokedynamic Operation (JSR-292), ca. 10-20 Prozent der Instruktionen die von Nashorn generiert werden sind `invokedynamic` Bytecodes.
+
+In jedem Schritt kann sich theoretisch auch jeder Bestandteil eines Objekts und Kontextes ändern, so dass man diese erneut laden und überprüfen muss.
+Dasselbe gilt für alle aufgerufenen Funktionen.
+
+Aus dieser Dynamizität ergibt sich, dass wir für jeden Zugriff oder Aufruf immer wieder auf die JS-Runtime zugreifen müssen, um die letzte, aktuellste Variante einer Eigenschaft oder Methode zu erhalten.
+
+Dieser dynamische Zugriff auf die Informationen erfolgt über `MethodHandles` die dann mittels `invokeExact` oder `invoke` aufgerufen werden und über die deklarierte Meta-Informationen der Runtime die Auflösung und Entscheidung überlassen.
+
+In Nashorn wird für diese Entscheidung und Umwandlung die "dynalink" Bibliothek genutzt, die in diesem Rahmen schon viele hilfreiche Ansätze für dynamische Auswertung und Konvertierung umsetzt.
+//Dazu später mehr.
+
+Dieser pessimistische Ansatz zwar korrekt, aber viel zu langsam als dass man ihn ernsthaft in Betracht ziehen kann.
+Zum Beispiel ist eine Addition von zwei Werten in einer Schleife zwischen mit dem Integer-Ansatz 150 mal schneller als mit Objekten
+
+Zum Glück sind dynamische Sprachen in der Realität gar nicht so dynamisch, wie es zuerst den Anschein hat.
+Zwar ist es theoretisch möglich, zu jeder Zeit, jeden Typ, Methode, Variable oder Eigenschaft in Typ oder Wert zu ändern, selbst als Seiteneffekt eines anderen Methodenaufrufs.
+Nach der Anlaufphase am Anfang einer Javascript-Anwendung, sind die meisten dynamischen Rekonfigurationen vorgenommen worden und es gibt in den Kernbereichen der Anwendung den meisten kaum noch Überraschungen.
+
+Diesen Umstand hat sich das Nashorn Team zunutze gemacht, in dem es von optimistischen Vorhersagen ausgehend, mit einer optimalen Implementierung für die effizientesten Typen (int, double, long) einer Methode beginnt.
+An allen Stellen an denen eine Verletzung dieser Annahmen auftreten kann (z.b. Variablenzugriff oder Operationen) werden innerhalb der Methode *markiert* und beim Abweichen des aktuellen vom erwartetem Typ wird eine `UnwarrantedOptimismException` erzeugt.
+
+image::https://dl.dropboxusercontent.com/u/14493611/optimistic_types.jpg[width=400]
+
+Diese wird dann am Ende der Methode behandelt und führt dazu, dass die Methode mit höherem Pessimismus für die Typerwartungen neu erzeugt und geladen wird.
+Die aktuellen lokalen Variablen werden gesichert und eine maximal pessimistische Implementierung der Methode ab der Markierung generiert und ausgeführt.
+Dieser Continuation-Ansatz funktioniert erstaunlich gut, man erreicht im optimalen Fall fast die Leisungsfähigkeit von getypten Java-Bytecode. 
+
+Er ist im JEP-196 "Nashorn Optimistic Typing"[JEP196] noch einmal im Detail beschrieben.
+
+[source,javascript]
+----
+function() {
+   return a + b;
+}
+----
+
+[source,asm]
+----
+public static f(ScriptFunction;Object;)I
+0	aload 0
+1	invokevirtual ScriptFunction.getScope()ScriptObject;
+4	astore 2
+5	aload 2
+// Zugriff auf a mit Annahme dass es ein int ist
+6	invokedynamic dyn:getProp|getElem|getMtd:a(Object;)I
+11	istore 3
+12	iload 3
+13	aload 2
+// Zugriff auf b mit Annahme dass es ein int ist
+14	invokedynamic dyn:getProp|getElem|getMtd:b(Object;)I
+// Integer-Addition mit Überlaufschutz
+19	invokedynamic iadd(II)I 
+----
+
+[source,java]
+----
+try {
+  operation; // Zugriff auf a,b  und Addition
+} catch (final UnwarrantedOptimismException e) {
+  throw new RewriteException(e.getLocalVariables(), e.getProgramPoint());
+}
+----
+
+Dieser Ansatz ist ähnlich zu dem der von Truffle und Graal genutzt wird, nur dass dort die Kommunikation zwischen Interpreterframework und Compiler automatisch funktioniert.
+
+
+Durch die fehlende Typisierung kann die Vorhersage von Typen von Variablen nur indirekt abgeleitet werden, aus ihrer Deklaration, den Operationen die auf ihnen ausgeführt werden (z.b. Multiplikation auf Zahlen) und dem Fluss von Werten durch das Programm.
+Das macht man sich für die initiale, optimistische Variante zunutze, da man für bestimmte Variablen "weiss" welchen Typ sie haben und ihn damit für andere inferieren kann.
+
+=== Überläufe
+
+Für die mathematischen Operationen ist nachteilig dass die JavaScript Typen nicht mit Java kompatibel sind.
+Zahlen in Javascript sind etwas größer als in Java, so dass man zwar alle mit `double` abbilden kann, aber halt nicht mit `int`.
+Damit würde man aber deutliche Leistungseinbussen hinnehmen.
+
+Für optimistische Integer-Operationen muss im Fall des Falles immer auf Überläufe reagiert werden können.
+In reinem Java-Code war der Überlaufs-Check zu langsam, daher wurde dieser mit neuen `-Exact` Operationen in `java.lang.Math` realisiert, z.B. `addExact`, die dann als intrinsische Methoden auf nur wenige Bytecode Operationen abgebildet werden können (jump on overflow).
+Somit kann man optimistisch `addExact` benutzen, und nur wenn der Integer-Wertebereich verlassen wird, muss die Operation mit Long oder Double wiederholt werden.
+
+////
+=== Hintergrund
+
+Die Implementierung der Laufzeitbibliotheken und Standardfunktionen sowohl von JavaScript als auch im JDK trugen ihren Anteil zu Performanceproblemen bei, so dass durch Optimierungen dort - Inlining, Unboxing, spezialisierte Funktionen - noch ein deutlicher Bonus zu verzeichnen war.
+Teilweise wurde eine ähnliche Technik wie oben beschrieben genutzt, nur dass der Typ-Check von Parameter dann explizit vorgenommen wurde.
+////
+
+=== Ableitungen
+
+Wenn eine Java Klasse oder Interface mittels durch Javascript abgeleitet wird, werden im Bytecode der generierten Klasse Instanzvariablen für den Script-Kontext und MethodHandles _für die explizit überschriebenen Methoden_, sowie `toString`, `hashCode` und `equals` vorgesehen.
+Diese werden dann im Constructor via `JavaAdapterServices.getHandle()` aus dem ScriptObject extrahiert und gespeichert.
+
+[source,javascript]
+----
+Java.extend(java.lang.Runnable, function() print("test"))
+----
+
+[source,java]
+----
+package jdk.nashorn.javaadapters.java.lang;
+
+public final class Runnable implements Runnable {
+	
+	ScriptObject global;
+	MethodHandle run;
+	MethodHandle toString;
+	MethodHandle hashCode;
+	MethodHandle equals;
+}
+
+this.run =  JavaAdapterServices.getHandle(target, "run", MethodType.type(void.class))
+this.global = Context.getGlobal()
+----
+
+Beim Aufruf der bytecode-generierten, überschriebenen Methoden wird dann immer wieder gecheckt ob das jeweilige MethodHandle eine Funktionsreferenz enthält, die aufgerufen werden kann, oder wenn nicht dann ggf. die Methode der Superklasse.
+
+////
+=== Sicherheit
+
+Nashorn wurde von Anfang an, mit mehr Sicherheit geplant, als das bei anderen dynamischen Sprachen der Fall war.
+Die Entwickler wollten sich davor schützen, beim Auftreten einer Sicherheitslücke im Mittelpunkt stehen zu müssen.
+
+Es können nur öffentliche Klassen und Interfaces erweitert werden, und da auch nur Methoden, die `public` oder `protected` sind.
+
+Wenn ein `SecurityManager` installiert ist, werden weitere Prüfungen durchgeführt, z.B. nach erlaubten Packages.
+
+Methoden, im JDK, die mit @CallerSensitive annotiert sind werden nicht überschrieben, diese würden sonst den falschen Stacktrace benutzen, um den Aufrufenden festzustellen.
+
+Adapterklassen für Ableitungen werden in einer separaten Protection-Domain erzeugt, so dass sie die Rechte von Aufrufendem und Aufgerufenen nicht einschränken. 
+
+Es ist wichtig den richtigen ClassLoader bei Ableitungen zu finden, wenn mehrere Supertypen angegeben wurden.
+Dann wird die sichtbarkeit der ClassLoader untereinander geprüft und nur wenn ein ClassLoader gefunden wird, für den alle anderen erreichbar sind, kann der Adapter erzeugt werden.
+////
+
+
+////
+pass functions to SAMs
+-> creates adapter classes/proxies
+-> with invokedynamic
+package jdk.nashorn.javaadapters.java.lang;
+
+public final class Runnable implements Runnable {
+	
+	ScriptObject global;
+	MethodHandle run;
+	MethodHandle run;
+	MethodHandle toString;
+	MethodHandle hashCode;
+	MethodHandle equals;
+}
+
+constructors for these have extra argument that carries the implementation
+JavaAdapterServices.getHandle() <- extract method handle for passed in target object
+aka. 
+
+this.run =  JavaAdapterServices.getHandle(target, "run", MethodType.type(void.class))
+this.global = Context.getGlobal()
+-> todo code for getHandle() from Slides
+
+for every SAM antoher constructor that takes a ScriptFunction and not an object
+-> into SAM-method
+-> all other methods initialized with null
+
+as additional arg is at end -> no vararg constructors preserved -> just X[]
+
+var Hello = Java.extend(java.lang.Runnable, { run: function() { print("hello");}});
+var Hello = Java.extend(java.lang.Runnable, function() { print("hello");}); // SAM
+
+dynalink makes sure the right overloaded constructor is picked up at invocation time
+
+bytecode generated for the methods 
+* on invocation of the method
+* retrieve field, if null either super call (invokespecial) or UnsupportedOperationException for abstract methods
+* otherwise MethodHandle.invokeExact() on MH from field
+* error handling: rethrow RuntimeException and Errors and previously declared (by original method) exceptions
+* others Throwables are wrapped in a new RuntimeException
+* check if context is the same as on creation otherwise use creation-time-global temporarily, restore to current later (context != this/self) (global context with global prototypes and global vars)
+* self/this object is bound in MethodHandle
+
+Usually instance level behavior, sometimes you want class level behavior then additionally store MH to static behavior and static context
+Pass class overrides via thread-local as initialization happens in static {} block
+loaded every time in a new class-loader for fresh set of static fields for the class level spec
+
+resolve on classloading = true => run static initializers
+
+there is no overloading in JS
+how do you override them
+override by name -> all non-final overloads
+you have on the JS side inspect argument list and do your own dispatch
+only public classes / interfaces extendable, public/protected methods
+SecurityManager check for restricted packages
+prevent @CallerSensitive methods
+Adapters in separate protection domain
+so that they don't narrow the priviledges of callee or caller
+they have no doPriviledged blocks, can't act as escalator
+make sure to use the right classloader to define the adaptor, as you can extend 1 class and many interfaces at once
+-> maximum visibility CL, that can see all other loaders.
+if none found, can't create adaptor
+
+type conversions
+
+JavaScript ist special
+
+coercion sometimes is unexpected
+0->false
+1->true
+[]->true
+{}->true
+""->false
+"false"->true
+null->null
+undefined->null
+
+if a java method accepts a SAM parameter, you can pass a JS function and an on-the-fly adapter is created
+sometimes tricky with overloads, e.g. if there is an overload with a string -> each JS object (incl. functions) has a toString() method
+if a dynamic language allows more conversions/coercions than Java, you widen the range of applicable methods for overload resolution !!
+priorization needed
+
+numbers,booleans,strings used as their boxed Java counterparts, you can use Java methods on them
+
+////
+
+////
+=== Auflösung - Linker
+
+Nashorn benutzt unter der Haube nicht direkt MethodHandles auf die Runtime sondern bedient sich einer Bibliothek von Attila Szegedi namens "dynalink".
+Diese dient zur Erleichterung und Vereinfachung des Zugriff auf ausführbaren Code aus dynamischen Runtimes.
+Dazu wird als Call-Site nicht die Runtime direkt angesprochen, sondern ein Method-Handle das von "dynalink" zurückgeben wird.
+In der Runtime kann dann neben des Standardverhaltens komplett dynamisch auf den Aufruf reagiert werden, d.h. je nach lokalem Kontext und Zustand werden neue Method-Handles oder Objekte zurückgegeben.
+Jedes Stück Javascript-Code wird in eine lange Reihe individueller Method-Handle Lookups umgewandelt, die dann zur Laufzeit mit `invokedynamic` aufgerufen werden.
+
+In der Runtime kann auf Methoden, Properties oder Elementen (von Arrays) zugegriffen werden, sogar in einer Fallback-Kette.
+Beim Aufruf werden Typen konvertiert und die MethodHandles aufgelöst.
+
+Hier als Beispiel der Zugriff auf eine Eigenschaft `a` im Scope.
+
+----
+invokedynamic dyn:getProp|getElem|getMethod:a(Object;)
+----
+////
+
+////
+
+JSR 292 Invoke-Dynamic 
+JSR 232 Java Scripting
+
+Das wichtigste Werkzeug von Nashorn sind MethodHandles, die uns ja schon von diversen Exkursen zu invokedynamic bekannt sind und die programmatische Ausführung (Reflection) von Methodenausführung und Feldzugriffen fast bis auf das Niveau normaler Aufrufe beschleunigen.
+
+Ein zentraler Aspekt bei der Realisierung von Nashorn war die enge Integration in die JVM und Java.
+So können natürlich Objekte und Primitive beider Sprachen ineinander umgewandelt werden, aber es können auch Java-Interfaces implementiert oder Javascript-Funktionen als SAMs ausgeführt werden.
+
+TODO check if Nashorn allows executing lambdas as functions and vice versa
+
+Nashorn benutzt unter der Haube nicht direkt MethodHandles sondern bedient sich einer Bibliothek von Attila Szegedi namens "dynalink".
+Diese dient zur Erleichterung und Vereinfachung des Zugriff auf ausführbaren Code aus dynamischen Runtimes.
+Dazu wird als Call-Site nicht die Runtime direkt angesprochen, sondern ein Method-Handle das von "dynalink" zurückgeben wird.
+In der Runtime kann dann neben des Standardverhaltens komplett dynamisch auf den Aufruf reagiert werden, d.h. je nach lokalem Kontext und Zustand werden neue Method-Handles oder Objekte zurückgegeben.
+Jedes Stück Javascript-Code wird in eine lange Reihe individueller Method-Handle Lookups umgewandelt, die dann zur Laufzeit mit invokedynamic aufgerufen werden.
+
+
+Xxxx hat das an diesem Beispiel gut demonstriert:
+
+[source,javascript]
+----
+
+----
+
+Der generierte Bytecode wird nie gespeichert, sondern von Nashorn direkt der JVM übergeben.
+Daher musste er ihn mittels eines Java-Agents und der Kapselung bestimmter Aufrufe extrahieren:
+
+
+----
+----
+
+JAVA!-Bytecode - strong types, methods, classes, size limitations != JavaScript
+every 10th bytecode is an invokedynamic
+has a well designed security model
+performance -> js compliance made it slower, security too, invokedynamic improvements, inlining, worked with jvm team
+dynamic langauges, no types, change at runtime a lot, invokedynamic helps a lot
+JS makes it especially hard
+optimistic and be prepared to revert a lot of decisions
+prototypes can change everything
+Numbers have no fixed ranges, handle overflows, conservatively -> double
+nashorn bytecode originally tailored towards objects everywhere -> slow
+boxing, 
+need primitives for performance !!
+try to get static information from JS source (from uses and definitions, coercion semantics)
+assume things
+
+generally you cannot trust a thing be the same in the next call
+but specifically make assumptions
+use coercion that happens for operations to your advantage
+look at callsite parameter types, operations return type  (e.g. multiplication)
+
+have specific versions for optimized types e.g. double -> double
+as soon as you notice your invariant breaks, revert to the slow object based version, using return-value / parameter filters for methodhandles, 
+no bytecode for reverting needed
+method-handle API does a great job
+parameters mean trouble
+for a few numbers, types and ranges are provable, but it's hard and you have to follow them / inlining
+-> 
+runtime callsite is really object->object but we try better
+-> using objects everywhere and boxing / unboxing would be safe but way too slow
+use whatever primitives you can, get some performance, and static range-checking
+---> we would end up building our own native js runtime
+
+adaptive / dynamic /optimistic 
+
+use guards, they will be inlined
+specialized versions of methods (with primitive parameters as inferred) and revert it when proven wrong
+jvm doesn't like doubles, but ints
+but you often can't assume to have ints
+arithmetic can overflow -> out of range of ints
+"+" operator is worst
+
+nashorn performs well with primitive int types
+overflow-checks are slow (make int operations slower than double operations)
+Math.addExact (w/ overflow-check also mulExact, subExact)-> into Java8 -> 2x as fast intrinsic in machine code to react on overflow in machine-code (jump on overflow "jo")
+
+-> is replaced by machine-code if possible
+public static int Math.addExact(int x, int y) {
+    int r = x + y;
+    // HD 2-12 Overflow iff both arguments have the opposite sign of the result
+    if (((x ^ r) & (y ^ r)) < 0) {
+        throw new ArithmeticException("integer overflow");
+    }
+    return r;
+}
+
+Native overflow checking enables to use ints everywhere -> JIT optimizations, unrolling etc.
+make sure that global values which has to be retrieved using invokedynamic are of the type we (and operations) expect
+retrieve them once, check type, then use the local copy
+
+function f() {
+	var x = 0;
+	while (x < y) {
+		x++;
+	}
+	return x;
+}
+
+iconst_0
+istore_0
+invokedynamic get y()I //check for primitive
+istore_1
+while:
+iload_0
+iload_1 // y
+if_icmpge exit
+iload_0
+iconst_1
+invokestatic addExact // intrinsic machine code
+goto while
+exit:
+istore_0
+ireturn
+
+what happens if we are wrong in our assumptions???
+e.g. access of array values
+bytecode is strongly typed, so we can't swap out bytecode
+but we can encapsulate it in a MH??
+throw errors / guards / version code
+int vs. double vs. object -> branchy code of combinatiorial explosion -> no versioning or guards
+add catch block -> take continuation -> jump to less specialized version of the code
+need limited form of continuation -> restart single method at top of the stack, only restart it once
+optimistically access array values as "ints", do iadd and handle error
+optimistic call site for array access -> give it an id
+Method-Handle for array access -> return value filter for call-site, if we don't get an int back, we throw an exception
+UnwarrantedOptimismException with original return value as object and the id of the optimistic call site 
+-> try catch around method -> rewrite-ex -> rewrite method with more general variant (callee is wrong, rewrite caller)
+JEP ?? <- Lagergren
+
+"JS is a lot about unwarranted optimism"
+
+Have the Linker add MethodHandles.catchExeption for RewriteException
+-> Catch triggers recompilation with more pessimistic implementation
+for continuation to finish -> also generates and executes maximal pessimistic "rest-of-method" with the saved local variables, the original return value (it can never throw an UnwarrantedOptimismException)
+on stack replacement in bytecode
+
+JVM:
+started in Java7 but issues with NoClassDefFound
+Java8 -> lots of the c++ rewritten in Java LambdaForms -> 10% of the performance
+deep stack-traces of LambdaForms
+google:lambdaform
+inliners take care of 
+
+jrockit incremental -> keep on inlining
+the hard inlining size threshold hit them
+LambdaForms + MethodHandles put lots of pressure on inlining and LF also on Metaspace
+fixed inlining -> double performance from invokedynamic
+
+Are LambdaForms still in bytecode????
+lots of boxing (of objects) but also in MethodHandle-Framework
+MethodHandle.invoke was slow
+
+bootstrapping invokedynamic and callsite analysis and lambda-forms slows down warmup
+
+everything in scope has to be a field on a java instance (for optimistic vs. non-optimistic both primitive and object)
+
+
+Attila:
+intricasies for writing adapter classes when using invokedynamic
+type conversions
+arrays
+packages
+dynalink
+security
+
+interface with java
+
+pass functions to SAMs
+-> creates adapter classes/proxies
+-> with invokedynamic
+jdk.nashorn.javaadapters.java.lang
+class ... implements Runnable {
+	
+	ScriptObject global;
+	MethodHandle run;
+	MethodHandle run;
+	MethodHandle toString;
+	MethodHandle hashCode;
+	MethodHandle equals;
+}
+
+constructors for these have extra argument that carries the implementation
+JavaAdapterServices.getHandle() <- extract method handle for passed in target object
+aka. 
+
+this.run =  JavaAdapterServices.getHandle(target, run, MethodType.type(void.class))
+this.global = Context.getGlobal()
+-> todo code for getHandle() from Slides
+
+for every SAM antoher constructor that takes a ScriptFunction and not an object
+-> into SAM-method
+-> all other methods initialized with null
+
+as additional arg is at end -> no vararg constructors preserved -> just X[]
+
+var Hello = Java.extend(java.lang.Runnable, { run: function() { print("hello");}});
+var Hello = Java.extend(java.lang.Runnable, function() { print("hello");}); // SAM
+
+dynalink makes sure the right overloaded constructor is picked up at invocation time
+
+bytecode generated for the methods 
+* on invocation of the method
+* retrieve field, if null either super call (invokespecial) or UnsupportedOperationException for abstract methods
+* otherwise MethodHandle.invokeExact() on MH from field
+* error handling: rethrow RuntimeException and Errors and previously declared (by original method) exceptions
+* others Throwables are wrapped in a new RuntimeException
+* check if context is the same as on creation otherwise use creation-time-global temporarily, restore to current later (context != this/self) (global context with global prototypes and global vars)
+* self/this object is bound in MethodHandle
+
+Usually instance level behavior, sometimes you want class level behavior then additionally store MH to static behavior and static context
+Pass class overrides via thread-local as initialization happens in static {} block
+loaded every time in a new class-loader for fresh set of static fields for the class level spec
+
+resolve on classloading = true => run static initializers
+
+there is no overloading in JS
+how do you override them
+override by name -> all non-final overloads
+you have on the JS side inspect argument list and do your own dispatch
+only public classes / interfaces extendable, public/protected methods
+SecurityManager check for restricted packages
+prevent @CallerSensitive methods
+Adapters in separate protection domain
+so that they don't narrow the priviledges of callee or caller
+they have no doPriviledged blocks, can't act as escalator
+make sure to use the right classloader to define the adaptor, as you can extend 1 class and many interfaces at once
+-> maximum visibility CL, that can see all other loaders.
+if none found, can't create adaptor
+
+type conversions
+
+JavaScript ist special
+
+coercion sometimes is unexpected
+0->false
+1->true
+[]->true
+{}->true
+""->false
+"false"->true
+null->null
+undefined->null
+
+if a java method accepts a SAM parameter, you can pass a JS function and an on-the-fly adapter is created
+sometimes tricky with overloads, e.g. if there is an overload with a string -> each JS object (incl. functions) has a toString() method
+if a dynamic language allows more conversions/coercions than Java, you widen the range of applicable methods for overload resolution !!
+priorization needed
+
+numbers,booleans,strings used as their boxed Java counterparts, you can use Java methods on them
+
+Arrays: JS arrays, heterogeneious types, grow, shrink, can be sparse
+very different semantics from java
+decision to do no implicit conversion but Java.to([1,2,3]) (uses Object[]) or Java.to([1,2,3],"int[]"), Java.from(list,array) as explicit
+and Java.type("int[]")
+conscious decision
+you can use java Arrays in JS incl. for and slices
+only for JS specific functionality (map, reduce, filter) you have to do Java.from()
+mixed value arrays are individually converted to target types
+java.util.Arrays.toString(Java.to([1,"2","false"],"int[]")) -> 1,2,0
+
+via dynalink converter 
+
+ScriptObject implements java.util.Map
+JS arrays are ScriptObject so they can't implement java.util.List
+
+Packages represented with global objects and nested properties that are either packages or classes
+classes can then be constructed
+problems are typos, as the dynamic resolution thinks those are still packages and then constructing object instances from them will fail
+-> Java.type("java.util.ArrayList"), Java.type("int[]"),new (Java.type("int[]"))(5)
+-> use Java.type than java.*
+
+Linking
+-> embeds dynalink
+-> lots of improvements
+-> for a JS field what do you link to? property-getter, method-getter, element-getter ? -> all of them
+-> as JS has not separate namespaces for the different types
+-> preference depending on call-site, e.g. obj.foo prefers property, obj.foo() prefers method and obj.foo[5] prefers element
+-> many cases can be resolved at link time
+-> copy from slides if needed
+-> beans-linker to correctly link to the right semantic
+
+-> caching on methodhandles
+prevent access to linking to restricted packages
+
+detection of unstable call-sites
+new invocation syntax for overloads with param type: dyn:getMethod:println(double)
+
+Security
+
+
+dynalink -> prevent access to non-public members
+also to classes in restricted packages (with SecurityManager in place) (that's stricter than java)
+handle @CallerSensitive methods
+Java.type() can't
+Nashorn.JavaReflect permission
+for accessign Class, ClassLoader, java.lang.reflect and java.lang.invoke
+
+native performance for dynamic languages
+how far does invokedynamic take us? -> pretty far
+-> JIT + Language Team
+
+everything to bytecode, no AST interpretation
+Limited ECMAScript 6, (8u40)
+8u20 security, JIT / JDK improvements
+8u40 performance release
+Java 9 - JFR integration
+
+"A runtime for dynamic languages on the JVM. Takes away the pain and performance loss bridging the gap between language and bytecode.
+Types, objects and code are automatically adapted to be an optimal fit in the JVM mould"
+dyn lang execution architecture / dyn-lang toolkit runtime
+
+JS dynamic and a lot of quirks, if you solve that, you solve all dynamic languages
+It can't get worse.
+a lot of work was to create an architecture to do the optimization
+so the performance gain came in for free
+new mechanisms for JS / Scripting like BufferArrayData
+"Optimistic Type Runtime Architecture for dynamic languages" - JEP 186
+People assume: "The JVM will do it automatically by the JIT, magic happens" -> NO
+Bytecode is strongly typed and optimized around Java
+-> generate bytecode for dynamic languages that the JVM understands and can optimize
+-> invokedynamic is a big key, types is another big problem
+-> specialize the types (in java you'd specify the types)
+x,y might be numbers, strings, objects, might have sideeffects if you coerce them into numbers
+you can infer some things from operations
+e.g. subtraction on numbers
+pessimistic object based implementation with a lot of checks an coercion is 150x slower than the specialized one with int's
+"generate java-like bytecode"
+"optimistic types" -> don't know all the types when you compile you still generate an optimistic as possible function "narrowest type"
+for every optimistic operation -> surround it with exception handlers
+when type is too narrow UnwarrantedOptimismException -> frame stage / program point (as last parameter to the optimistic invokedynamic call), simple continuation
+-> regenerate a more pessimistic method
+-> and rest method
+int->long->double->object
+(consider boolean as orthogonal)
+imul also intrinsified with a jump-on-overflow
+3x invokedynamic
+Exceptions in bytecode remove stack -> write stack to local variables
+have to be careful with the exception handling code due to hotspots sensitivity of bytecode-sizes for inlining
+-> weakness if you have a lot of type-permutations and a lot of state in the method !!!! -> method grows too large no inlining
+-> rewrite exception with scope, frame-state, pointer -> linker regenerate rest-method and regenerates the whole method
+-> isub intrisified invokedynamic -> Math.subExact()
+many similiarities to Java code if you are right about types
+local variables -> if they have different types within a method "live ranges" -> multiple "types"
+conservatively it is an object -> multiple slots in the variable table -> ranges of types
+you have to change/widen types in many places -> type change, overflows, scope access
+-> reduce to the minimal type when possible only widen when needed
+java.lang.Invoke box stuff behind the scenes !!
+built in libraries
+boxing is our enemy, primitive types are our friends
+ScriptObject -> propertyMap (shape of the object)
+subclasses contain fields -> for scope variables
+growing array -> spill pool
+otherthings, like ArrayData (when you use an object as an array)
+
+
+public abstract class ScriptObject
+    implements PropertyAccess {
+    protected Object[] spillObjects;
+    long    spillPrimitives;
+    // most guards are a ref comparison on map
+    private PropertyMap map;
+}
+public JO$4 extends ScriptObject {
+    private Object o0, o1, o2, o3;
+    long p1, p2, p3, p4;
+}
+
+PropertyMap -> name, flags, slots + methodhandle to access the data (getter,setter)
+AccessorProperty flag + slot
+SpillProperty flag + index in spill pool
+
+PropertyMap is immutable
+on changes -> copy on write
+check the property if it is the same as when linking the call site on each access to a property -> relink call-site when it is not the same
+-> standard way for dynamic languages
+OLD NASHORN:
+-> normal interaction (old nashorn)
+-> load object, check type, coerce to object primitive type, unbox -> no hotspot optimization b/c you are loading/storing an object
+
+-> simple optimization but memory intensive (fat pointers) -> also store spillObjects as primitives (e.g. long for int, long, double(longbits)) same for variable objects
+-> getter and setter have to be aware
+-> add type to propertymap, on type change, guard ^^^ triggered and getters and setters are relinked
+
+-> dual field (fat pointer) representation worked actually pretty well
+still: need better representation 
+
+the whole cycle from optimistic type usage to storage has been really good for performance
+-> chase non-primitives in builtin methods / class libraries of Java/Nashorn
+-> usually very generic as they have to work on everything you pass in
+-> eg. array.push could be simple, but isn't (boxing, checks, potentially, multi-arguments)
+-> dynalink now relinks call-sites on exception -> replace many guards with a single, certain exception (invalidation mechanism)
+-> need type-checks within built-in libraries -> remove type-checks and replace them with an optimistic cast ! try to cast -> results in a ClassCastException which causes the relinking
+-> e.g. optimistically assume you have a continous int array (not a sparse one or a mixed one)
+
+-> lots of opportunities for optimization: Array.push,pop,shift,length
+String.charAt, length, Number, Math, Function.apply(args-arry) -change-to-> Function.call(a,b,c) (5-10x faster)
+use same optimistic recompilation approach as in the JS methods
+many common patterns in JS that suck for the engine 
+
+turn invariant expressions e.g. x.length in a loop into MethodHandleConstant (will be hoisted (herausgezogen)) and replace it when overriden
+
+put java.nio.ByteBuffer in a lot of places (WebGL, ECMAScript 6 typeds arrays)
+much faster than java arrays in non-standard operations on arrays (slices etc.)
+
+JVM/JDK improvements
+
+Improvmenets for invokedynamic
+Propagate types
+Math intrinsics 
+Inlining
+partial escape analysis
+java.lang.invoke has a lot of boxing
+better trap replacement
+improve implementations in java.lang.invoke 
+it would be cool to use optimized generated methods as well in the JDK
+
+COST is warm-up:
+- generate more code
+- has to generate recompile methods
+- beneficial: linker sees more types in scope when the method fails (use the additional information in the next rewrite to be more concrete / optimistic / pessimistic for each symbol)
+- lazy compilation, only compile a method when it is actually called the first time, not before
+- at link time if no matching signature yet exist, compile one as much specific as possible
+- if a matching signature does exist and the call args are more specific then try to compile a more specific one
+- keep compiled versions around
+- persistent code cache for re-runs (across jvm invocations) also optimistic type information
+
+
+JFR Nashorn? -> a unique javascript profiler
+a ton of things that could be turned into events
+
+Avatar.js put on hold in Feb 2015 
+Helped to drive Nashorn performance but too little interest from users / customers. 
+
+- java9 how to amortize the cost for extra type computation (warmup)
+
+ES6, ES2015 compatiblity with Java9 (backports to Java8)
+Nashorn is not threadsafe by design. Use ThreadLocal<ScriptEngine> as needed.
+
+
+
+Future Goals
+	•  Toolbox for other dynamic languages on top of the JVM
+	–  Dynalink – TypeScript thesis – JRuby 9000 synergy
+	–  “the invokedynamic way of language implementation”
+
+TypeScript front-end thesis	
+JRuby 9000 with IR format
+
+	What Does “Performance” Mean?
+	Total Performance = Executon Time + Run>me Overhead
+	
+	
+	[JavaScript & native time – brought down by: invokedynamic optimizations, incremental inlining, field access time minimization, efficient native code implementation, type specialization, optimistic type guesses, JIT optimizations of bytecode]
+	
+	The goal of 8u40 (main functionality, like –optimistic-types still disabled by default)
+	Have to enable -optimistic-types
+	
+	RuntimeOverhead --> Goal for Java9
+
+	
+	[increase BC/Nashorn jit speed, minimize relinking of callsite/bytecode regeneration, tired JIT recompilation, class installation speed, time spent in GC etc – MAKE STARTUP FASTER]
+	
+	class is minimal unit of compilation -> you generate A LOT of them
+	startup / warmup affected by optimistic types
+
+	
+	Warmup/Steady State Overhead + Run>me Overhead
+	Especially important: Time to reach
+	steady state!
+	Use cases: frequent restarts, REPL, redeployments, evals
+	
+	every 5th instruction is an invokedynamic
+	lots of boxing
+	
+	
+	continuation mechanism is quite elegant
+    keep primitive storage for scope variables if you made all the effort to remove boxing
+    dual-fields (long + object) waiting for VarHandles (which will also help to remove some checks)
+	
+	better native implementations for JS functions (class libraries) @SpecializedFunctions
+	
+
+
+javax.script.ScriptEngine js = new javax.script.ScriptEngineManager().getEngineByName("nashorn");
+
+js.eval("function echo(arg) { return arg + ' ... ' + arg; }")
+
+((javax.script.Invocable)js).invokeFunction("echo","Hallo")
+
+////
+
+== Vergleiche
+
+Schon als Nashorn noch im Beta-Stadium war, interessierte mich seine Leistungsfähigkeit, besonders im Vergleich zum in C++ implementierten V8.
+Eine kurze Recherche ergabt, dass es eine javax-Script-Engine Implementierung mittels V8[Jav8] gab, die über JNI angebunden wurde.
+
+Beim Vergleich von V8 und Nashorn für einige Javascript-Beispiele zeigte sich, dass Nashorn durchaus mit V8 mithalten kann, wenn reines Javascript ausgeführt wird.
+
+Sobald aber Callbacks und Datentransformationen zurück nach Java notwendig sind, hat Nashorn ganz klar die Nase vorn.
+
+Ich habe den Vergleich noch einmal für eine schnelle Gegenüberstellung aufgesetzt.
+Für diesen Beispielcode sind hier die Ergebnisse, die für sich sprechen:
+
+.Reines Javascript
+[source,javascript]
+----
+function compute(a,b) { return ((b % 3) - 1) * Math.pow(b,a % 3); }
+function testRun(runs) {
+   var sum = 0;
+   for (var i=0;i < runs;i++) sum += compute(sum,i);
+   return sum;
+}
+----
+
+.Javascript und Java
+[source,java]
+----
+public static class Power {
+    public int raise(int base, int exp) { 
+	    return (int)Math.pow(base,exp); }
+}
+
+engine.put("power", new Power());
+engine.eval("function compute(a,b) { "+
+  "return ((b % 3) - 1) * power.raise(b,a % 3); }");
+engine.eval("function testRun(runs) { ...");
+
+// 100 mal in Schleife 
+((Invocable)engine).invokeFunction("testRun", 10000);
+----
+
+Die Funktion testRun wurde mit 10000 Schleifendurchläufen aufgerufen. 
+Nach einem Warmup, wurde die Zeit über 100 Durchläufe gemittelt und ein Benchmark berechnet 10 dieser gemittelten Zeiten.
+D.h. die `compute` Funktion wurde insgesamt 1 Million mal aufgerufen.
+
+Um den Aufruf von `java.lang.Math.pow` auch mit V8 zu ermöglichen wurde eine Instanz einer kleinen Wrapper Klasse in die ScriptEngine injiziert.
+Dann wurde statt `Math.pow`, `power.raise(base, exp)` aufgerufen.
+
+|===
+h| Beispiel | V8 | Nashorn
+| reines Javascript | 1,32 ms | 0,42 ms
+| Javascipt und Java | 12-200ms | 0,41 ms
+|===
+
+Die "jav8"-Engine scheint ein Probleme mit Speichermanagement beim Callback nach Java zu haben.
+Ich musste die Schleifendurchläufe von 10000 auf 1000 reduzieren, sonst reichte der Speicher nicht, die Laufzeit wurde auch mit jedem Run langsamer.
+
+Hier ist auch noch einmal für den *reinen* Javascript Benchmark _Octane_ der Vergleich zwischen Nashorn, Rhino und V8 zu sehen.
+Dabei zeigt sich, dass V8 immer noch deutlich schneller ist, Nashorn aber in derselben Liga spielt.
+
+image::https://dl.dropboxusercontent.com/u/14493611/octane_benchmark_nashorn_jdk9.jpg[]
+
+== Zukünftiges
+
+Interessanterweise scheint sich schon jetzt eine zukunftssichere Alternative abzuzeichnen.
+Das von mir schon vorgestellte Gespann aus Truffle und Graal [JS???] kann für beliebige, dynamische Sprachen, basierend auf der Implementierung von Truffle AST-Konstrukten in annotierten Java-Methoden, mittels des optimierenden Compilers Graal extrem effizienten, typsicheren Laufzeit-Bytecode für Runtimes generieren.
+Diese werden dann entweder direkt als Maschinencode-Binary lauffähig sein, oder vom Hotspot-Compiler auch zur Laufzeit unterstützt von Graal und Truffle optimal ausgeführt.
+
+== Referenzen
+
+
+* http://www.oracle.com/technetwork/articles/java/jf14-nashorn-2126515.html[Oracle Nashorn: A Next-Generation JavaScript Engine for the JVM]
+* https://docs.oracle.com/javase/8/docs/technotes/guides/scripting/nashorn/api.html[Java Platform, Standard Edition Nashorn User's Guide]
+* https://en.wikipedia.org/wiki/Nashorn_(JavaScript_engine)[Nashorn Wikipedia]
+* https://dzone.com/articles/how-java-8-handles-javascript[How Java 8 handles JavaScript - A look inside The New Nashorn compiler]
+* http://openjdk.java.net/projects/nashorn/[Project Nashorn]
+* https://www.quora.com/What-are-some-good-uses-of-the-Nashorn-JavaScript-engine-for-the-JVM[What are some good uses of the Nashorn JavaScript engine for the JVM?]
+
+* https://developers.google.com/v8[Google's V8 Javascript Engine]
+* https://de.wikipedia.org/wiki/JavaScript#Geschichte[Geschichte von JavaScript]
+* Rhino: https://en.wikipedia.org/wiki/Rhino_(JavaScript_engine)[Rhino]
+* http://www.heise.de/developer/artikel/Entdecke-das-Nashorn-in-Java-1931616.html
+* http://winterbe.com/posts/2014/04/05/java8-nashorn-tutorial/
+
+* http://openjdk.java.net/jeps/196[JEP-196 Nashorn Optimistic Typing]
+* http://www.oracle.com/technetwork/java/javase/community/jvmls2013-2013900.html[JVM Language Summit 2013]
+* http://www.oracle.com/technetwork/java/javase/community/jlssessions-2255337.html[JVMLS 2014]
+* http://www.oracle.com/technetwork/java/javase/community/jlssessions-2015-2633029.html[JVMLS 2015]
+
+* https://code.google.com/archive/p/jav8/[V8 ScriptEngine für Java]
+* http://github.com/jexp/javaspektrum/nashorn[QuellCode zum Artikel]
+
+////
+* http://wiki.jvmlangsummit.com/images/c/ce/Nashorn.pdf[How To Be A Duck Without Really Trying]
+* http://de.slideshare.net/ZeroTurnaround/attila-szegedithestateofmanagedruntimes2013[State of Managed Runtimes]
+* https://blogs.oracle.com/nashorn/[Nashorn Blog]
+* https://wiki.openjdk.java.net/display/Nashorn/Main[Nashorn Wiki]
+
+ heise
+* http://comments.gmane.org/gmane.comp.java.openjdk.nashorn.devel/2723[Re: Nashorn and JVMTI]
+* http://comments.gmane.org/gmane.comp.java.openjdk.nashorn.devel
+* http://cr.openjdk.java.net/~sundar/8015354/webrev.00/src/jdk/nashorn/internal/runtime/JSONFunctions.java.html[]
+
+* http://benjiweber.co.uk/blog/2014/05/08/json-to-java-interfaces-with-nashorn/
+
+* http://www.sitepoint.com/introducing-nashorn-javascript-engine/[Introducing the Nashorn JavaScript Engine]
+* http://zeroturnaround.com/rebellabs/javascript-explain-it-like-im-a-java-developer/[JavaScript: Explain it like I’m a Java Developer]
+
+
+Nashorn ist der Name der neuen JavaScript-Engine im JDK 8. Als separate JavaScript-Engine lässt sie sich via JSR-223 in Java einbinden. Im JDK 8 steht Nashorn direkt zur Verfügung und ersetzt damit nach gut 11 Jahren die bisherige Referenz-Implementierung von Mozilla mit dem Namen Rhino. Nashorn selber ist zu 100 Prozent in Java geschrieben. Das eigentliche Ziel der Projekts war nicht viel mehr als ein sogenannter Proof-Of-Concept (PoC), in dem die Möglichkeiten der neuen bytecode-Instruktionen MethodHandles und InvokeDynamic (JSR-292) aus Java 7 ausprobiert werden sollten. Begonnen wurde im September 2011. Nach gut einem Jahr war Nashorn in einer ersten Version verfügbar. Sehr schnell gelang es, das Projekt zu 100 Prozent konform zu ECMAScript 5.1 zu machen, und die Geschwindigkeit von Rhino um Größenordnungen von 2 bis 10 zu übertreffen.
+
+
+Performance Nashorn vs. Rino (Quelle: http://www.slideshare.net/lagergren/lagergren-jvmls2013final)  Vergrößern
+Aber die Geschwindigkeit ist nur ein Aspekt. Viel spannender ist die tatsächlich erreichte ECMAScript-Konformität. Bezogen auf den ECMA-test262 erreicht Nashorn 100 Prozent, während Rhino die 95.90 Prozent nie übertroffen hat. Damit können Anwendungen von der alten Basis problemlos auf Nashorn migriert werden.
+
+Nachdem Nashorn auf JSR-292 aufbaut, war das Thema Performance lange Zeit bestimmend. Die JVM ist für stark typisierte Sprachen wie Java gebaut und die Umsetzung von JavaScript als dynamisch typisierte Sprache führte zu etlichen Problemen. Auch diese scheinen zunehmend zu verschwinden. Positiver Nebeneffekt dieses nicht zu kleinen PoC ist, dass andere dynamische Sprachen wie beispielsweise JRuby ebenfalls von durch Nashorn entdeckten Performance-Optimierungen profitieren.
+
+Nashorn kann aktuell ausprobiert werden. Die OpenJDK 8 Early Access Releases lassen sich direkt für die Wunschplattform herunterladen und enthalten Nashorn vollständig. Das komplette Projekt ist Open Source im Rahmen des OpenJDK. Parallel zur Software gibt es auch die Java SE 8 Early Access Documentation. In ihr ist der Java Scripting Programmer's Guide enthalten, der viele Anwendungsfälle für die Integration von JavaScript in Java enthält. Eine speziell auf Nashorn zugeschnittene Variante existiert bereits.
+
+Jetzt aber schnell noch ein wenig was ausprobieren: Nach der Installation des JDK 8 in ein beliebiges Verzeichnis, kann Nashorn direkt via bin/jjs ausgeführt werden.
+
+jdk1.8.0\bin>jjs
+jjs> print("This is a hello from Nashorn");
+This is a hello from Nashorn
+jjs> quit();
+Es können auch direkt JavaScript-Dateien übergeben werden.
+
+jdk1.8.0\bin>jjs d:\temp\test.js
+This is hello from test.js
+Viel spannender ist es aber, Nashorn direkt in Java zu verwenden. Das gelingt über den JSR-223 und die javax.script.*-API.
+
+ public static void main(String[] args) throws Exception {
+        // Script Engine Manager
+        ScriptEngineManager factory = new ScriptEngineManager();
+        // JavaScript Engine Nashorn
+        ScriptEngine engine = factory.getEngineByName("nashorn");
+        // Evaluate JavaScript code 
+        engine.eval("print(\"This is a hello from JavaScript in Java\");");
+    }
+Soweit besteht in der Verwendung von Nashorn kein wesentlicher Unterschied zu Rhino. Lediglich die Performance und Konformität wurden deutlich verbessert. Aber warum genau macht Oracle das? So viel Aufwand für einen PoC?
+
+Vielleicht ist die Antwort wirklich ein einfaches Ja. Oracle hat Gefallen daran gefunden, die JVM als allgemeine Laufzeitumgebung für verschiedene Sprachen zu sehen. Neben Scala und JRuby finden sich immer mehr JVM-Sprachen, die von den Vorteilen der JVM profitieren wollen. Neben Speichermanagement sind es die Runtime-Optimierungen, welche den Versuch extrem attraktiv machen. Aber es kann auch noch mehr Gründe geben. Java und Embedded spielen eine immer stärkere Rolle. Nashorn wird auch auf diesen Plattformen zur Verfügung stehen und in Kombination mit Technologien wie beispielsweise Node.js durchaus eine Alternative für eine noch größere Entwicklergemeinde bieten. Das Thema bleibt also spannend. Vielleicht gibt es auf der diesjährigen JavaOne ja noch ein paar neue Informationen.
+
+Wer mehr über die Details hinter der Implementierung wissen möchte, dem sei eine Präsentation vom diesjährigen JVMLS (JVM Language Summit) empfohlen. Einer der hauptsächlichen Nashorn-Entwickler (Marcus Lagergren, @lagergren) hat über die Herausforderungen bei der Umsetzung von Nashorn referiert. Sie ist aktuell auf Slideshare verfügbar und soll später auch auf OTN inklusive Video zu sehen sein.
+
+Originally, Rhino compiled all JavaScript code to Java bytecode in generated Java class files. This produced the best performance, often beating the C++ implementation of JavaScript run with just-in-time compilation (JIT), but suffered from two faults. First, compiling time was long since generating bytecode and loading the generated classes was a resource-intensive process. Also, the implementation effectively leaked memory since most Java Virtual Machines (JVM) didn't collect unused classes or the strings that are interned as a result of loading a class file.[citation needed] (This has changed in later versions of Java.)
+
+As a result, in the fall of 1998, Rhino added an interpretive mode. The classfile generation code was moved to an optional, dynamically loaded package. Compiling is faster and when scripts are no longer in use they can be collected like any other Java object.
+
+Rhino was released to Mozilla Foundation in April 1998. Originally Rhino classfile generation had been held back from release. However the licensors of Rhino have now agreed to release all of Rhino to open source, including class file generation. Since its release to open source, Rhino has found a variety of uses and an increasing number of people have contributed to the code.[1] The project gets its name from the animal on the cover of the JavaScript book from O'Reilly Media.[2] Starting with version 1.7R1, Rhino relies on the Java 5 platform, and supports version 1.7 of JavaScript.[3]
+
+Use[edit]
+Rhino converts JavaScript scripts into classes. Rhino works in both compiled and interpreted mode. It is intended to be used in server-side applications, hence there is no built-in support for the Web browser objects that are commonly associated with JavaScript.
+
+Rhino can be used as a debugger by using the Rhino shell. The JavaScript shell provides a simple way to run scripts in batch mode or within an interactive environment for exploratory programming. It can be used in applications by embedding Rhino.
+
+A slightly modified version of Rhino 1.6r2 comes bundled with the Sun Microsystems release of Java SE version 6, which was released in December 2006. This makes it easier to integrate JavaScript as part of Java programs and to access Java resources from JavaScript. Other implementations of Java 6 may differ.
+
+NASHORN
+
+Goals:
+
+• Make scripting accessible to Java developers
+– Thin API, low overhead, Java objects, collections, Java Beans
+• Based on ECMAScript-262
+• Example of JSR-292 usage
+• Promote the JVM relevance as a multi language platform
+• Customizable to specialized needs
+• Introduction at the JVM Language Summit in summer
+2011
+
+Nashorn.pdf slide 10 -> internals
+var node = { parent: …, sibling: … };
+node.__proto__ = …;
+…
+node.left = …;
+…
+node.right = …;
+
+Objects Objects Everywhere
+• Basic objects
+– arrays, date, functions, regexp, ...
+• Globals
+– global dynamic object
+• Prototypes
+– delegate
+• Scopes
+– chained objects
+– not always necessary (eval, arguments, nested functions)
+
+JSR-292 Handling Java void Methods
+if (mh.type().returnType() == void.class) {
+ mh = MethodHandles.filterReturnValue
+ (mh, undefinedFilter);
+}
+…
+static final MethodHandle undefinedFilter =
+Linker.getMethodHandle
+(NativeJavaObject.class, "undefinedFilter");
+…
+public static Object undefinedFilter() {
+return ScriptRuntime.UNDEFINED;
+
+JS-Closures with late binding, i.e. changes in variable spill to the previously defined closure (by reference)
+
+static Object gen(Object receiver, ScriptObject scope, …) {
+scope = new Scope(scope, scope$map, …);
+ScriptArray list = newScriptArray(0);
+…
+MethodHandle
+mh =linker.getMethod(scriptClass, “f$1”, f$1$mt);
+mh = MethodHandles.insertArguments(mh, 1, scope);
+ScriptFunction function = new Function(mh);
+list.push(function);
+…
+return list;
+}
+
+
+
+Language Interop:
+
+ You likely want to have your language somehow interface with the
+underlying platform: VM, libraries, etc.
+ There are some typical things that you need to solve for a rich interop
+story.
+ Extending JVM classes and implementing interfaces in your
+language
+ Type conversions
+ Handling arrays (yes, it can be quite a special case)
+ Invocation of Java methods
+
+
+Typical Nashorn code:
+var r = new java.lang.Runnable() {
+ run: function() {
+ print(“Hello!”)
+ }
+}
+
+Adapter Classes
+ Obviously, when you write code like this, we instantiate an adapter
+class.
+ Question is: how is it supposed to look like when implemented
+around invokedynamic?
+
+Invoke-Dynamic Adaptors with Method-Handle fields for each overridable method.
+Including equals, hashCode, toString
+
+Anatomy of an Adapter
+package jdk.nashorn.javaadapters.java.lang;
+public final class Runnable implements java.lang.Runnable {
+ private final ScriptObject global;
+ private final MethodHandle run;
+ private final MethodHandle toString;
+ private final MethodHandle hashCode;
+ private final MethodHandle equals;
+ ...
+}
+
+Nashorn implements number of syntactic and API extensions as well. This page describes syntax and API extensions of nashorn implementation. A number of syntax and API extensions are enabled only when scripting mode is enabled. Scripting mode is turned on by nashorn option "-scripting". Whenever a syntax or an API extension is available only in -scripting mode, it is noted so in this document.
+
+Instead of explicitly working with getters and setters you can just use simple property names both for getting or setting values from a java bean.
+
+var Date = Java.type('java.util.Date');
+var date = new Date();
+date.year += 1900;
+print(date.year);  // 2014
+Function Literals
+
+For simple one line functions we can skip the curly braces:
+
+function sqr(x) x * x;
+print(sqr(3));    // 9
+
+For simple one line functions we can skip the curly braces:
+
+function sqr(x) x * x;
+print(sqr(3));    // 9
+Binding properties
+
+Properties from two different objects can be bound together:
+
+var o1 = {};
+var o2 = { foo: 'bar'};
+
+Object.bindProperties(o1, o2);
+
+print(o1.foo);    // bar
+o1.foo = 'BAM';
+print(o2.foo);    // BAM
+Trimming strings
+
+I like my strings trimmed.
+
+print("   hehe".trimLeft());            // hehe
+print("hehe    ".trimRight() + "he");   // hehehe
+Whereis
+
+In case you forget where you are:
+
+print(__FILE__, __LINE__, __DIR__);
+
+Import Scopes
+
+Sometimes it's useful to import many java packages at once. We can use the class JavaImporter to be used in conjunction with the with statement. All class files from the imported packages are accessible within the local scope of the with statement:
+
+var imports = new JavaImporter(java.io, java.lang);
+with (imports) {
+    var file = new File(__FILE__);
+    System.out.println(file.getAbsolutePath());
+    // /path/to/my/script.js
+}
+
+Convert arrays
+
+Some packages like java.util can be accessed directly without utilizing Java.type or JavaImporter:
+
+var list = new java.util.ArrayList();
+list.add("s1");
+list.add("s2");
+list.add("s3");
+This code converts the java list to a native javascript array:
+
+var jsArray = Java.from(list);
+print(jsArray);                                  // s1,s2,s3
+print(Object.prototype.toString.call(jsArray));  // [object Array]
+And the other way around:
+
+var javaArray = Java.to([3, 5, 7, 11], "int[]");
+
+Accessing overridden members in javascript is traditionally awkward because javas super keyword doesn't exist in ECMAScript. Luckily nashorn goes to the rescue.
+
+First we define a super type in java code:
+
+class SuperRunner implements Runnable {
+    @Override
+    public void run() {
+        System.out.println("super run");
+    }
+}
+Next we override SuperRunner from javascript. Pay attention to the extended nashorn syntax when creating a new Runner instance: The syntax of overriding members is borrowed from javas anonymous objects.
+
+var SuperRunner = Java.type('com.winterbe.java8.SuperRunner');
+var Runner = Java.extend(SuperRunner);
+
+var runner = new Runner() {
+    run: function() {
+        Java.super(runner).run();
+        print('on my run');
+    }
+}
+runner.run();
+
+// super run
+// on my run
+We call the overridden method SuperRunner.run() by utilizing the Java.super extension.
+
+
+Loading scripts
+
+Evaluating additional script files from javascript is quite easy. We can load both local or remote scripts with the load function.
+
+I'm using Underscore.js a lot for my web front-ends, so let's reuse Underscore in Nashorn:
+
+load('http://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.6.0/underscore-min.js');
+
+var odds = _.filter([1, 2, 3, 4, 5, 6], function (num) {
+    return num % 2 == 1;
+});
+
+print(odds);  // 1, 3, 5
+The external script will be evaluated in the same javascript context, so we can access the underscore variable directly. Keep in mind that loading scripts can potentially break your own code when variable names are overlapping each other.
+
+This problem can be bypassed by loading script files into a new global context:
+
+loadWithNewGlobal('script.js');
+
+
+Nashorn itself is thread-safe but it depends on the evaluated script. This is a really tricky part to decide because if you use third-party libraries like Underscore, Lodash or React.js you have to make sure those scripts are thread-safe.
+
+	
+The predefined top-level Packages object enables you to access Java packages and classes using their fully qualified names, as if they are properties of the Packages object. The following example shows how you can access the MyPackage package and its MyClass class if MyPackage.jar is in your class path:
+
+jjs> Packages.MyPackage
+[JavaPackage MyPackage]
+jjs> Packages.MyPackage.MyClass
+[JavaClass MyPackage.MyClass]
+Accessing standard Java packages and classes is more straightforward than accessing custom packages and classes. For your convenience, there are global objects defined for each of the standard Java packages: com, edu, java, javafx, javax, and org. They have aliases that correspond to properties of the Packages object. The following example shows how you can access the java.lang package and the java.lang.System class:
+
+To avoid the disadvantages of the approach previously described, Nashorn defines the Java global object that has several functions for working with Java classes. The Java.type() function takes a string with the fully qualified Java class name, and returns the corresponding JavaClass function object.
+
+Nashorn also supports member access using the bracket notation, where you specify the name of the member as a string between brackets ([]) that immediately follow the class (in case of a static member) or object (in case of an instance member). This method is defined by the ECMAScript as an alternative to the dot notation, and is not intuitive for Java developers. However, it can be used to resolve method overload ambiguity. By default, Nashorn uses the overloaded method that best matches the arguments, and this is not always what you expect. For example, if you want to print a double value, you must use the java.lang.System.out.println(double) method overload, as shown in the following example:
+
+
+invokeDynamic added in java7 to help with dynamic languages
+nashorn takes it to the extreme
+
+InvokeDynamic enables deferring of linkage back to the writers of the language at run-time, so they can guide the JVM as to which method they would like to call, based on their own language semantics.
+
+
+Nashorn's goal is to implement a lightweight high-performance JavaScript runtime in Java with a native JVM. This Project intends to enable Java developers embedding of JavaScript in Java applications via JSR-223 and to develop free standing JavaScript applications using the jrunscript command-line tool.
+
+This Project is designed to take full advantage of newer technologies for native JVMs that have been made since the original development of JVM-based JavaScript which was started in 1997 by Netscape and maintained by Mozilla. This Project will be an entirely new code base, focused on these newer technologies. In particular the project will utilize the MethodHandles and InvokeDynamic APIs described in JSR-292.
+
+In summary, the JVM brings (i) portability; (ii) manageability; (iii) Java tools; (iv) Java libraries/technologies such as JDBC, Hadoop; and (v) the preservation of investments in Java. 
+
+Rhino
+
+First JavaScript engine entirery written in Java; started at NetScape in 1997 then, became an open-source Mozilla project [6]. Was for quite some time the default JavaScript engine in Java SE, now  replaced by Nashorn in Java SE 8.
+
+DynJS
+
+DynJS is another open-source JavaScript engine for the JVM. Here is the project homepage http://dynjs.org/.
+
+Nashorn
+
+Introduced in Java 7 but “production” in Java 8[7], the goal of project Nashorn (JEP 174), is to enhance the performance and security of the Rhino JavaScript engine on the JVM. It integrates with javax.script API (JSR 223) and allows seamless interaction between Java and JavaScript (i.e., invoking Nashorn from Java and invoking Java from Nashorn).
+
+
+////

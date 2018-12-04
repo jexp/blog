@@ -1,0 +1,444 @@
+= Release It - Java Edition
+Michael Hunger
+
+== Lektionen vom System-Stabilisator
+
+Schon die erste Edition von "Release-It" [Nygard], vor 10 Jahren!, von Michael Nygard war eines der besten Bücher für Softwareentwickler das ich je in den Händen hatte.
+Unterhaltsam geschrieben mit vielen Beispielen aus der Praxis stellte er (Anti-)Pattern und erprobte Lösungsansätze für stabile Produktivsysteme vor und zeigte am konkreten Beispiel wie man diese umsetzen kann, um die eigenen Systeme auch unter der Last von Horden von Internetnutzern sauber am Laufen zu halten.
+
+Jetzt ist die zweite Ausgabe im Review und ich bin immer noch begeistert, die Informationen aus dem ersten Buch wurden nicht nur aktualisiert. 
+Ein grosser und dicht gepackter Teil, der Schicht für Schicht der Gesamtarchitektur im Detail behandelt wurde umfassend erweitert. 
+Besonders im Zeitalter von Cloud, Containern, MicroServices und Diensten "as a Service" gibt es vieles, was einem von den Anbietern abgenommen wird, aber auch viele neue (und alte) Fallstricke, die man kennen sollte.
+
+Ich möchte heute einige Themen herausgreifen, die besonders für Java-Entwickler relevant sind. 
+Ich empfehle trotzdem dringend jedem, der an Systemen arbeitet die entweder kritisch oder öffentlich sind, sich die zweite Ausgabe von "Release-It" zuzulegen und stets dabeizuhaben.
+
+Ich möchte auf jeden Fall auch die Arbeit von Uwe Friedrichsen von Codecentric zur "Mustersprache für resiliente Systeme" [UFried] herausstellen.
+Uwe's Vorträge, Artikel und Gedanken zu dem Thema sind ebenso grossartig wie Michaels.
+Ich finde es sehr hilfreich, dass er die Muster in einer Mustersprache zusammenführt und damit ihre Zusammenhänge und Abhängigkeiten deutlich macht.
+
+Eine gute Implementierung vieler dieser Muster ist in [Resilience4j] zu finden. 
+Die Bibliothek stellt komponierbare Dekoratoren für Lambdas und Methodenreferenzen bereit, die die jeweilige Funktionalität für (a)synchrone Aufrufe kapseln und auch entsprechende Metriken an Monitoringsysteme weitermelden.
+
+== Produktivsysteme
+
+Systeme, die viel Mehrwert erwirtschaften haben oft viele Nutzer (Menschen oder Maschinen).
+Daher müssen sie in ihrer Leistungsfähigkeit diesen Anwenderzahlen gerecht werden, auch bekannt als "internet-scale".
+Diese Systeme handhaben komplexe Prozesse, die Daten verschiedenster Art entgegennehmen, verarbeiten, speichern, zur Verfügung stellen und weitersenden.
+Oft nutzen sie externe Dienste um ihre Aufgaben zu lösen.
+
+All diese harmlosen Beschreibungen stellen für die Architektur des Systems Herausforderungen dar, die während Entwicklung und Wartung aber besonders im Produktivbetrieb extrem in Anspruch genommen werden.
+
+I'm Buch stellt Michael Nygard Negativmuster dar, die den Betrieb solcher Systeme negativ beeinflussen und auch Stabilitätsmuster, mit denen man das System robuster machen kann.
+
+Hier ein paar Beispiele für kritische Aspekte, die ich im folgenden partiell wieder aufgreifen möchte.
+
+* Integrationspunkte
+* Kettenreaktionen
+* Fehlerkaskaden
+* Nutzer
+* Blockierte Threads
+* Eigentore
+* Skalierungseffekte
+* Unbalancierte Kapazitäten
+* Hebelwirkung
+* Langsame Antworten
+* Unbegrenzte Ergebnismengen
+* Überlastung beim Start
+
+== Kaskaden
+
+Oft ist es ein kleiner Fehler, der am Anfang sogar unbemerkt bleibt, der sich in kurzer Zeit ausbreitet und immer größeres Systemversagen verursacht, das exponentiell beschleunigt und sich durch Fehlverhalten nach aussen materialisiert.
+
+Das exponentielle Versagen ist dem Umstand geschuldet, dass die verbliebenen Systeme zusätzlich die immer höhere Last der ausgefallenen übernehmen müssen und immer schneller überlasten.
+Selbst mit Auto-Scaling kommt man da nicht mehr hinterher, besonders wenn alle Systeme schlussendlich in denselben Ursprungsfehler laufen.
+Eine Ähnliche Überlastsituation kann beim Neustart eines Gesamtsystems (mit tausenden von Diensten) passieren, wenn dahinterliegende Systeme (Daten oder Energie) durch den gleichzeitigen Initialisierungsbedarf überladen werden und dann auch kaskadiert zusammenbrechen.
+
+Oft sind diese Überlastsituationen auch selbst verschuldet, z.B. durch nicht abgestimmte Marketingaktiväten (deren Links ggf. Caches umgehen), globale Roll-Outs neuer Systeme, Ignoranz von Nutzermengen und -verhalten (z.b. Crawler, Bots ohne Session-Cookies pro Request).
+
+Automatisierung von Systemmanagement ist generell zu begrüßen, da sie uns von Fehlern bewahrt, getested werden kann und vormals manuelle Aufgaben viel schneller ausführen kann.
+
+Sie kann aber auch unerwünschte Aktionen aus Missverständnissen viel schneller ausführen, als wir darauf reagieren können (z.B. massives Abschalten von Servern, Synchronisation leerer Datenbanken auf vormals volle, usw.).
+Um dort den Gau zu verhindern, helfen graduelle Ausführung von Operationen, Monitoring, Limits und Regeln für die Begrenzung der Beschleunigung und ggf. Bestätigung bei "grossen" Änderungen.
+
+*Da wir Fehler nicht vermeiden können, ist es viel sinnvoller Systeme zu entwickeln, die mit Problemsituationen sinnvoll umgehen können.*
+
+Das kann Kapazitätsmanagement, eingeschränkte Funktionalität (z.b. statische Seiten statt personalisiert), sinnvolle Fehlermeldungen an Nutzer
+
+== Multi-Threading
+
+Viele Kerne pro CPU und viele CPUs pro Server haben uns im Zeitalter der stagnierenden Taktfrequenzen den Weg der Nebenläufigkeit geführt.
+Gerade für Produktivsysteme sind verfügbar Pools von Threads zu Abarbeitung von Aufgaben essientiell.
+
+Umso erschreckender ist, wie schnell ein Pool mit hunderten oder sogar tausenden von Threads mit Warten auf einen (oder sogar ein und denselben) blockierenden Aufruf zum Stillstand gebracht werden kann.
+
+Die Ursachen sind vielseitig:
+
+* Netzwerkverbindungen ohne Timeouts,
+* Warten auf geteilte Resourcen (bes. Deadlocks),
+* volle Warteschlangen,
+* selbstentwickelte Nebenläufigkeitsframeworks und vieles mehr.
+
+// Wenn wir nicht dafür sorgen können, dass
+
+Heutige Systeme sind oft eng gekoppelt mit synchronen Aufrufen und teilweise unsichtbaren Abhängigkeiten.
+Änderungen oder Fehler in einer Komponente propagieren in andere.
+
+Die Entkopplung von Diensten (MicroServices sind nur ein Beispiel) und Aufrufen (EventBus, MessageQueues) und die klare Definition von Systemgrenzen helfen klarzustellen wo mein eigener Dienst aufhört und die Aussenwelt beginnt.
+Und welche Kontrakte ich als Aufrufer erwarten kann oder als Anbieter garantieren muss.
+Beides kann und sollte dann unabhängig voneinander getestet werden.
+
+Synchrone Aufrufe können blockieren, nur extrem langsam Daten zurückliefern oder nach initialer Kontaktaufnahme nie wieder antworten.
+Wie oft setzen wir uns mit solchen Fehlerszenarien auseinander?
+
+Und können und wollen wir all diese selbst in unserer Kommunikationsschicht behandeln? 
+Es ist sicher sinnvoller eine erprobte und geteste Infrastruktur dafür zu benutzen, wie z.B. Akka, Kafka, RabbitMQ usw.
+
+* Was passiert, wenn unser Threadpool leer ist? 
+* Werden neue Threads erzeugt ohne Obergrenze?
+* Werden neue Aufgaben in eine (lange) Warteschlange gestellt?
+* Produziert der Aufrufer weiterhin neue Aufgaben oder wird er geblockt?
+
+Java ThreadPools bieten sowohl Task-Warteschlange an als auch verschiedene Strategien `RejectedExecutionHandler`, für die Behandlung neuer Aufgaben wenn die Warteschlange voll ist.
+
+[source,java]
+----
+public static ExecutorService createDefaultPool() {
+    int threads = getNoThreadsInDefaultPool();
+    int queueSize = threads * 25;
+    int corePoolSize = threads / 2;
+    int keepAliveTime = 30L;
+    Queue<Runnable> queue =  new ArrayBlockingQueue<>(queueSize)
+    return new ThreadPoolExecutor(corePoolSize, threads, keepAliveTime, SECONDS, queue, 
+                                  new CallerBlocksPolicy());
+    // alternativ: new ThreadPoolExecutor.CallerRunsPolicy()
+
+}
+static class CallerBlocksPolicy implements RejectedExecutionHandler {
+    public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+        if (!executor.isShutdown()) {
+            LockSupport.parkNanos(100);
+            executor.execute(r);
+        }
+    }
+}
+----
+
+* `AbortPolicy` - der Versuch schlägt mit einer Exception fehl (das ist der Standardansatz)
+* `DiscardPolicy` - der Task wird ohne Rückmeldung ignoriert
+* `DiscardOldestPolicy` - entferne den ältesten Eintrag, auf dessen Ergebnisse wird am unwahrscheinlichsten noch gewartet
+* `CallerBlocksPolicy` - der Aufrufer wird blockiert bis die Warteschlange wieder Platz frei hat
+* `CallerRunsPolicy` - der Aufrufer führt die Arbeit selbst aus, und blockiert sich damit selbst (immer wieder)
+
+Letztere ist etwas tricky, da das Verhalten bei einer Ausführung des Tasks im Aufrufer anders sein kann: 
+
+* von ThreadLocals, die ggf. anders genutzt werden als angedacht, 
+* zu nicht vorhandenem Monitoring und 
+* unerwartetem Verhalten, wenn plötzlich Exceptions den Aufrufer beenden (im Threadpool kann das vorkommen, dann werden einfach neue Threads erzeugt).
+
+Oft sind Threadpools verschiedener Teile des Systems unterschiedlich dimensioniert.
+Während Webserver beliebig repliziert werden können und zehntausende von Threads haben, sind Datenbanken mit ein paar hundert Threads gut ausgelastet und Fremdsysteme zur Integration haben oft nur eine Handvoll.
+Damit kann ein 
+
+Eine interessante Frage stellte hier die Dimensionierung unserer Testsysteme dar.
+Aufgrund von Budgetgrenzen aber auch der Unmöglichkeit das Produktivverhalten (Last, Nutzeranfragen, Ausfälle, Fremdsysteme) zu reproduzieren, sind Testssysteme of nur eine sehr schwache Abbildung der Realität und verhalten sich viel freundlicher als die echte Welt.
+
+Thread-Pool-Größen der verschiedenen Systeme, die produktiv teilweise starke Verzerrungen aufweisen sind im Testsystem oft ähnlich große Kapazitäten vorhanden.
+Damit werden die Wahrscheinlichkeit von Problemen durch Blockierungen und Überlast deutlich reduziert.
+Das Mocking von Fremdsystemen durch gutartige Implementierungen stellen auch eine deutliche Verharmlosung dar.
+
+Michael empfiehlt einen Test-Harness, mit dem man alle möglichen, fiesen Situtationen produzieren kann die im echten Leben auftreten.
+Für einen wirklich realistischen Test der Systemstabilität wird Chaos-Testing erfolgreich genutzt, um zu lernen was und was nicht funktioniert (und warum) und bei letzterem natürlich die Ursachen anzugehen.
+
+== Netzwerkverbindungen
+
+In heutigen Cloud und Datacenter-Deployments ist Netzwerklatenz udn Bandbreite meist kein kritisches Problem mehr.
+Interessant wird es aber bei der Verfügbarkeit anderer Dienste, und deren Antwortverhalten, besonders wenn man nicht das Netzwerk dahin und den Dienst dahinter kontrolliert und kennt.
+
+Das können Datenbanken, Addressvalidierungsdienste, Logistikdienstleister und anderes sein. Die eigene Antwortzeit ist immer mindestens langsam wie die Antwortzeiten der aufgerufenen Dienste.
+
+Bei der Konfiguration unseres Dienstes muss aufgepasst werden, an welche Netzwerkinterfaces und Routen wir uns binden, besonders, wenn dankenswerterweise mehrere Netzwerkinterfaces vorliegen.
+
+Es ist wichtig, die IP zu spezifizieren an die jeweiligen Netzwerk sich binden will, sonst schaut man in die "falsche Röhre".
+Besonders in Java ist IP-Lookup ein unerwartet komplexes Thema, wenn man nicht konkret genug ist. Dann bindet sich der Socket an ein zufälliges (oder alle) Interfaces.
+
+////
+----
+----
+////
+
+Sofern man sich auf DNS-Round-Robin zum Load-balancing verlässt, sollte man wissen dass (nicht-)aufgelöste DNS Einträge lange gecached werden.
+
+Java hat seinen eigenen Cache (u.a. aus Sicherheitsgründen), den man auf minimale Werte setzen kann.
+Wenn ein SecurityManager installiert ist, wird standardmässig unendlich lange gecached (wg. DNS Spoofing), sonst 30 Sekunden.
+Die Einstellungen findet man in `${JRE_HOME}/lib/security/java.security` oder über `java.security.Security.setProperty`.
+
+----
+// alternatives, internes Setting, wenn Security Property nicht gesetzt
+-Dsun.net.inetaddr.ttl=5 -Dsun.net.inetaddr.negative.ttl=30
+
+java.security.Security.setProperty("networkaddress.cache.ttl")
+java.security.Security.setProperty("networkaddress.cache.negative.ttl")
+----
+
+Wenn der aufgerufene Dienst die Verbindung ablehnt, sind wir gut raus, unser Aufruf schlägt schnell fehl und wir können darauf reagieren.
+
+Andererseits ist man gut beraten, eine Timeout für die Verbindung angegeben zu haben, ansonsten blockiert der Aufruf potentiell bis in alle Ewigkeit.
+
+Oft ist das nicht in der API möglich, aber oft können Maximalzeiten für Verbindungsaufbau (connect) und Lesen (read) vom Socket konfiguriert werden, wie z.B. bei den meisten HTTP-Clients und sogar `HttpURLConnection`.
+
+.JDBC Timeouts
+[source,java]
+----
+// timeout für connection initialization
+DriverManager.setLoginTimeout(timeoutInSeconds);
+Connection con = DriverManager.getConnection(url, username, password);
+
+// Vorzeitiger Abbruch von SQL Connections, bei langen Netzwerk (TCP) Timeouts
+con.setNetworkTimeout(executor, timeoutInMillis);
+
+// Transaktions-Timeout, e.g. via Spring oder JTA (vor tx.begin() aufrufen)
+UserTransaction.setTransactionTimeout(timeoutInSeconds);
+
+// Timeout pro statement (standardmässig kein Timeout)
+Statement.setQueryTimeout(timeoutInSeconds);
+----
+
+Für einige JDBC Treiber gibt es dafür eigene Methoden, oder URL parameter für den JDBC connection String oder JDBC Properties, siehe auch [JDBCTimeouts].
+
+.HTTP connect und read timeout
+[source,java]
+----
+HttpURLConnection con = ...
+con.setConnectTimeout(3_0000);
+con.setReadTimeout30_000);
+....
+----
+
+In einigen APIs, wie ist das nicht möglich, dann kann man entweder Sockets mit Timout erzeugen, bevor man diese für die eigentliche Verbindung verwendet.
+
+.Socket timeout
+[source,java]
+----
+Socket socket = new Socket();
+socket.setSoTimeout(readTimeout);
+socket.connect(addr, connectTimeout);
+
+newSocket = socket.getSocketFactory().createSocket(socket, hostname, port, true);
+----
+
+Oder sogar eine eigene `SocketFactory` im System installieren, die *immer* solche Timeouts setzt.
+
+.Eigene SocketFactory
+[source,java]
+----
+// default is java.net.SocksSocketImpl
+// Client Sockets
+Socket.setSocketImplFactory(new TimoutSocketFactory())
+// Server Sockets
+ServerSocket.setSocketFactory(SocketImplFactory)
+
+public class TimoutSocketFactory extends java.net.SocksSocketImpl {
+    private final int defaultSoTimeout = 5000;  // oder aus System property oder Constructor
+
+    protected void connect(SocketAddress endpoint, int timeout) throws IOException {
+        super.connect(endpoint, timeout == 0 ? defaultSoTimeout : timeout);
+    }
+
+    protected void connect(String host, int port) throws UnknownHostException, IOException {
+        setTimeoutIfNecessary();
+        super.connect(host, port);
+    }
+    
+    protected void connect(InetAddress address, int port) throws IOException {
+        setTimeoutIfNecessary();
+        super.connect(address, port);
+    }
+    
+    private void setTimeoutIfNecessary() throws SocketException {
+        if (super.getTimeout() == 0) 
+          setOption(SO_TIMEOUT, defaultSoTimeout);
+    }
+}
+----
+
+Ein oft unbeachteter Aspekt ist die Blockierung von Lese- oder Schreiboperationen, z.b. auf HTTP-Verbindunge, wenn die Input- und Output-Streams nicht geleert werden.
+So kann es z.B. passieren, dass man keine Daten empfangen kann, wenn der InputStream nicht abgeschlossen wurde, oder die Vebindung solange blockiert, bis man wieder genug Daten aus dem OutputStream gelesen hat.
+
+Mit Resourcenmanagement (z.b. try-with-resources für `AutoCloseable`s) kann man zumindest dafür sorgen, dass Verbindungen garantiert die Gelegenheit gegeben wird, ihre Resourcen aufzuräumen.
+Wenn das nicht oder unvollständig passiert, können z.B. halb-geschlossene Verbindungen existieren, oder verhindert werden dass Connections in den Pool zurückgegeben werden.
+In einem Beispiel im Buch passierte das nach einem Datenbank-Failover, wenn existierende Connections und Statements partiell invalidiert wurden.
+Dasselbe gilt natürlich für andere Resourcen, wie z.B. Datei-Handles.
+
+.Falsch - kein null-check, und wenn ein close fehlschlägt, werden die anderen nicht mehr ausgeführt
+[source,java]
+----
+Connection con = driverMgr.getConnection();
+Statement stmt = con.createStatement();
+ResultSet rs = stmt.executeQuery(query);
+try {
+  ...
+} finally {
+   rs.close();
+   stmt.close();
+   con.close();
+}
+----
+
+.Besser mit try-with-resources
+[source,java]
+----
+try (Connection con = driverMgr.getConnection()) {
+   try (PreparedStatement pstmt = con.prepareStatement(statement)) {
+      try (ResultSet rs = pstmt.executeQuery()) {
+
+      }
+   }
+}
+----
+
+Um diesen (temporären) Ausfall von Fremdkomponenten zu handhaben, ist ein Muster wie "Circuit-Breaker" (Sicherung) gut geeignet.
+So eine Sicherung kapselt Aufrufe von Fremdsysteme und zählt aufeinanderfolgende Fehlschläge (in einem Zeitrahmen) mit und weist ab einer gewissen Quote (je nach Regel) Aufrufe ab. 
+Nach einiger Zeit können einzelne Aufrufe testweise durchgelassen werden, um zu testen ob das Fremdsystem wieder verfügbar ist.
+Die Fehlerzähler, -raten und -zustände dieser Sicherungen sollten definitiv ins Monitoring mit einbezogen werden.
+
+Das kann in Java mittels Bibliotheken, wie z.b. der Hystrix-Annotation: `@HystrixCommand(fallbackMethod = "fallbackMethodName")`
+oder [Resilience4j], die jeweils auch Integration mit Monitoring anbieten.
+
+.Beispiel aus Resilience4j
+[source,java]
+----
+public interface BackendService {
+    String doSomething();
+}
+
+CircuitBreaker circuitBreaker = CircuitBreaker.ofDefaults("backendName");
+
+// Create a default Retry with at most 3 retries and a fixed time interval between retries of 500ms
+Retry retry = Retry.ofDefaults("backendName");
+
+// Decorate your call to BackendService.doSomething() with a CircuitBreaker
+Supplier<String> decoratedSupplier = CircuitBreaker
+    .decorateSupplier(circuitBreaker, backendService::doSomething);
+
+// Decorate your call with automatic retry
+decoratedSupplier = Retry
+    .decorateSupplier(retry, decoratedSupplier);
+
+// Execute the decorated supplier and recover from any exception
+String result = Try.ofSupplier(decoratedSupplier)
+    .recover(throwable -> "Hello from Recovery").get();
+
+// When you don't want to decorate your lambda expression,
+// but just execute it and protect the call by a CircuitBreaker.
+String result = circuitBreaker.executeSupplier(backendService::doSomething);
+----
+
+Nur bei transienten Problemen (z.b. kurze Netzwerkstörung, Neustart des Dienstes), was uns auch erst einmal korrekt vermittelt werden muss, könnte man den Aufruf noch einmal versuchen.
+
+Die automatische Wiederholung des Aufrufs (retry), ggf. mit inkrementellem Verzögerungen, klingt erst einmal wie eine gute Idee, geht aber oft eher nach hinten los.
+
+Denn all diese Versuche und Wartezeiten summieren sich schnell auf (und übersteigen dann unsere garantierte Antwortzeit) und blockieren Resourcen, es ist viel besser dem Aufrufer schnell das Fehlschlagen mitzuteilen (fail-fast) und ihm dann die Entscheidung zu überlassen.
+Endnutzer klicken sowieso noch einmal, oder laden ihre Seite neu, wenn ihnen die Antwort nicht schnell genug kommt.
+
+Oft wären die angeforderten Daten nach einem Retry schon veraltet und würden sowieso verworfen.
+
+// Dieses 
+
+// Was passiert aber wenn der aufgerufene Dienst nicht antwortet?
+
+Auf dem TCP Schicht sorgen Empfangs- und Sendewarteschlangen für eine Pufferung eingehender Pakete, was im Sinne der Bandbreite erst einmal hilfreich sein kann.
+Wenn diese voll sind, wird die andere Seite und damit der Aufrufer geblockt und damit eine Art "Backpressure" erzeugt.
+Reaktive Systeme wie Akka, Reactor usw. nutzen einen ähnlichen Ansatz auf dem höheren Infrastrukturlevel um skalierbare Systeme zu gewährleisten, in denen Konsumenten nicht überlastet werden.
+
+Die Länge dieser Warteschlangen kann ein Problem darstellen besonders wenn die Weiterverarbeitung der gepufferten Anfragen, dann gar nicht passiert oder extrem verzögert ist. 
+Dann wartet man ggf. unnötig lange auf ein Ergebnis das dann doch nicht kommt. 
+Daher gibt es oft die Empfehlung diese TCP-Puffer (auch den für Nachzügler-Pakete) im Rechenzentrum eher klein zu halten, damit man schnell eine Rückmeldung über die Kapazitätsprobleme der anderen Seite bekommt.
+
+Das ganze Thema Orchestrierung, Discovery und Configuration Management für service- oder komponentenbasierte Dienste ist ein eigenes Thema das ganze Bücher füllen kann.
+
+== Security
+
+Sicherheit ist ein extrem wichtiges Thema, wie wir nicht erst seit den letzten Problemen mit Struts oder Commons Collections in Verbindung mit Deserialisierung [HungXXX artikel].
+
+Die Grundregeln sind: 
+
+1. Traue niemandem, 
+2. Alle Daten von ausserhalb des Systems sind potentiell kontaminiert
+3. Du bist nur so sicher wie deine Dependencies (Bibliotheken, JVM, OS).
+4. Minimale Rechte für den Nutzer unter dem das System läuft
+
+Daten von Nutzern, wie `Bobby'); DROP TABLE students; --` sollten nie in ihrer Rohform in Datenbank-Statements eingebunden werden, an Dateinamen angehängt oder in HTML gerendert werden.
+
+Wenn irgend möglich müssen Parameter genutzt werden, wie hier im `PreparedStatement`, das gilt übrigens nicht nur für SQL, sondern auch für NoSQL Datenbanken, Big-Data Systeme und Suchmaschinen.
+Es hilft auch, Anfragen, die nur Daten lesen sollen, in einer READ_ONLY Transaktion auszuführen.
+
+.Beispiel aus JDBC
+[source,java]
+----
+try (PreparedStatement pstmt = con.prepareStatement("SELECT * FROM PERSON WHERE NAME = ?")) {
+   pstmt.setString(1,request.get("name"));
+   try (ResultSet rs = pstmt.executeQuery()) {
+     ...
+   }
+}
+----
+
+.Beispiel aus Neo4j's Cypher
+[source,java]
+----
+String stmt = "CREATE (p:Person {id:$id}) SET p.name = $name";
+Map params = Map.ofEntries(entry("id",request.get("id")), entry("name",request.get("name")));
+try (Session session = driver.session(AccessMode.READ)) {
+    StatementResult res = session.run(stmt, params);
+}
+----
+
+Da die Daten von Nutzereingaben trotzdem in der Datenbank landen und da schlummern, sollte man sich nicht sicher wiegen.
+Sobald sie, ohne Säuberung z.b. in einer HTML Seite angezeigt werden, können enhaltene Skript-Fragemente auch Monate später noch Schaden anrichten.
+Das reicht vom Identitätsdiebstahl zu Übernahme von Systemen (wenn diese Daten z.b. in einem Admin-Backend angezeigt werden, die umfassende Rechte hat).
+
+Die Aktualisierung von Dependencies bes. nach Sicherheitsfixes ist kritisch, oft wird das vernachlässigt, da die eigenen Release-Zyklen zu lang sind bzw. das Thema nicht wichtig genommen wird, wie wir gerade erst beim Equifax-Datendiebstahls gesehen haben.
+Automatisierte Dependency-Trackingsysteme wie Version-Eye können dabei gut helfen.
+
+Michael empfiehlt auch, eigene Mirrors von öffentlichen Dependencies anzulegen, da Kompromittierung mittels "man-in-the-middle" sonst leicht möglich ist, das betrifft auch Plugins für Build-Systeme (maven, gradle, Jenkins usw.). Diese sollten dann zumindest gegen die veröffentlichen Checksummen gepüft werden.
+
+Im Buch werden die Top-10 Sicherheitsprobleme von OWASP (Open Web Application Security Project) detailliert besprochen, jedes von ihnen ist glaube ich einen Artikel wenn nicht sogar ein Buch wert. 
+Für die meisten davon gibt es Checklisten, Übersichten und sogar Bibliotheken die beim sicheren Umgang mit (Nutzer-)Daten, Authentifizierung, Authorisierung, Angriffen und Verletzlichkeiten helfen.
+
+== Systembetrachtung
+
+Im Buch werden alle relevanten Schichten unserer Systeme im Detail beleuchtet, das würde hier leider den Rahmen sprengen.
+
+Bild:{img}/nygard-layers-of-concern.jpg[]
+
+Eine weiteren umfangreichen Teil nehmen Betrachtungen zu Plattformen (Cloud, as a Service) und neuen Ansätzen zu Paketierung (Container), Monitoring und Datenaustausch (APIs, Messaging) ein und wie adaptive Architekturen dabei helfen können, zukünftigen Anforderungen kontinuierlich gerecht zu werden.
+
+Desweiteren geht Michael auch auf die organisatorischen Aspekte ein, wie Teamstruktur und -kommunikation, gemeinsames Verständnis, Auslastung (Überlastung), Platform-Teams, DevOps und die Entwicklung hin zu Organisationen die mit schnellen Entwicklungs- und Releasezyklen sowohl Mehrwerte schneller realisieren können als auch Produktivprobleme unmittelbar finden und sofort im nächsten Deployment beheben können.
+
+== Fazit
+
+Es gibt nicht viel, dass ich im Buch vermisse, aber es soll ja auch noch Raum für eine 3. Edition bleiben.
+
+Natürlich hätte man bei jedem Thema noch viel mehr in die Tiefe gehen können, aber dafür gibt es eine Menge Referenzen und ein gutes Literaturverzeichnis.
+Ich hätte mir noch mehr Bezug zu NoSQL Datenbanken, Orchestrierung und Roll-Out in größeren Systemen, und die aktuellen Entwicklungen um serverless/Lambda-basierte Ansätze.
+Eine Referenz auf Uwe Friedrichsens Mustersprache wäre angemessen gewesen und auch die Darstellung der Muster in einem engerem Zusammenhang. 
+
+In dem Zusammenhang hätte auch eine Diskussion von Architekturerosion und -dokumentation gut ins Buch gepasst.
+Das Dokumentationsthema mit dazugehörigen Problemen und Lösungen findet leider auch keine Beachtung.
+
+Das gilt auch für den Bezug auf Domain-Driven-Design und welche Auswirkungen es auf die Systemarchitektur hat, z.B. mittels bounded-context, translation layer und ubiquitous language.
+
+Auf jeden Fall, ist das Buch sehr zu empfehlen, soviel Wissen, nützliche Tips und Unterhaltung findet man selten in einer technischen Publikation.
+
+== Referenzen
+
+* [Nygard] Release It Michael Nygard, Pragmatic Programmers
+* [DDD] Domain Driven Design, Eric Evans
+* [LongBastani] Cloud Native Java, Josh Long, Kenny Bastani
+* [UFried] Uwe Friedrichsen Resilicency Patterns: https://www.codecentric.de/publikation/eine-kurze-einfuehrung-in-resilient-software-design/
+* [JDBCTimeouts] https://www.cubrid.org/blog/understanding-jdbc-internals-and-timeout-configuration
+* [OWASP] Open Web Application Security Project http://owasp.org
+* [Resilience4j] https://github.com/resilience4j/resilience4j - implementiert viele der vorgestellten Muster in plain Java basierend auf VAVR(ehem. JavaSlang)
+* [DNSJava] http://www.myhowto.org/java/42-understanding-host-name-resolution-and-dns-behavior-in-java/
+

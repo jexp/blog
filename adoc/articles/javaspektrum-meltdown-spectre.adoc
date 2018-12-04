@@ -1,0 +1,709 @@
+= Prozessor Gau - Meltdown und Spectre
+
+// image::https://www.heise.de/themenseite/02/2/3/4/8/8/5/1/meltdown-spectre-df891a6d8633c482.jpg[height=400,float=right]
+
+Einige Autoren sprechen vom kritischsten Sicherheitsproblemen in der Geschichte moderner Hard- und Software.
+In den wenigen Wochen seit der Veröffentlichung der drei neuen Angriffmuster für moderne Prozessoren, die unter ihren Bezeichnungen "Meltdown" und "Spectre" war die IT Welt im Aufruhr.
+Sie hat sich jetzt beruhigt, zeigt aber dass es schwieriger ist, sich vor modernen, untraditionellen Angriffe zu schützen.
+
+// "Meltdown" ist auch als "Rouge Data Cache Load" (CVE-2017-5754) bekannt und von "Spectre" gibt es 2 Varianten: zum einen "Array Bounds Bypass" (V1: CVE-2017-5753) und "Branch Target Injection" (BTI) (V2: CVE-2017-5715).
+
+image::https://spectreattack.com/images/meltdown.min.svg[width=400,float=right]
+
+Beide Lücken bedürfen, dass fremder Code auf dem eigenen System ausgeführt wird, was aber bei Multi-User Systemen, Cloud-Umgebungen und sogar beim Browsen im Netz stets gegeben ist.
+In beiden Fällen wird spekulative Ausführung von Operationen zusammen mit einer indirekten Erkennung genutzt.
+Bei Meltdown wird aus dem Kernel-Speicher und bei Spectre aus geschütztem Anwendungsspeicher gelesen.
+
+Die Forschungsergebnisse wurden schon im Juni 2017 bereitgestellt. 
+Die Erkenntnisse kamen vom Google's "Project Zero" das aktiv nach Sicherheitslücken forscht, und anderen Wissenschaftlern, die darauffolgend auch an Fixes arbeiteten.
+
+Auch wenn die Informationen erst Anfang Januar an die breite Öffentlichkeit kamen, haben Mitarbeiter der Prozessorschmieden Intel, AMD, Apple und ARM, sowie der Cloud-Anbieter (AWS, Google, Microsoft) und Betriebsystementwickler (Linux, Apple, Microsoft) schon seit mehreren Monaten an Lösungen für die Probleme gearbeitet.
+
+Offensichtlich ist das aber schwieriger als es sich jeder wünschen würde - wir hörten von Geschwindigkeitseinbussen von bis zu 30% je nach Anwendungsfall in Betriebsystemen, Serverdiensten, und Datenbanken.
+Leider sind nicht nur traditionelle Server und PCs (Laptops) von diesem Problem betroffen, sondern auch Mobilgeräte und ggf. auch andere Geräte mit einem "modernen" Prozessor aus den letzten 20 Jahren.
+
+// Was steckt hinter den Schlagworten? Einige Autoren haben die Gründe und Probleme verständlich erläutert, so dass ich mich darauf beziehen möchte.
+// Zum anderen möchte ich auf die Implikationen für Java-Anwendungen eingehen, sowohl was die Sicherheitslücken, also auch deren Stopfung betrifft.
+
+== Sicherheitslücken
+
+Wir haben bisher meist von Sicherheitslücken gehört, die auf Pufferüberläufen, fehlerhafter Rechte- oder Schlüsselhandhabung oder unzureichendem Schutz von sensiblen Informationen beruhten.
+Selten waren es auch fehlerhafte Microcodes in Prozessoren (Pentium Bug), oder Handhabung von Speicherfehlern.
+
+Meltdown und Spectre stellen eine neue Art von Angriffen dar, sogenannte Sidechannel-Attacken.
+Dabei wird auf sensible, geschütze Information nicht unmittelbar zugegriffen sondern ihre Werte durch indirekte Beobachtungen von Laufzeiten, Temperaturen, Änderungen im elektrischen Feld abgeleitet.
+
+In Prozessoren ist die Laufzeit von Operationen eine Größe die mit Zeitmessung im Nanosekundenbereich beobachtet werden kann.
+Und um mehrere Größenordnungen unterscheidbare Laufzeiten gibt es vor allem beim Zugriff auf verschiedene Speicher.
+
+Wenn man also den Prozessor dazu bekommt, abhängig von geschützen Speicherinhalten, bestimmte Zugriffszeiten zu verändern, kann man auf diese Inhalte schliessen.
+
+Fast alle Prozesse laufen im regulären Benutzer-Modus, also mit den Rechten des ausführenden Nutzers, und können nur ihren eigenen Speicher lesen und schreiben.
+Sie können nicht auf geschützte Speicherbereiche zugreifen, diese sind nur im Kernel-Modus verfügbar, z.B. während Systemaufrufen.
+
+Aus Performance-Gründen wird der Systemspeicher auch bei regulären Prozessen mittels virtueller Addressen in den Seitentabellen (Page-Tables) in den Prozessspeicher eingeblendet.
+Der Zugriff auf diesen Speicher im Benutzer-Modus ist aber trotzdem geschützt (Supervisor-Bit), der Prozess würde beim Versuch mit einem Zugriffsfehler abgebrochen.
+// Dieser Abbruch kann verzögert werden, wenn die Adresse vorher noch nicht geladen wurde.
+
+// Da dieser privilegierte Modus für eine Reihe von häufigen Systemaufrufen notwendig ist, wäre es teuer, diese Speicheradressen zu Beginn jedes dieser Aufrufe zugreifbar zu machen und danach wieder zu entfernen.
+
+Wenn man also die CPU dazu bringen kann, Code im Hintergrund auszuführen der ohne den Sicherheitscheck den geschützten Speicher ausliest und dann nicht alle "Spuren" hinter sich beseitigt, dann kann man dies nutzen, um die Informationen implizit ermitteln.
+
+Und genau das passiert bei der spekulativen Ausführung von zukünftigen Codefragmenten. 
+
+Während Meltdown direkt diesen unzureichenden Schutz ausnutzt, hat Spectre einen anderen Fokus.
+Bei diesem Angriff werden die Vorhersageeinheiten der CPU beeinflusst, um spekulativ vertrauenswürdige, privilegierte Code-Abschnitte aus Programmen und Bibliotheken auszuführen und so die nachweisbaren Spuren zu erzeugen. 
+Das geht soweit, dass sogar ein Javascript Programm in der Browser-Sandbox eines ungepatchten Systems auf geschützte Passworte im Browser-Speicher zugreifen könnte.
+
+Um zu verstehen wie und warum das passiert, müssen wir kurz auf moderne Prozessorarchitektur eingehen.
+
+// Meltdown breaks the most fundamental isolation between user applications and the operating system. 
+// Spectre breaks the isolation between different applications. It allows an attacker to trick error-free programs, which follow best practices, into leaking their secrets.
+
+// There are two important exclusions to the rollback of side-effects: cache and branch prediction history. These generally aren't rolled back because speculative execution is a performance feature, and rolling back cache and BHB contents would generally hurt performance.
+
+== Moderne Prozessoren
+
+Seit den 1965 begleitet uns Moore's Law, das besagt, dass sich die Anzahl der Transistoren auf einem Chip alle 18 Monate verdoppelt.
+Das bedeutet aber *nicht* dass sich dadurch die Leistung einer CPU automatisch steigt. 
+
+image::https://upload.wikimedia.org/wikipedia/commons/0/06/Moore_Law_diagram_%282004%29.png[float=right,width=400]
+
+Die höhere Zahl an Transistoren ging für einige Zeit mit gleichzeitiger Steigerung der Taktfrequenzen einher, von wenigen Megahertz bis auf heutzutage bis zu 3.7 GHz.
+Dem ungebremsten Takt-Turbo machte dann die Physik einen Strich durch die Rechnung - Übersprechen und Interferenzen von Leitungen mit immer kleineren Abständen und vor allem auch die massive Abwärme, fokussierten die Chipdesigner auf andere Architekturbestandteile, die sich leichter skalieren lassen.
+
+Zum einen sind das heute viele Kerne pro Chip, von denen jeder auch noch 2 CPUs enthält (Hyper-Threading), eine andere Entwicklung begann aber schon viel eher.
+
+Schon in den Neunzigern wurden mit dem Pentium mehrere Pipelines zur Abarbeitung von Prozessorbefehlen integriert. 
+Diese Prozessoren werden auch als [superskalar] bezeichnet.
+
+Damit konnten aufeinanderfolgende, aber voneinander unabhängige Befehle im Mikrocode parallel ausgeführt werden.
+Leider gibt es diese Unabhängigkeit von Operationen generell nicht oft genug, um die Pipelines zu beschäftigen, obwohl Compiler versuchen dafür optimierten Code zu erzeugen.
+
+Also wurde im weiteren auf bedingte Entscheidungspunkte im Programmablauf geschaut, die mehrere Programmzweige, Aufrufe oder Sprünge zu verschiedenen Zielen zur Folge hätten.
+
+Offensichtlich sind diese parallelen Alternativzweige unabhängig voneinander und somit perfekte Kandidaten für die sich langweilenden Pipelines.
+
+Sie können die Operationen schon einmal spekulativ ausführen, so dass wenn die Entscheidung ausgewertet wird, der Code "dahinter" schon ausgeführt wurde und die relevanten Ergebnisse schon vorliegen.
+
+Alle anderen Ergebnisse werden einfach verworfen. 
+Das ist immer noch günstiger, als alle anderen Pipelines nicht zu nutzen und erst nach der Entscheidung den einen, relevanten Zweig auszuführen.
+
+_Wirklich alle? Dazu kommen wir gleich._
+
+Die Entscheidung, welcher der vielen Zweige oder Ziele relevanter sind als andere, versucht der Prozessor mittels Annahmen über die Ausdrücke (Branch-Prediction) und einem minimalen Lernprozess (Cache) vorherzusagen.
+
+== Caches 
+
+Die hohe Taktfrequenz und die vielen parallelen Ausführungseinheiten führen dazu, dass der Hauptspeichercontroller unter einer hohen Last steht und nicht schnell genug Daten für die Ausführungseinheiten liefern kann. 
+Damit lange Wartezyklen auf den Hauptspeicher die CPU nicht komplett ausbremsen, wurden schon früh CPU-Caches eingeführt.
+
+Moderne CPUs enthalten meist 3 Cacheschichten (oder sogar 4), deren Zugriffszeiten und Größen sich um mehrere Größenordnungen voneinander und auch vom Hauptspeicher unterscheiden.
+
+// (L1: 1ns,3-4 Takte, bis 128KB, L2: 20 Takte, 1-2MB, L3: 80-90 Takte 8-10MB, L4: 100MB, Hauptspeicher 80-120ns) 
+
+.Cache: Latenzen & Größen
+[opts=headers]
+|===
+| Level | Latenz | Takte | Größe
+| L1 | 1 ns | 3-4 | 128KB
+| L2 | 5ns  | 20 | 1-2MB
+| L3 | 20ns | 80-90 | 8-10MB
+| L4 | 50ns | 150-200 | 100MB
+| RAM | 80-120ns | 400-500 | GB / TB 
+|===
+
+image::https://upload.wikimedia.org/wikipedia/commons/thumb/9/93/Multi-level_Cache_Hierarchy_diagram.svg/557px-Multi-level_Cache_Hierarchy_diagram.svg[float=right,width=400]
+
+Nur wenn Informationen in Registern oder im Level 1 Cache vorliegen, kann die CPU-Pipeline mit maximalem Takt arbeiten, sonst muss sie stets warten, bis die Informationen geladen sind.
+Daher gibt es zusätzlich diverse Mechanismen zum Vorladen (Prefetching) von Daten. 
+Einige (einfache) Zugriffsmuster auf Speicher können vorhergesagt, und die relevanten Bereiche oder Addressinhalte vorgeladen werden.
+
+// todo bild
+
+*All diese Architekturbestandteile moderner Prozessoren werden für die neuen Angriffe genutzt.*
+
+Leider gibt es einen Design-Fehler in Intel Prozessoren: bei der Hintergrundausführung von Operationen in den parallelen Pipelines werden die Zugriffsrechte für den Kernel-Speicherbereich nicht sofort beachtet, so dass Werte daraus in Berechnungen genutzt werden können.
+// Gerade wenn der Sicherheitscheck auf sich warten lässt, z.B. durch Sicherstellen dass die betroffenen Adressen vorher noch nicht geladen wurden, werden noch eine ganze Menge von Operationen ausgeführt, bevor es zum Abbruch kommt.
+
+Dann können diese spekulativen Operationen mit den geschützten Werten zum Beispiel eine Speicheradresse im Nutzerspeicher indirekt berechnen, die dann in den Cache vorgeladen wird.
+
+Man stelle sich ein 256-elementiges Feld vor, für das man sicherstellt dass keiner seiner Werte im CPU-Cache ist.
+Jetzt wird ein Feldindex mittels des Wertes aus dem "sicheren" Kernel-Speicher berechnet `feld[kernelSpeicherWert]`, was dazu führt dass *dieses eine* Feldelement in den Cache geladen wird.
+
+Bei *Meltdown* führt diese Vorbereitung ein Prozess direkt aus, der dann, wie erwartet mit einem Zugriffsfehler abgebrochen wird.
+
+Aber die geladene, harmlose Speicheraddresse ist immer noch im CPU Cache vorhanden und wird beim Zugriff darauf eine deutlich kürzere Zugriffszeit vorweisen als all ihre benachbarten Feldinhalte.
+Die kann man in einem zweiten Programm messen und daraus den originalen Byte-Wert aus dem geschützten Kernel-Speicher rekonstruieren, das dem Feldindex entspricht.
+
+image::https://spectreattack.com/images/spectre.min.svg[float=right,width=400]
+
+Bei *Spectre* sind indirekte Sprünge und Aufrufe im Programmcode die Angriffstelle, d.h. ein Sprünge deren Zieladdresse von einem Registerinhalt abhängig ist.
+
+Die Startadresse eines indirekte Zweiges wird erst zur Laufzeit ermittelt, wie z.B. bei Sprungtabellen oder virtuellen Aufrufen in objektorientierten Programmen.
+Diese Ziele werden für die spekulative Ausführung vorhergesagt (branch prediction), ein Prozess, der möglichst treffsicher sein soll, und daher auch "lernen" kann.
+
+Bei mehreren Alternativen, wird genau wie bei anderen spekulativen Zweigen abgeschätzt welche Zielroutinen das sein könnten und diese schon einmal vorauseilend ausgeführt.
+
+// Aus Performance- und Komplexitätsgründen wird bei auch dieser spekulativen Ausführung nicht zwischen schützenswerten Speicherbereichen unterschieden, was dann genau zu den genannten Problemen führt. 
+
+Im Angriff werden die Vorhersageeinheiten der CPU so beeinflusst, dass sie spekulativ Code im Programm, dem Betriebssystem oder einer Bibliothek ausführen, der geschützte Inhalte lädt und dann abhängig von deren Wert entweder wieder Caches lädt, oder weitere Verzweigungen steuert, deren Auswirkungen gemessen werden können.
+
+////
+Diese spekulativen Zweige können sich auch existierende Maschinencode-Fragmente aus dem Hauptprogramm bzw. Bibliotheken zunutze machen, um unerlabut Daten zu lesen und zu schreiben (wie z.B. Rücksprungadressen zum Schadcode).
+In der Demonstration wurde gezeigt wie mittels Spectre aus "Sandboxen" wie Javascript ausgebrochen werden kann, um anderen Speicher im Prozess (Browser) zu lesen.
+////
+
+Und so kann man mit beiden Ansätzen Byte für Byte Speicherbereiche auslesen auf die man eigentlich keinen Zugriff haben sollte.
+Das ist zwar nicht besonders schnell, die Forscher sind auf Datenraten zwischen 100 bis 500kb pro Sekunde gekommen, aber das ist für den Angriff an sich keine Einschränkung.
+
+== Patch Day
+
+Wer ist alles betroffen? 
+Intel CPUs sind wegen ihres Designfehlers anfällig für Meltdown, aber alle Hersteller produzierten moderne CPUs mit spekulativer Ausführung von Zweigen im Hintergrund, die sich Spectre zunutze macht.
+
+Das betrifft Milliarden von Prozessoren weltweit, die nicht so mal einfach getauscht oder repariert werden können.
+Also muss es Patches im Mikrocode, den Betriebssystemen, Virtualisierungslösungen, Compilern und Anwendungen geben.
+
+Es wäre jedoch fatal für die CPU-Leistung, die spekulative Ausführung pauschal abzuschalten.
+
+Die Auswirkungen von Fixes auf die Rechenleistung auf Systeme und Anwendungen hängt davon ab, wieviele der kritischen Angriffstellen sie enthalten, also Systemaufrufe oder bedingte Sprünge.
+
+Ein unschöner Workaround der für Endnutzer-Anwendungen, wie Browser oder die JVM in Frage kommt, ist die *Granularität von Zeitmessung* auf mehr als 20 Nanosekunden zu vergröbern.
+Dann könnten die Cachelaufzeiten nicht mehr genau genug gemessen werden.
+Das wurde von einigen Browseranbietern schon umgesetzt.
+
+Bisher gibt es für Meltdown einen relativ "radikalen" Patch. 
+Dabei werden die Kernel-Speicherbereiche nicht mehr automatisch in den Prozessspeicher eingeblendet, sondern erst bei jedem relevanten Systemaufruf und auch nur für dessen Laufzeit. 
+
+// Eine "einfache" aber teure Lösung stellt es dar, Kernel-Pages nie im User-Mode in den Speicherbereich der Programme zu mappen, sondern erst nachdem der Wechel in den privilegierten Modus erfolgt ist. Und auch nur dann. 
+
+image::https://upload.wikimedia.org/wikipedia/commons/3/33/Kernel_page-table_isolation.svg[width=400,float=left]
+
+Diese Lösung heisst in Linux *Kernel Page Table Isolation* (KPTI), für Windows und andere Betriebssystemen gibt es ähnliche Ansätze.
+Damit werden Nutzer- und Kernelspeicher strikter voneinander getrennt.
+// Das wird in Zukunft in CPU-Hardware erfolgen müssen, die klar Nutzer- und Kernel-Speicher voneinander isoliert.
+
+Bei der Umschaltung zwischen den beiden Betriebsmodi müsste auch der Address-Caches (TLB) bereinigt werden, eine extrem teure, sich auch noch selbst-verstärkende Angelegenheit, die selbst Anwendungen mit nur wenigen Systemaufrufen extrem ausbremsen würde.
+
+Zum Glück kann das [PCID] (*Processor-Context-ID*) Feature moderner Prozessoren dafür sorgen dass bestimmte Seiten nur im korrekten Kontext sichtbar werden, was in Linux seit kurzem auch benutzt werden kann.
+Wie Gil Tene von Azul festgesellt hat, wird dieses Feature von vielen Virtualsierungslösungen nicht an Gastsysteme weitergereicht.
+Wenn ihre Systeme auf virtueller oder Cloud-Infrastruktur laufen, stellen Sie sicher, das `grep pcid /proc/cpuinfo | wc -l` die Anzahl der Prozessoren anzeigt. 
+
+Intels Patches waren bisher nur bedingt erfolgreich.
+Zum Beispiel führten die Microcode-Updates zu Crashes und spontanen Neustarts, so dass Intel Ende Januar sie erst einmal wieder zurückgezogen hat.
+Die PR-Strategy die gefundenen Probleme einfach als "reguläre Funktionsweise" moderner Chips darzustellen wird Intel auch nicht abgenommen.
+
+Eingereichte Linux Kernel Patches wurden von Linus Torvalds heftigst kritisiert, da scheinbar relativ einfache Fixes mit einer Menge irrelevanter Änderungen gemischt wurden.
+Nach den Erklärungen des Authors David Woodhouse ist das aber nicht der Fall, sondern stellt eine breitere Absicherung dar, um bestimmte Probleme auf Intel Skylake Prozessoren zu addressieren.
+
+Für Spectre ist die Problembehebung deutlich schwieriger.
+
+Zum einen muss betroffene Software analysiert und bei Bedarf mit gepatchten Compilern (neue Versionen von GCC, LLVM usw sind verfügbar) neu übersetzt werden, die die kritischen Stellen unschädlich machen.
+
+// MS, Epic Games Leistungseinbrüche in servern
+// 1% in desktops / mobile für skylake, aber mehr für ältere Prozessoren -> älteres Windows Font-Rendering im Kernel mode
+// 
+
+// Die drei Sicherheitsfeatures sind IBPB (Indirect Branch Prediction Barrier), STIBP (Single Thread Indirect Branch Predictors) und IBRS (Indirect Branch Restricted Speculation)
+
+Es wird versucht über die Einschränkung der spekulativer Ausführung von Zweigen eine der beiden Spectre Varianten zu entschärfen, über Kernel Patches und Microcode-Updates in Prozessoren. 
+// (IRBS, IBPB, STIBP). 
+Diese Ansätze sind aber relativ teuer, besonders auf älteren Prozessoren.
+
+Sie verhindern, dass die Vorhersage von Sprungaddressen von weniger privilegiertem Code und nebenläufigen bzw. vorangegangenen Ausführungen beeinflusst werden kann.
+Die daraus entstehenden Leistungseinbussen kommen noch zu den Auswirkungen für den Meltdown-Fix hinzu.
+
+Für Spectre(v2) wurde von Google Mitarbeitern ein Ansatz namens [Retpoline] ("return + trampoline") entwickelt.
+Indirekte Sprünge (`JMP %rax`) und Aufrufe (`CALL %rax`) stellen das Angriffsziel von Spectre dar.
+Dabei wird die Umgebung so manipuliert, dass *potentielle* Werte des Registerinhaltes auf Betriebssystems- oder Bibliotheksfunktionen zeigen, die relevanten geschützen Speicher auslesen und damit in den Cache laden würden.
+Und diese werden dann auch während der Sprungvorhersage spekulativ ausgeführt.
+
+Retpoline nutzt einen ziemlich cleveren Trick:
+
+Ein `RETURN` Opcode stellt ja nur einen indirekten Sprung dar, dessen Ziel (die Rücksprungadresse) auf dem Stack liegt.
+Damit kann man jeden bedingten Sprung (JMP) oder Aufruf (CALL) durch das Platzieren der Zieladdresse auf dem Stack und ein nachfolgendes `RETURN` ersetzen.
+Diese Operation ist zwar auch theoretisch spekulativ, wird aber von den CPUs schon frühzeitiger festgehalten, so dass die manipulierbare spekulative Ausführung von "Fake News" also falschen Informationen über die Sprungadresse ausgeht, und in einer von Retpoline eingefügten Endlosschleife landet, die dann nach Abschluss der Spekulation einfach verworfen wird.
+
+// shared retpoline, einfach eins pro "register" & call bzw. jmp anlegen. Fertig.
+// oder compiler benutzt immer dasselbe jump-register
+
+// bedingte Sprünge -> jmp %rax
+// angriff: modifiziere umgebung um falsche zieladdressen für den jump spekulativ auszuführen
+
+// TODO more details for how spectre works
+// isolieren indirekte Zweige vor spekulativer Ausführung, statt des erwarteten modifizierten Rücksprungs würden sie in einem endlosen Sprung-Schleife hängen bleiben.
+
+Der Retpoline Maschinencode kann direkt jeden indirekte Verzweigung oder Aufruf ersetzen, aus einem Opcode werden zwar mehrere (6) aber davon werden nur 2 ausgeführt, der "Mehraufwand" ist nicht existent.
+
+// Auf Skylake CPUs kann Retpoline in manchen Fällen nicht wirksam werden, dort muss dann der IRBS Fix genutzt werden.
+
+////
+Now that a data side-effect has been found, it is possible to adversarially bias the speculative execution of Foo() so that a gadget such as Variant 1’s  “Bounds check bypass” is instead temporarily speculatively executed.
+
+jmp *%rax; /* indirect branch to the target referenced by %rax */
+!!! -> CPU speculates about content of register and executes potential branches some of which can be tailored to lie in the gadget region
+can't be prevented
+-> inject our own prediction target manipulation that "guarantees" the correct branches are chosen.
+-> function return is a indirect branch (jmp on stack address)
+-> but target can be cached for future -> specific implementation for return prediction operation on CPUs (e.g. return stack buffer on Intel)
+"use return prediction to control speculative execution"
+-> ala replace jump with return ???
+call addr ==  ret + addr on stack
+
+| jmp *%r11
+
+call set_up_target;   (1)
+capture_spec:         (4)
+  pause;
+  jmp capture_spec;
+set_up_target:
+  mov %r11, (%rsp);   (2)
+  ret;                (3)  
+
+gadget -> read-data-code
+must be part of the victims address space
+
+Importantly, this steering may occur:
+
+Between user and kernel execution on the same CPU
+Between processes on the same CPU
+Between guests and their hypervisors
+Between execution on SMT or CPU siblings (prediction hardware may be shared)
+
+Recall that an indirect branch is one for which the target must be determined at run-time; common examples being polymorphic code or a jump-table.
+////
+
+Neue Compilerversionen enthalten Optionen (z.B. Retpoline aber auch Blockaden für Vorhersagebeeinflussung), um weniger anfälligen Code für Programme und Bibliotheken für Spectre(v2) zu generieren.
+Für Betriebssysteme, Browser und andere Software gibt es neue Builds mit diesen Änderungen.
+
+== Leistungseinbussen
+
+Bei _Anwenderrechnern_ mit aktuellen Prozessoren sowie aktuellen Betriebssystemen sinkt die Rechnerleistung trotz der Patches laut Aussagen von Microsoft und Apple kaum.
+
+Ingenieure von [RedHat] haben verschiedene Kernelupdates mit Microcode-Patches mit einer Zahl von Benchmarks getestet und haben folgende Einbussen ermittelt:
+
+* 8-19% Speicherintensive Anwendungen, OLTP Datenbankzugriffe (Transaktionen)
+* 3-7% OLAP Datenbankzugriffe (Analyse), Entscheidungssysteme, Java VMs
+* 2-5% Hochleistungsrechnen, CPU-intensive Anwendungen
+
+Da Anwendungen in Containern als Linux-Prozesse sind deren Einschränkungen ähnlich. 
+Dagegen haben Virtualisierungslösungen häufigere Wechsel zwischen Kernel- und Nutzermodus, was zu höheren Leistungsverlusten führen muss.
+
+Wenn Systeme schon an der Kapazitätsgrenze laufen, sind unmittelbare Maßnahmen notwendig.
+Für alle anderen Anwendungen sollte die Auswirkung im Realbetrieb beobachtet und bei Bedarf über Skalierung oder andere Optimierungen addressiert werden.
+
+//// 
+REDHAT
+Measureable: 8-19% - Highly cached random memory, with buffered I/O, OLTP database workloads, and benchmarks with high kernel-to-user space transitions were measured to be impacted between 8-19%. Examples include OLTP Workloads (tpc), sysbench, pgbench, netperf (< 256 byte), and fio (random I/O to NvME).
+
+Modest: 3-7% - Database analytics, Decision Support System (DSS), and Java VMs were measured to be impacted less than the “Measurable” category. These applications may have significant sequential disk or network traffic, but kernel/device drivers are able to aggregate requests to moderate level of kernel-to-user transitions. Examples include SPECjbb2005, Queries/Hour and overall analytic timing (sec).
+
+Small: 2-5% - HPC (High Performance Computing) CPU-intensive workloads that spend little time in the kernel were measured to have 2-5% performance impact. This is with jobs that run mostly in user space and are scheduled using cpu-pinning or numa-control. Examples include Linpack NxN on x86 and SPECcpu2006.
+
+Due to containerized applications being implemented as generic Linux processes, applications deployed in containers incur the same performance impact as those deployed on bare metal. We expect the impact on applications deployed in virtual guests to be higher than bare metal due to the increased frequency of user-to-kernel transitions.
+
+If an application is running on a system that has consumed the full capacity of memory and CPU, the overhead of this fix may overload a system payload, resulting in more significant performance degradation. 
+////
+
+Google, Microsoft und Amazon haben schon zeitig Patches auf ihrer _Cloud-Infrastruktur_ eingespielt, zum Teil (auf AWS) hat sich das deutlich in der Leistung der virtuellen Maschinen widergespiegelt, bei [Google-Cloud] gab es kaum Auswirkungen.
+
+Für Nutzer von _serverlosen (Lambda) Funktionen_ sollte sich der Einfluss in Grenzen halten, da die meisten der Operationen innerhalb der Funktion keinen Kernel-Zugriff benötigen, es kann sich maximal die Ausführzeit etwas verlängern. Eine Auswirkung wie CPU-Last ist dort ja nicht relevant für den Endnutzer.
+
+Von den Meltdown Patches wären alle Systemaufrufe die Kernelberechtigungen benötigen betroffen, hier ist eine Auswahl:
+
+* Netzwerk I/O
+* Disk I/O
+* Interrupts
+* Locking
+* Thread Management
+
+Wenn Anwendungen und ihre Bibliotheken nur relativ wenige dieser Aufrufe nutzen, oder deren Nutzung bündeln, dann beeiträchtigen die Patches ihre Leistung nur minimal.
+In vielen Fällen ist das aber deutlich zu merken, in verschiedenen Systemen wurden bis zu 30% Leistungseinbussen berichtet:
+
+* Redis (3% - 15%)
+* Spark (3% - 5%) 
+// in executor due to code-generation instead of virtuellen methodenaufrufen, mehr im "driver" durch netzwerkaufrufe / thread-switches, OO->VCalls
+* Kafka (bis zu 40%) 
+* Postgres (7% - 20%)
+* Cassandra (2% - 25%)
+* Memcache (bis zu 100%)
+
+Je nach Anwendungsfall sind die Ergebnisse sehr verschieden, von [SolarWinds] wurde in einem Artikel die Auswirkung der AWS Patches auf ihren Kafka, Cassandra und Memcache Cluster visualisiert.
+Dabei wird vor allem deutlich, dass nachgelagerte Systeme von der Latenzerhöhung durch kaskadierte Laufzeiten beeinträchtigt wurden.
+Spätere Patches verbesserten das Laufzeitverhalten, zum Teil wurden aber auch einfach Intels Microcode-Updates wegen Instabilitäten zurückgerollt.
+
+Infrastructure as a Service (IaaS) ist somit ein Segen - da die Anbieter automatisch und ohne Zutun der Nutzer so weit wie möglich optimierte Patches auf den verwalteten Maschinen einspielen.
+Weniger segensreich ist jedoch die granulare Transparenz, trotz Blog- und Helpcenter-Artikeln ist es oft nicht wirklich klar, was da wie, wo und wann gepatched wurde.
+Anwender mit kritischen Systemen sollten selbst testen und sicherstellen, wie es um ihre Backendinfrastruktur bestellt ist.
+
+// The mitigation strategies for Meltdown and Spectre impact code paths that perform virtual function calls and context switches (such as thread switches, system calls, disk I/O, and network I/O interrupts).
+// One of the major goals of Project Tungsten in Spark 2.0 was to eliminate as many virtual function dispatches as possible through code generation.
+// syscalls when reading from NVMe SSDs
+
+// https://googleprojectzero.blogspot.de/2018/01/reading-privileged-memory-with-side.html
+// https://databricks.com/blog/2018/01/13/meltdown-and-spectre-performance-impact-on-big-data-workloads-in-the-cloud.html
+// 
+// https://neo4j.com/blog/meltdown-spectre-results-neo4j-performance-testing/
+// https://www.postgresql.org/message-id/20180102222354.qikjmf7dvnjgbkxe@alap3.anarazel.de
+// AWS: https://aws.amazon.com/de/security/security-bulletins/AWS-2018-013/
+// Redis: https://gist.github.com/antirez/9e716670f76133ec81cb24036f86ee95
+// redis https://gist.github.com/bobrik/c67189e88efcc2a1491c54c15f5fe006
+
+
+== JVM und Java Programme
+
+Die JVM selbst ist wie Browser ein Programm das "nicht vertrauenswürdigen" Code in einer Sandbox ausführt.
+Daher sollte sie für Spectre (v1) anfällig sein sund müsste mit entsprechend gefixten Compilern neu übersetzt werden.
+
+Aber in den von Oracle im Januar herausgegebenen Sicherheitpatches [ORA-PATCH] sind keine relevanten Patches für die JVM enthalten.
+Nur X86 Server und Virtual Box erhielten Fixes für Spectre(v2).
+
+Es bleibt also abzuwarten ob da noch etwas kommt.
+
+Prinzipiell kann der JVM Interpreter / JIT-Compiler aktiver dafür sorgen das potentiell kritische Codesequenzen nicht generiert bzw. geschützt werden.
+Für Anwendungen die häufig I/O bzw. Netzwerkzugriffe mit kleinen Blöcken durchführen, sollten die Meltdown Patches Auswirkungen zeigen.
+Dasselbe sollte auch beim Thread-Scheduling der Fall sein, das auch einen privilegierten Systemaufruf darstellt.
+Bei Locks und Semaphoren auf Resourcen mit vielen Konflikten wird durch die Nutzung von Betriebssystem-Mutex (Futex - fast userspace mutex) Aufrufen weiter verlangsamt.
+
+// OS mutexes/futex on contented resources
+// In computing, a futex (short for "fast userspace mutex") is a kernel system call that programmers can use to implement basic locking, or as a building block for higher-level locking abstractions such as semaphores and POSIX mutexes or condition variables.
+
+// JVM / Syscalls
+
+////
+aktualisieren die für die Adressberechnung benötigten Translation Lookaside Buffer (TLBs)
+immer schief geht und dass die Zeit, bis der Prozessor die fehlerhafte Spekulation erkennt, möglichst lang ist. Dann ist genügend Zeit (zum Teil 100 Takte und mehr), um zahlreiche nachfolgende Befehle „transient“ auszuführen. Das heißt, die transienten Befehle werden nur spekulativ mit internen Registern und nie wirklich mit den Architekturregistern ausgeführt, sie können also auch nie eine Exception generieren, egal welchen Unsinn sie anstellen.s
+////
+
+== Fazit
+
+Die Entwicklung der Angriffe und von Retpoline als Gegenmassnahme stellt jeweils eine beeindruckende Kombination von Ideen dar.
+
+Meltdown und Spectre sind sicher nur die Spitze des Eisbergs, es bleibt abzuwarten, welche anderen Ansätze mit indirekten Angriffen auf die modernen Prozessorarchitekturen realisiert werden. 
+Die Designer der Chiphersteller müssen jetzt jedenfalls diese Erkenntnisse in ihre Arbeit integrieren und sicherstellen, dass die transiente Ausführung von Operationen diesselben Sicherheitsüberprüfungen unterliegt wie im regulären Fall.
+
+Was ich beeindruckend finde, ist dass diese Lücken nicht von traditionellen Sicherheitsfirmen oder den Chipherstellern kommen, sondern einer Cloud-Firma wie Google. 
+
+Und dass sich hier ein Vorteil von Infrastrukturservices sehr deutlich auszahlt. 
+Effektive Fixes werden unmittelbar eingespielt, ohne dass sich die Nutzer darum kümmern müssen.
+
+// Und mit "serverlosen" Diensten hält sich sogar die Auswirkung im Rahmen.
+
+== Referenzen
+
+
+* [ProjectZeroPub] https://googleprojectzero.blogspot.de/2018/01/reading-privileged-memory-with-side.html
+* [Spectre Paper] https://spectreattack.com/spectre.pdf
+* [Meltdown Paper] https://meltdownattack.com/meltdown.pdf
+* [Heise Analyse] https://www.heise.de/security/meldung/Analyse-zur-Prozessorluecke-Meltdown-und-Spectre-sind-ein-Security-Supergau-3935124.html
+* [KPTI] https://en.wikipedia.org/wiki/Kernel_page-table_isolation
+* [InfoQ] https://www.infoq.com/news/2018/01/meltdown-spectre-deep-dive
+* [Google-Cloud] https://www.blog.google/topics/google-cloud/protecting-our-google-cloud-customers-new-vulnerabilities-without-impacting-performance/
+* [Retpoline] https://support.google.com/faqs/answer/7625886
+* [ORA-PATCH] http://www.oracle.com/technetwork/security-advisory/cpujan2018-3236628.html#AppendixJAVA
+* [TUGRAZ] Meltdown Demo Code und Video Uni Graz: https://github.com/iaik/meltdown
+* [RedHat Performance Impact] https://access.redhat.com/articles/3307751
+* [SolarWinds] https://blog.appoptics.com/visualizing-meltdown-aws/
+* Meltdown and Spectre, explained: https://medium.com/@mattklein123/meltdown-spectre-explained-6bc8634cc0c2
+
+// *  https://www.heise.de/thema/Meltdown-und-Spectre
+// * https://medium.com/@message2america/meltdown-and-spectre-9c0699462b81
+// KPTI patch https://lkml.org/lkml/2017/12/4/709
+// Cassandra latencies: http://thelastpickle.com/blog/2018/01/10/meltdown-impact-on-latency.html
+// Datastax: https://academy.datastax.com/content/impact-meltdown-patches-dse-performance
+// https://support.apple.com/en-us/HT208394
+// https://randomascii.wordpress.com/2018/01/07/finding-a-cpu-design-bug-in-the-xbox-360/
+// CPU Caches https://www.extremetech.com/extreme/188776-how-l1-and-l2-cpu-caches-work-and-why-theyre-an-essential-part-of-modern-chips
+//  collection of Meltdown/Spectre postings Jan 4: https://lwn.net/Articles/742999/
+// GCC 7.3 fix für Spectre v2 
+// https://gcc.gnu.org/ml/gcc/2018-01/msg00197.html
+// LLVM: http://lists.llvm.org/pipermail/llvm-commits/Week-of-Mon-20180101/513630.html
+// postgres latency: https://www.postgresql.org/message-id/20180102222354.qikjmf7dvnjgbkxe@alap3.anarazel.de
+// https://medium.com/@message2america/meltdown-and-spectre-9c0699462b81
+// https://medium.com/@mattklein123/meltdown-spectre-explained-6bc8634cc0c2
+// https://medium.com/@lfscheidegger/a-semi-technical-description-of-meltdown-e96c74394e55
+// https://medium.com/implodinggradients/meltdown-c24a9d5e254e
+// https://www.raspberrypi.org/blog/why-raspberry-pi-isnt-vulnerable-to-spectre-or-meltdown/
+// https://security.googleblog.com/2018/01/more-details-about-mitigations-for-cpu_4.html
+// https://googleprojectzero.blogspot.de/2018/01/reading-privileged-memory-with-side.html
+// https://spectreattack.com/#faq-fix
+// KAISER/KPTI: https://lwn.net/Articles/738975/
+// https://hackernoon.com/system-calls-have-been-more-expensive-with-meltdown-how-to-avoid-them-af4b0026d35a
+// https://www.scylladb.com/2018/01/07/cost-of-avoiding-a-meltdown/
+// https://en.wikipedia.org/wiki/Kernel_page-table_isolation
+// CPU Usage Differences After Applying Meltdown Patch at Epic Games https://news.ycombinator.com/item?id=16084732 -> https://www.epicgames.com/fortnite/forums/news/announcements/132642-epic-services-stability-update
+// Our Node.js, MongoDB, Python servers all with significant network traffic didn't have any measurable impact after KPTI patches on Amazon Linux on T2.medium(burst), M4.large, T2.large(burst) respectively.
+// More specifically, the meltdown patch primarily affect memory bound applications, not necessarily computations, although those usually overlap for CPU bound applications.
+// PostgreSQL is getting about a 7% hit on our databases that don't fit in memory.
+// We know that the biggest performance factor in both of these patches (spectre, meltdown) is the kernel boundary.
+// https://www.infoq.com/news/2018/01/meltdown-spectre-deep-dive
+// Spectre/Meltdown Pits Transparency Against Liability: Which is More Important to You? https://www.bunniestudios.com/blog/?p=5127
+// https://googleprojectzero.blogspot.de/2018/01/reading-privileged-memory-with-side.html
+// http://www.zdnet.com/article/how-the-meltdown-and-spectre-security-holes-fixes-will-affect-you/
+// https://www.quora.com/How-does-patches-for-Meltdown-and-Spectre-affects-JVMs
+// https://danielmiessler.com/blog/simple-explanation-difference-meltdown-spectre/
+
+////
+Starting with Linux kernel 4.12, KASLR (Kernel Address Space Layout Randomizaton) is active by default. This means, that the location of the kernel (and also the direct physical map which maps the entire physical memory) changes with each reboot.
+
+This demo uses Meltdown to leak the (secret) randomization of the direct physical map. This demo requires root privileges to speed up the process. The paper describes a variant which does not require root privileges.
+////
+
+// Woodhouse Answer to Torvalds: http://lkml.iu.edu/hypermail/linux/kernel/1801.2/05282.html
+
+////
+The new microcode from Intel and AMD adds three new features.
+
+One new feature (IBPB) is a complete barrier for branch prediction.
+After frobbing this, no branch targets learned earlier are going to be
+used. It's kind of expensive (order of magnitude ~4000 cycles).
+
+The second (STIBP) protects a hyperthread sibling from following branch
+predictions which were learned on another sibling. You *might* want
+this when running unrelated processes in userspace, for example. Or
+different VM guests running on HT siblings.
+
+The third feature (IBRS) is more complicated. It's designed to be
+set when you enter a more privileged execution mode (i.e. the kernel).
+It prevents branch targets learned in a less-privileged execution mode,
+BEFORE IT WAS MOST RECENTLY SET, from taking effect. But it's not just
+a 'set-and-forget' feature, it also has barrier-like semantics and
+needs to be set on *each* entry into the kernel (from userspace or a VM
+guest). It's *also* expensive. And a vile hack, but for a while it was
+the only option we had.
+
+Even with IBRS, the CPU cannot tell the difference between different
+userspace processes, and between different VM guests. So in addition to
+IBRS to protect the kernel, we need the full IBPB barrier on context
+switch and vmexit. And maybe STIBP while they're running.
+
+Then along came Paul with the cunning plan of "oh, indirect branches
+can be exploited? Screw it, let's not have any of *those* then", which
+is retpoline. And it's a *lot* faster than frobbing IBRS on every entry
+into the kernel. It's a massive performance win.
+
+So now we *mostly* don't need IBRS. We build with retpoline, use IBPB
+on context switches/vmexit (which is in the first part of this patch
+series before IBRS is added), and we're safe. We even refactored the
+patch series to put retpoline first.
+
+But wait, why did I say "mostly"? Well, not everyone has a retpoline
+compiler yet... but OK, screw them; they need to update.
+
+Then there's Skylake, and that generation of CPU cores. For complicated
+reasons they actually end up being vulnerable not just on indirect
+branches, but also on a 'ret' in some circumstances (such as 16+ CALLs
+in a deep chain).
+
+The IBRS solution, ugly though it is, did address that. Retpoline
+doesn't. There are patches being floated to detect and prevent deep
+stacks, and deal with some of the other special cases that bite on SKL,
+but those are icky too. And in fact IBRS performance isn't anywhere
+near as bad on this generation of CPUs as it is on earlier CPUs
+*anyway*, which makes it not quite so insane to *contemplate* using it
+as Intel proposed.
+
+That's why my initial idea, as implemented in this RFC patchset, was to
+stick with IBRS on Skylake, and use retpoline everywhere else. I'll
+give you "garbage patches", but they weren't being "just mindlessly
+sent around". If we're going to drop IBRS support and accept the
+caveats, then let's do it as a conscious decision having seen what it
+would look like, not just drop it quietly because poor Davey is too
+scared that Linus might shout at him again. :)
+
+I have seen *hand-wavy* analyses of the Skylake thing that mean I'm not
+actually lying awake at night fretting about it, but nothing concrete
+that really says it's OK.
+
+If you view retpoline as a performance optimisation, which is how it
+first arrived, then it's rather unconventional to say "well, it only
+opens a *little* bit of a security hole but it does go nice and fast so
+let's do it".
+
+But fine, I'm content with ditching the use of IBRS to protect the
+kernel, and I'm not even surprised. There's a *reason* we put it last
+in the series, as both the most contentious and most dispensable part.
+I'd be *happier* with a coherent analysis showing Skylake is still OK,
+but hey-ho, screw Skylake.
+
+The early part of the series adds the new feature bits and detects when
+it can turn KPTI off on non-Meltdown-vulnerable Intel CPUs, and also
+supports the IBPB barrier that we need to make retpoline complete. That
+much I think we definitely *do* want. There have been a bunch of us
+working on this behind the scenes; one of us will probably post that
+bit in the next day or so.
+
+I think we also want to expose IBRS to VM guests, even if we don't use
+it ourselves. Because Windows guests (and RHEL guests; yay!) do use it.
+
+If we can be done with the shouty part, I'd actually quite like to have
+a sensible discussion about when, if ever, we do IBPB on context switch
+(ptraceability and dumpable have both been suggested) and when, if
+ever, we set STIPB in userspace.
+
+////
+
+
+////
+Here's an overview of each variant:
+
+Variant 1 (CVE-2017-5753), “bounds check bypass.” This vulnerability affects specific sequences within compiled applications, which must be addressed on a per-binary basis. This variant is currently the basis for concern around browser attacks, Javascript exploitation and vulnerabilities within individual binaries.
+
+Variant 2 (CVE-2017-5715), “branch target injection.” This variant may either be fixed by a CPU microcode update from the CPU vendor, or by applying a software protection called “Retpoline” to binaries where concern about information leakage is present. This variant is currently the basis for concern around Cloud Virtualization and “Hypervisor Bypass” concerns that affect entire systems.
+
+Variant 3 (CVE-2017-5754), “rogue data cache load.”  This variant is the basis behind the discussion around “KPTI,” or “Kernel Page Table Isolation.” When an attacker already has the ability to run code on a system, they can access memory which they do not have permission to access.
+////
+
+////
+Fixing the bounds bypass check attack requires analysis and recompilation of vulnerable code; addressing the branch target injection attack can be dealt with via a CPU microcode update, such as Intel's IBRS microcode, or through a software patch like "retpoline" to the operating system kernel, the hypervisor, and applications.
+////
+
+////
+Intel recommends using the LFENCE instruction to serialize operations and prevent instruction speculation that can be abused.
+
+But that could slow things down. "Note that the insertion of LFENCE must be done judiciously; if it is used too liberally, performance may be significantly compromised," 
+
+
+Another mitigation technique involves reducing timer accuracy.
+
+"Both Meltdown and Spectre currently use the cache side channel in order to exfiltrate the data obtained during the erroneous speculative execution," said Genkin. "As cache attacks often need an accurate timing source, decreasing timer accuracy is a generic way to make cache attacks harder to mount."
+
+
+On Wednesday, Luke Wagner, senior staff software engineer at Mozilla, said Firefox 57 will reduce the resolution of time sources like performance.now() and disable SharedArrayBuffer, which can be used to create high-resolution timers, in an effort to limit the impact of Spectre attacks. In other words, prevent malicious JavaScript running in a tab from potentially sniffing data – like login tokens – held elsewhere in the browser or system.
+////
+
+////
+With Line 3 already sitting half-executed in the processor, as soon as the KernelData is read, a race begins between Line 3 finishing and the realization that Line 2’s memory access should fault. It turns out Line 3 often wins this race and that even though the forthcoming fault erases the processor’s results from all lines executed out-of-order, it does not erase any cache effects.
+
+
+The basis for branch target injection is to direct speculative execution
+of the processor to some "gadget" of executable code by poisoning the
+prediction of indirect branches with the address of that gadget. The
+gadget in turn contains an operation that provides a side channel for
+reading data. Most commonly, this will look like a load of secret data
+followed by a branch on the loaded value and then a load of some
+predictable cache line. The attacker then uses timing of the processors
+cache to determine which direction the branch took *in the speculative
+execution*, and in turn what one bit of the loaded value was. Due to the
+nature of these timing side channels and the branch predictor on Intel
+processors, this allows an attacker to leak data only accessible to
+a privileged domain (like the kernel) back into an unprivileged domain.
+
+Is there a workaround/fix?
+There are patches against Meltdown for Linux ( KPTI (formerly KAISER)), Windows, and OS X. There is also work to harden software against future exploitation of Spectre, respectively to patch software after exploitation through Spectre ( LLVM patch, MSVC, ARM speculation barrier header).
+
+Which systems are affected by Meltdown?
+Desktop, Laptop, and Cloud computers may be affected by Meltdown. More technically, every Intel processor which implements out-of-order execution is potentially affected, which is effectively every processor since 1995 (except Intel Itanium and Intel Atom before 2013). We successfully tested Meltdown on Intel processor generations released as early as 2011. Currently, we have only verified Meltdown on Intel processors. At the moment, it is unclear whether AMD processors are also affected by Meltdown. According to ARM, some of their processors are also affected.
+
+Which systems are affected by Spectre?
+Almost every system is affected by Spectre: Desktops, Laptops, Cloud Servers, as well as Smartphones. More specifically, all modern processors capable of keeping many instructions in flight are potentially vulnerable. In particular, we have verified Spectre on Intel, AMD, and ARM processors.
+
+Meltdown breaks the mechanism that keeps applications from accessing arbitrary system memory. Consequently, applications can access system memory. Spectre tricks other applications into accessing arbitrary locations in their memory. Both attacks use side channels to obtain the information from the accessed memory location. For a more technical discussion we refer to the papers ( Meltdown and Spectre)
+
+Why is it called Meltdown?
+The vulnerability basically melts security boundaries which are normally enforced by the hardware.
+
+Why is it called Spectre?
+The name is based on the root cause, speculative execution. As it is not easy to fix, it will haunt us for quite some time
+////
+
+////
+
+It enables the indirect branch restricted
+speculation (IBRS) on kernel entry and disables it on exit.
+It enumerates the indirect branch prediction barrier (IBPB).
+
+The x86 IBRS feature requires corresponding microcode support.
+
+If IBRS is set, near returns and near indirect jumps/calls will not
+allow their predicted target address to be controlled by code that
+executed in a less privileged prediction mode before the IBRS mode was
+last written with a value of 1 or on another logical processor so long
+as all RSB entries from the previous less privileged prediction mode
+are overwritten.
+
+Setting of IBPB ensures that earlier code's behavior does not control later
+indirect branch predictions.  It is used when context switching to new
+untrusted address space. Unlike IBRS, IBPB is a command MSR
+and does not retain its state.
+
+Speculation on Skylake and later requires these patches ("dynamic IBRS")
+be used instead of retpoline[1].  If you are very paranoid or you run on
+a CPU where IBRS=1 is cheaper, you may also want to run in "IBRS always"
+mode.
+In other words: to protect yourself from Spectre Variant 1 attacks, you need to rebuild your applications with countermeasures. These defense mechanisms are not generally available yet. To protect yourself from Spectre Variant 2 attacks, you have to use a kernel with countermeasures, and if you're on a Skylake or newer core, a microcode update, too.
+////
+
+////
+In einer Tabelle erklärt Terry Myerson nochmals die drei Meltdown-/Spectre-Sicherheitslücken und die jeweiligen Gegenmaßnahmen, die die aktuellen Windows-Updates bringen. Nur die Patches gegen CVE-2017-5715 (Spectre Variante 2, Branch Target Injection/BTI) verlangen demnach BIOS- beziehungsweise CPU-Microcode-Updates.
+
+Als Maßnahme gegen CVE-2017-5753 (Spectre Variante 1, Bounds Check Bypass) bringen die Windows-Updates neu compilierten Code mit. Außerdem hat Microsoft die Browser Edge und IE11 "gehärtet", um denkbare Angriffe mit JavaScript zu erschweren.
+
+Ähnlich wie Linux mit KPTI schützt Microsoft Windows gegen Meltdown (CVE-2017-5754, Rogue Data Cache Load) durch eine bessere Trennung der Speicherbereiche von Kernel und Anwendungen (Isolate Kernel and User Mode Page Tables).
+////
+
+////
+The PCID (Processor-Context ID) feature on x86-64 works much like the more generic ASID (Address Space IDs) available on many hardware platforms for decades. Simplistically, it allows TLB-cached page table contents to be tagged with a context identifier, and limits the lookups in the TLB to only match within the currently allowed context.
+Without this feature, a context switch that would involve switching to a different page table (e.g. a process-to-process context switch) would require a flush of the entire TLB. With the feature, it only requires a change to the context id designated as "currently allowed". The benefit of this comes up when a back-and-forth set of context switches (e.g. from process 1 to process 2 and back to process 1) occurs "quickly enough" that TLB entries of the newly-switched-into context still reside in the TLB cache. With modern x86 CPUs holding >1K entries in their L2 TLB caches (sometimes referred to as STLB), and each entry mapping 2MB or 4KB virtual regions to physical pages, the possibility of such reuse becomes interesting on heavily loaded systems that do a lot of process-to-process context switching. It's important to note that in virtually all modern operating systems, thread-to-thread context switches do not require TLB flushing, and remain within the same PCID because they do not require switching the page table. In addition, UNTIL NOW, most modern operating systems implemented user-to-kernel and kernel-to-user context switching without switching page tables, so no TLB flushing or switching or ASID/PCID was required in system calls or interrupts.
+The PCID feature has been a "cool, interesting, but not critical" feature to know about in most Linux/x86 environments for these main reasons:
+
+1. Linux kernels did not make use of PCID until 4.14. So even tho it's been around and available in hardware, it didn't make any difference.
+
+2. It's been around and supported in hardware "forever", since 2010 (apparently added with Westmere), so it's not new or exciting.
+
+3. The benefits of PCID-based retention of TLB entries in the TLB cache, once supported by the OS, would only show up when process-to-process context switching is rapid enough to matter. While heavily loaded systems with lots of active processes (not threads) that rapidly switch would benefit, systems with a reasonable number of  of [potentially heavily] multi-threaded processes wouldn't really be affected or see a benefit.
+
+This all changed with Meltdown. 
+
+The basic mechanism used by Meltdown fixes in the various distros, under term variants like "pti", "KPTI", "kaiser" and "KAISER", all have one key thing in common: They use completely separate page tables for user mode execution and for kernel mode execution, in order to make sure that kernel mapping would not be available [to the processor] as the basis for any speculative operations. Where previously a user process had a single page table with entries for both user-space and kernel-space mappings in it (with the kernel mapping having access enforced by protection rules), it now has two page tables: A "user-only" table containing only the user-accesible mappings (this table is referred to as "user" in some variants and "shadow" in other variants), and another table containing both the kernel and the user mappings (referred to as "kernel" in the variants I've seen so far). When running user-mode code, the user-only table is the currently active table that the processor would walk on a TLB miss, and when running kernel code, the "kernel" table is. System calls switch from using the user-only table to using the kernel table, perform their kernel-code work, and then switch back to the user-only table before returning to user code.
+
+When a processor has the PCID feature, this back-and-forth switching between page tables is achieved by using separate PCIDs for the two tables associated with the process. For kernels that did not previously have PCID support (which is all kernels prior to 4.14, so the vast majority of kernels in use at the time of this writing), the Meltdown fix variants seem to use constant PCID values for this purpose (e.g. 0 for kernel and 128 for user). For later kernels where PCID-to-process relationship is maintained on each CPU, the PCID space is split in half (e.g. uPCID = kPCID + 2048). Either way, the switch back and forth between the user-only table and the kernel table does involve telling the CPU that the page table root and the PCID have changed, but does not require or force a TLB flush.
+
+When a processor does NOT have the PCID feature, things get ugly. Each system call and each user-to-kernel-to-user transition (like an interrupt) would be required to flush the TLB twice (once after each switch), which means two terrible things happen:
+
+1. System calls [which are generally fairly short] are pretty much guaranteed to incur TLB misses on all first-access to any data and code within the call, with each miss taking 1-7 steps to walk through the page tables in memory. This has an obvious impact on workloads that involve frequent system calls, as the length of each system call will now be longer.
+
+2. Each system call and each user-to-kernel-to-user transition flushes the entire cache of user space TLBs, which means that *after* the systemcall/transition 100s or 1000s of additional TLB misses will be incurred, the walks for many of which can end up missing in L2/L3. This will effect applications and systems that do not necessarily have a "very high" rate of system calls. The more TLBs have being helping your performance, the more this impact will be felt, and TLBs have been silently helping you for decades. It is enough for only a few hundreds or a few thousands of user-to-kernel-to-user transitions per second to be happening for this impact to be sorely felt. And guess what: in most normal configurations, interrupts (timer, TLB-invalidate, etc.) all cause such transitions on a regular and frequent basis.
+
+The performance impact of needing to fully flush the TLB on each transition is apparently high enough that at least some of the Meltdown-fixing variants I've read through (e.g. the KAISER variant in RHEL7/RHEL6 and their CentOS brethren) are not willing to take it. Instead, some of those variants appear to implicitly turn off the dual-page-table-per-process security measure if the processor they are running on does not have PCID capability. 
+
+The bottom line so far is: you REALLY want PCID in your processor. Without it, you may be running insecurely (Meltdown fixes turned off by default), or you may run so slow you'll be wishing for a security intrusion to put you out of your misery.
+
+Ok. So far, you'd think this whole thing boils down to "once I update my Linux distro with the latest fixes, I just want to make sure I'm not running on ancient hardware". And since virtually all x86 hardware made this decade has PCID support, everything is fine. Right? That was my first thought too. Then I went and check a bunch of systems. Most of the Linux instances I looked in had no pcid feature, and all of them were running on modern hardware. Oh Shit.
+
+The quickest way to check whether or not you have PCID is to grep for "pcid" in /proc/cpuinfo. If it's there, you're good. You can stop reading and go on to worrying about the other performance and security impacts being discussed everywhere else. But if it's not there, you are in trouble. You now have a choice between running insecurely (turn pti off) and having performance so bad that some of the security fixes out there will refuse to secure you. Or you can act (which often means "go scream at someone") and get that PCID feature you now really really need turned on.
+
+So, how/why would you not have PCID?
+
+It turns out that because PCID was so boring and non-exciting, and Linux didn't even use it until a couple of months ago, it's been withheld from many guest-OS instances when running on modern hardware and modern hypervisors. In my quick and informal polling I so far found that:
+
+- Most of the KVM guests I personally looked in did NOT have pcid
+- All the VMWare guests I personally looked in DID have pcid
+- About half the AWS instances I l personally looked in did NOT have pcid, and the other half did.
+
+[I encourage others to add their experiences, and e.g. enrich this with a table of PCID-capability on known instance types on cloud platforms]
+
+I believe that all hypervisors are capable of exposing PCID to guests, and that it is a matter of choice. I.e. of how your specific hypervisor host and guest instance is configured.
+
+The actual Bottom Line:
+
+- On any system that does not currently show "pcid" in the flags line of /proc/cpuinfo, Meltdown is a bigger issue than "install latest updates".
+
+- PCID is now a critical feature for both security and performance.
+
+- Many existing Linux guest instances don't have PCID. Including many Cloud instances.
+
+Go get your PCID!
+
+
+////
+
+
+////
+Erkennung solcher Zugriffsmuster beim Laden von Programmen.
+Compilermodifikationen.
+Randomisierung beim Laden von Speicherzellen in den Cache, z.b. zusätzliches Laden zufälliger Nachbarzellen.
+
+Doch vor allem bei Systemen mit Intel-Prozessoren und Highend-SSDs (PCIe NVMe) können die IOPS-Raten bei zufällig verteilten Zugriffen auf kleine Datenblöcke deutlich einbrechen – wenn auch nicht bei allen Zugriffsmustern.
+////

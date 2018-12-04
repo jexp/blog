@@ -1,0 +1,316 @@
+Java-8 - Streams - Funktionale Handhabung von Containern
+
+Ich hätte es kaum noch für möglich gehalten, dass in Java noch Dinge eingeführt werden, die richtig Spass machen und auch den Abstand anderer Programmiersprachen, wie z.B. Scala zumindest etwas verringern.
+Die Rede ist hier nicht vor allem von Lambda-Functions (einfache Closures), sondern vor allem von Streams, der funktionalen Erweiterung der Collections-API. Vieles von dem was heute hier diskutiert wird, gibt es in der einen oder anderen Form schon in existierenden funktionalen oder Containerbibliotheken für Java [libs], aber mit den dargestellten Spracherweiterungen erhält es noch einmal einen ganz anderen Stellewert.
+
+Streams erlauben es, die kontinuierliche Verarbeitung von Daten in Kollektionen (Iterable, Collection, List, Set, Map usw.) anders als mit der klassischen und bekannten "for"-Schleife mittels Aufrufen (Callbacks) in eigenen Code zu steuern und durchzuführen. Das ist aus funktionalen Sprachen zwar schon lange bekannt (mindestens seit den 60ern) aber in Java eine Novität. 
+
+Wie sieht so etwas aus? Hier das klassische Hello-World Beispiel für diese Art von Code.
+
+Arrays.asList(7,6,5,4,3,2,1).stream().map(x -> x * x).filter(x -> x >= 4).skip(1).limit(4).sorted(Integer::compare).groupBy(x-> x%2).values().forEach(System.out::println);
+
+Ergibt nach Quadrierung, Filterung, Paginierung, Sortierung, Gruppierung die folgende Ausgabe:
+
+VariableStreamBuilder[[9, 25]]
+VariableStreamBuilder[[16, 36]]
+
+Ich mag mir gar nicht vorstellen wieviel Zeilen Java-Code das normalerweiser erfordert hätte. Neben der besseren Lesbarkeit bietet der funktionale Ansatz eine Menge weiterer Vorteile.
+Neben der Diskussion der Vorteile und potentieller Nutzung dieser API möchte ich in dieser Kolumne auch auf die Implementierung der Streams API eingehen.
+
+Wie so oft bauen neue Features einer Sprache auf vorhergehenden oder einhergehenden Änderungen auf (Ähnlichkeiten zum Design von LINQ in .net sind sicher nicht ganz zufällig). Die Streams in Java 8
+benötigen mindestens zwei Schultern auf denen sie stehen können. Zum einen sind das Lambda-Funktionen (TODO Nomenklatur) und zum anderen Erweiterungs-Methoden (Extension-Methods). 
+
+Lambda-Funktionen
+
+Sie gibt es eigentlich schon seit Anbeginn der Programmiersprache Java. Die Lambda Funktionen in Java 8 sind eigentlich "nur" die syntaktische Vereinfachung der Nutzung von Interfaces mit einer einzigen Methode, sogenannte Single Abstract Method (SAM) interfaces. Sie sind aus vielen Bereichen von Java bekannt, seien es Runnable.run(), Callable<V>.call(), Comparator<T>.compare(T t1,T t2), FilenameFilter usw. Sie werden und wurden eingesetzt um einen ganz bestimmten Aspekt einer Berechnung oder Aktion zu kapseln, ggf. einer API zu genügen (z.B. Threading) oder wiederverwendbar zu machen.  Seit Java 8 können sie mit der Annotation @FunctionalInterface explizit gemacht werden. So annotierte Interfaces würden nicht kompilieren wenn sie nicht genau eine "abstrakte" Methode enthielten.
+
+Seit Java 1.1 wurden sie dynamisch oft in der Form von inneren Klassen, spezieller anonymen inneren Klassen genutzt. 
+
+Es gibt einige Aspekte von Lambdas die wirklich interessant sind. Zum einen kann eine Lambda-Funktion die Rolle eines deklarierten Interfaces (SAM) übernehmen solange sie in der Signatur mit der genutzten Interface-Methode übereinstimmt, d.h. Anzahl und Typen der Parameter (inklusive Konvertierung) und Typ der Rückgabewerte sowie deklarierter Exceptions. (??) Das heisst, diesselbe Lambdafunktion kann folgende zwei Interfaces erfüllen. Der konkrete Typ des in der API deklarierten Interfaces oder die konkrete Methode sind egal.
+
+interface Predicate<T> { boolean match(T value); }
+interface IntFilter { boolean filter(int number); }
+
+Für beide kann ich die Lambda Funktion " x ->  x < 3 " einsetzen. Siehe folgendes Beispiel:
+
+// unsere API
+static class Applicator {
+    <T> void applyPredicate(Predicate<T> pred) {}
+    void applyFilter(IntFilter filter) {}
+}
+
+// Nutzung der API mit anonymen inneren Klassen und Lambda
+Applicator app = new Applicator()
+
+app.applyFilter(new IntFilter() { boolean filter(int number) { return number < 3;}});
+app.applyFilter(x -> x < 3);
+
+// Lambda mit Typdeklaration und interner Konvertierung (unboxing)
+app.applyFilter((Integer x) -> x < 3);
+
+app.applyPredicate(new Predicate<Integer>() { boolean match(Integer value) { return value < 3;}});
+app.applyPredicate((Integer x) -> x < 3);
+
+// Lambda ausgelagert in wiederverwendbaren Code-Block
+final Predicate<Integer> lessThanThree = (Integer x) -> x < 3;
+app.applyPredicate(lessThanThree);
+
+
+Wie am Beispiel gesehen sind Lambdas nicht auf offizielle API des JDKs beschränkt ich kann an jeder Stelle im Code an der ich SAMs als Callback-Parameter deklariere entsprechende Lambdas nutzen. Somit können auch viele Aspekte aus typischen Business Anwendungen viel kompakter und klarer ausfallen, die Lesbarkeit erhöht sich deutlich, da der unnötige Rahmen der Klassendeklaration komplett entfällt.
+
+Die genutzten Ausdrücke sollten dann aber auch sprechend genug sein, mittels geeigneter Variablennamen kann man eine Menge erreichen. 
+Indem man die Lambda in eine benannte Variable auslagert die dann dem entsprechenden Ziel-Interface zugewiesen wird, erhält man verständliche, wiederverwendbar Code-Blöcke.
+
+Interessanterweise schlägt meine IDE IntelliJ IDEA für die beiden Aufrufe mittels anonymer innerer Klasse schon die Alternative Nutzung von Lambdas vor.
+
+Für Awendungsfälle wie das gezeigte Bespiel wurden zusammen mit dem Lambdas im JDK eine Sammlung von SAMs in java.util.function.* bereitgestellt, die typische Aufgaben und Ausdrücke die mittels einer einzigen Funktion ausgeführt werden können abbilden. Dazu gehören, Quellen (()->T), Blöcke (T->void), Prädikate (T->boolean), unäre (T->T) und binäre Funktionen (T&T->T), Reduktions-Operatoren (A&T->A), jeweils auch für primitive Typen (int, long, double). Die meisten dieser Interfaces werden auch in der Streams-API wieder verwendet, zusammen mit einigen spezialisierten Varianten.
+
+Lambdas gibt es in verschiedenen Formen, je nach Signatur der ersetzten Methoden
+
+Beispiele von Lambdas:
+
+()    -> expr				Lambda ohne Parameter, nur Aktion mit Seiteneffekt
+ { }						Block nur Aktion mit Seiteneffekt
+ x    -> x					Lambda mit einem Parameter
+(Typ x) -> x				Lambda mit Parameter und Typ
+(x,y) -> x + y				Lambda mit mehreren Parametern
+ x    -> return x+1			Lambda mit vorzeitigem Return
+ Integer::compare			statisches Methoden-Literal
+ System.out::println		Instanzmethoden-Literal
+
+Ein interessantes Detail stellt die Verwendung von Methoden-Literalen als Lambdas dar. So können statisch oder Instanzmethoden einfach als Methodenliteral referenziert und somit die einfache Delegation an diese Methode kompakt notiert werden.
+
+Auch wenn Lambda's machmal als Closures bezeichnet werden, sind sie das nicht wirklich sie "umschliessen" Variablen (auch lokale) die zum Zeitpunkt ihrer Erzeugung schon deklariert sind nur bedingt. Nur Variablen die als "final" gekennzeichnet sind oder als solche betrachtet werden können (einmalige Zuweisungen), können innerhalb einer Lambda-Funktion genutzt werden. Damit gelten diesselben Regeln wie bei anonymen inneren Klassen. So können auch Lambdas ohne Parameter potentiell auf Werte von aussen zugreifen. Das kann wichtig werden, wenn die geforderte API keine Callback-Methoden mit Parametern zulässt.
+
+Für die Anwendbarkeit von Prädikaten als Spezifikationen haben Martin Fowler und Eric Evans ein sehr anschauliches Pattern namens "Specification" [Specification] beschrieben, dass m.E. eines der wichtigsten Pattern darstellt.
+Wie dort diskutiert haben Spezifikaten eine Reihe von Vorteilen - so Wiederverwendung und Kombinierbarkeit zur leicht nachvollziehbaren Deklaration von Regelwerken oder komplexer Bedingungen über die Abbildung von Entscheidungsbäumen bis zur Quelle für das Erzeugen von Abfrage für verschiedene Backends oder deren Ausführung auf Datencontainern im Speicher.
+Wie auch schon dort beschrieben können boolesche Prädikate, d.h. Interfaces oder abstrakte Klassen mit einer definierten Methode die Objekte entgegennimmt und ein boolesches Ergebnis liefert als Prädikate oder Spezifikationen eingesetzt werden. Und dasselbe gilt natürlich auch für Lambda Funktionen die zu einem booleschen Ergebnis evaluieren.
+
+Erweiterungs-Methoden:
+
+Ein weiter wichtiger Baustein für die Streams-API stellen die Erweiterungsmethoden (oder auch Extension-/Defender-Methods) dar. Diese erlauben es, einem Interface neue Methoden hinzuzufügen und auch gleich deren Implementierung mittels des "default" Schlüsselwortes bereitzustellen. Solange abgeleitete Klassen diese neuen Interface-Methoden nicht selbst implementieren, wird die Standardimplementierung der Methodendeklaration benutzt. Diese kann dann natürlich wieder an andere Objekte oder Klassen (statisch) delegieren. Dieses neue Feature ist viel wichtiger als es zunächst aussieht. 
+
+Zum einen erlaubt es eine viel bessere API Evolution ohne den Interface Wildwuchs wie z.b. im Eclipse SDK oder der Nutzung von abstrakten Klassen mit Standardimplementierungen von Methoden (die dann durch die Mehrfahrvererbungsregeln die Entwicklung von komplexeren Plugins verhindern). Das schöne ist: das gilt nicht nur für neue API-Interfaces sondern auch besonders für schon lange existierende.
+
+So musste z.B: für die massive Erweiterung der Collection-API um Lambdas, interne Iteratoren und Streams keine zweites, inkompatibles Collection 2.0 (oder 3.0) Paket erstellt werden, das inkompatibel zu allem existierenden Code wäre (und damit wahrscheinlich keinen grossen Zuspruch gefunden hätte). Stattdessen konnten Interfaces wie Iterable, Collection usw. einfach mit neuen Methoden sowie einer Standardimplementierung erweitert werden die die notwendigen Anwendungsfälle abdeckt.
+
+Hier zwei Beispiele.
+
+interface java.util.Map<K,V> {
+	void forEach(BiBlock<? super K, ? super V> block) default {
+        for (Map.Entry<K, V> entry : entrySet())
+            block.apply(entry.getKey(), entry.getValue());
+    }
+}
+
+interface java.util.Collection<E> extends .... Streamable<Stream<E>> ... {
+	@Override
+    Stream<E> stream() default {
+        return Streams.stream(this);
+    }
+}	
+
+Wobei "Streams.stream()" wie folgt implementiert ist.
+
+public static<T> Stream<T> stream(Collection<T> source) {
+    return new ValuePipeline<>(new TraversableStreamAccessor<>(source, false, false, source.size()));
+}
+
+Und das führt uns auch schon tief in die Implementierung der Streams API zu deren Erforschung ich jetzt einladen will.
+
+Streams-API
+
+Der funktionale Ansatz der Streams API besteht aus einigen interessanten konzeptionellen Bausteinen. Eine der wichtigsten Änderungen ist der Wechsel von einem "externen Iterator" (der klassische java.util.Iterator bzw. java.lang.Iterable) der Nachfolger von java.util.Enumeration die mittels der bekannten "boolean hasNext()" und "T next()" Methoden von aussen angetrieben werden zu einem "intenren Iterator" bei dem die Steuerung der Iteration, Anwendung von Operationen und Konsumierung der Daten dem Container obliegt.
+
+Die wenigen Vorteile externer Iteratoren liegen darin, dass sie weitergereicht werden können und die API relativ einfach ist.
+Es gibt viel mehr Nachteile der externen Iteratoren:
+- zustandsbehaftet
+- Steuerung obliegt dem Nutzer nicht dem Container
+- nicht intern optimierbar (parallelisierung)
+- massive Objekterzeugung (liefert Objekte aus)
+- nicht komponierbar (zusammensetzbar) oder verkettbar
+- 
+
+Ein paar potentielle Optimierungen die entweder so schon im JDK durchgeführt werden oder leicht in Zukunft möglich sind (durch den internen Iterator sind die Details gekapselt). 
+Für die Iteration müssen keine Objekte erzeugt werden (Unterstützung für primitive Typen) oder angebotene Objekte könnten wiederverwendet werden. Die Iteration kann abhängig von der internen Speicherstruktur der Container in Batches erfolgen (z.b. ein Bucket einer Hash-Map auf einmal) und so z.B. Speichermanagement der CPU unterstützen. Die Iteration kann parallelisiert erfolgen (zur Zeit explizit über "parallel()") und somit vorhandene CPU-Resourcen besser ausnutzen. Wie beim Scala "view" können aufgerufene Operationen in eine oder wenige komplexere Operationen kombiniert werden die dann nicht in mehreren Schritten, sondern auf einmal ausgeführt werden können (Z.B filter() und map() oder sorted() und limit() in ein Top-n-Select). Eine andere interessante Option ist, nicht mit der Iteration zu beginnen bevor nicht das erste Element konsumiert wird und dann auch weiterhin nur jedes konsumierte Element (oder Batch) durch den Strom (Stream) zu saugen (lazy evaluation). 
+
+Das sind nur einige, wenige Optimierungen, die durch die Kapselung der Stream-API ermöglicht werden.
+
+Wie ist die Stream API jetzt implementiert: Die Basis-Interfaces wie java.util.Collection und java.util.Map erben von Streamable<Stream<E>> welches die Methode "stream()" zur Erzeugung von Streams zur Verfügung stellt.
+
+java.util.Collection {
+	Stream<E> stream() default { return Streams.stream(this); }
+}
+
+Diese Methode ist standardmässig im Interface implementiert, hat aber spezielle Implementierungen in Subklassen, z.B. in ArrayList<E>
+
+public Stream<E> stream() {
+    return Streams.stream((E[]) elementData, 0, size);
+}
+
+"Streams.stream()" stellt nun wiederum eine "ValuePipeline" Instanz zur Verfügung, die das "Stream" Interface implementiert und einen konkreten "Accessor" für die darunterliegende Datenstruktur (Feld, Collection, Map) kapselt. 
+
+Der Accessor liefert einige Informationen über die Datenstruktur, wie z.B. Größe (oder eine Größenschätzung), einen Iterator für den "Rest" des Streams, und die Form (Werte oder Schlüssel-Wert-Paare) des Streams.  Eine wichtige Methode stellt "StreamAccessor.into(Sink<T, ?, ?> sink)" dar, wobei eine "Sink" einen Konsumenten (Block<T>) von Elementen darstellt. Dieser Konsument kann wiederverwendbar sein, dann werden mittels "begin" und "end" die Blöcke markiert. 
+
+Sinks können mit weiteren, folgenden "downstream" Konsumenten verknüpft werden um die Pipeline des Streams zu bilden. Das bringt uns zurück zur ValuePipeline, die eine Implementierung der "AbstractPipeline<I, O>" darstellt, wobei I für Eingabe und O für Ausgabeelement-typen stehen. 
+
+Pipelines verknüpfen wiederum vorhergehende Pipelines mit einer neuen Operation und formen somit einen Stream (Pipeline) der Länge n+1.
+
+z.B. 
+// O ist der Ausgabetyp der Pipeline und der Eingabetyp der neuen Operation
+// V ist der Ausgabetyp der neuen Operation
+protected<V> Stream<V> AbstractPipeline.chainValue(IntermediateOp<O,V> op) {
+   return new ValuePipeline<>(this, op);
+}
+
+Die exemplarische Abbildung der Implementierung einer einfachen Operation "filter()" des Stream Interfaces in ValuePipeline sieht wie folgt aus, andere Operationen verhalten sich äquivalent:
+
+public Stream<O> ValuePipeline.filter(Predicate<? super O> predicate) {
+    return chainValue(new FilterOp<>(predicate));
+}
+
+Der Callback des Awendungscodes "predicate" wird in einer "FilterOp" Operation geproxied damit die API von "chainValue" bedient wird. Die Implementierung von FilterOp, die selbst zustandlos ist (in Bezug auf den Stream), speichert das Prädikat und wendet es dann bei Bedarf an, wie z.B in "wrapSink", die für einen gegebenen Konsumenten nur Elemente weiterreicht, die der Bedingung des Prädikats auch entsprechen.
+
+public Sink<T, ?, ?> wrapSink(final Sink sink) {
+    return new Sink.ChainedValue<T>(sink) {
+        public void accept(T t) {
+            if (predicate.test(t)) 
+                downstream.accept(t);
+        }
+    };
+}
+
+In diesem Fall hier ändert sich der Typ der Pipeline nicht da nur eine Filterung vorgenommen wird, bei "map()" ist das anders:
+
+public <V> Stream<V> map(Mapper<? super O, ? extends V> mapper) {
+    return chainValue(new MapOp<>(mapper));
+}
+public Sink<T, ?, ?> wrapSink(Sink sink) {
+    return new Sink.ChainedValue<T>(sink) {
+        public void accept(T t) {
+            downstream.accept(mapper.map(t));
+        }
+    };
+}
+
+
+Bei allen Operationen und Verknüpfungen ist zu beachten, das ausser Checks auf Null, Typenkompatibilität und Form des Stromes zu diesem nirgendwo eine Aktivität bezüglich des Streams ausgeführt wird. Dies ist alles nur "Setup", wie bei einer "Rube Goldberg" Maschine [RubeGoldberg] werden nur alle Bestandteile in Position gebracht, um dann bei Inbetriebnahme fleissig vor sich hin zu werkeln.
+
+Wie kommt nun der eigentliche Konsument ins Spiel? "forEach()" oder "iterator()" sind eine Operation auf dem Stream interface, um einen Konsumenten an das Ende des Streams anzukoppeln. Hier am Beispiel von "forEach()" gezeigt. Anders als sonst, ist die Operation die an die Pipeline angehängt wird, keine "IntermediateOp" die einen Schritt im Verarbeitungsstrom darstellt, sondern eine finale, terminale Operation. In diesem Fall wird der übergebene "Block" (Callback ohne Rückgabewert, nur mit Seiteneffekt) gekapselt in einer TerminalSink an die "pipeline()" Methode der AbstractPipeline übergeben. 
+
+public void forEach(Block<? super O> block) {
+    pipeline(ForEachOp.make(block));
+}
+
+public static<T> ForEachOp<T> ForEachOp.make(final Block<? super T> block) {
+    return new ForEachOp<>(new TerminalSink<T, Void>() {
+        public void accept(T t) {
+            block.apply(t);
+        }
+    }
+}
+
+public<V> V AbstractPipeline.pipeline(TerminalOp<O, V> terminal) {
+    return evaluate(terminal);
+}
+
+Diese macht dann eine Fallunterscheidung nach paralleler oder sequentieller Ausführung und aggregiert dann in "evaluateSerial" alle zwischenzeitlich angesammelten Operationen und deren Attribute.
+Für unendliche Streams, die dank der verzögerten Ausführung (lazy Evaluation) z.B. für die Kalkulation von Reihen genutzt werden können, werden nichtterminierende Berechnungen verhindert. 
+
+// TODO discuss
+protected<V> V AbstractPipeline.evaluateSerial(TerminalOp<U, V> terminal) {
+
+    IntermediateOp[] ops = new IntermediateOp[depth];
+    boolean intermediateShortCircuit = false;
+    AbstractPipeline p = this;
+    int flags = source.getStreamFlags();
+    for (int i=depth-1; i >= 0; i--) {
+        intermediateShortCircuit |= p.op.isShortCircuit();
+        ops[i] = p.op;
+        flags = ops[i].getStreamFlags(flags);
+        p = p.upstream;
+    }
+    boolean infinite = (flags & Stream.FLAG_INFINITE) != 0;
+
+    if (infinite && !terminal.isShortCircuit()) {
+        throw new IllegalStateException("An stream of known infinite size is input to a non-short-circuiting terminal operation");
+    }
+
+(I. Pull Traversal) Bestimmte Operationen brechen die Evaluierung des Streams ab, diese werden als "Kurzschluss" oder short-circuit Operationen behandelt. Beispiel dafür sind "limit(), skip(), findFirst(), findAny() oder match()" die alle nur ein fixe Anzahl von Ergebnissen (0..n Elemente oder Wahrheitswert) für die komplette Streamverarbeitung liefern. Sowohl für diese Operatoren als auch die Evaluation eines Streams als Iterator wird durch die Senke der terminalen Operation durchgeführt. Im Endeffekt werden alle restlichen Elemente des Streams als ein Batch-Segment aus der "iterator()" Methode gezogen und in die terminale Senke gespeist. Der Iterator ergibt sich für den ersten Schritt der Pipeline aus dem "iterator()" des Source-Accessors und sonst aus der aktuellen Operation ("op") des aktuellen Pipeline-Schritt angewandt auf den "iterator()" des vorherigen Schritts. Somit ist wie beim Matroschka-Prinzip die orginale Quelle über alle Schritte der Pipeline mit ebensovielen Schichten von Pipeline-Operationen umgeben. In der Illustration ist es in der "iterator()" Kette dargestellt.
+
+
+    if (intermediateShortCircuit || terminal.isShortCircuit() || iterator != null) {
+        // I. Pull traversal
+	    TerminalSink<T,U> terminalSink = terminal.sink();
+	    terminalSink.begin(-1); // undefiniert grosser Batch
+        Iterator<U> iterator = iterator();
+		// alle restlichen iterator-elemente werden in die Senke geschoben
+	    while (iterator.hasNext()) 
+	        terminalSink.accept(iterator.next());
+	    terminalSink.end();
+	    return terminalSink.getAndClearState();
+    }
+
+(II. Push Traversal) Alternativ werden die Elemente nicht aus einem Iterator gezogen, sondern in eine Kette von Senken bis zur finalen Senke geschoben. Die originale Quelle aus dem Stream-Accessor (source) kann mittels "collection.into(sink)" ihre Elemente einem Konsumenten bereitstellen. In diesem Fall ist es die Kette von Senken bis zur finalen Senke die durch Kapselung der jeweils nachgelagerten Senke durch die zugehörige Operation des Pipeline-Schrittes. (IntermediateOp.wrapSink). Jede Operation implementiert das "wrapSink" individuell für ihre Semantik, wie schon weiter oben erklärt für "FilterOp" und "MapOp". Durch die finale "getAndClearState()"
+
+    else {
+        // II. Push traversal
+        TerminalSink<U, V> terminalSink = terminal.sink();
+        Sink firstSink = terminalSink;
+        for (int i=ops.length-1; i >= 0; i--) {
+            firstSink = ops[i].wrapSink(firstSink);
+        }
+        source.into(firstSink);
+        return terminalSink.getAndClearState();
+    }
+}
+
+TODO TerminalSink.getAndClearState();
+
+Parallelisierung von Streams
+
+Streams bieten die Möglichkeit zwischen sequentieller und paralleler Abarbeitung (mittels "sequential()" und "parallel()") umzuschalten. Die sequentielle Abarbeitung wurde schon diskutiert. Für die parallele Evaluierung werden Intervalle von zustandslosen Operationen identifiziert. Diese werden dann mittels des Fork-Join Frameworks parallel ausgeführt, terminierend mit der darauf folgenden zustandsbehafteten Operation. Das geschieht für alle aufeinanderfolgenen Intervalle. Die Nutzung von Fork Join zur Parallelisierung wurde schon in der Kolumne zum GPars diskutiert.
+
+TODO potentiell in einer separaten Kolumne, Parallelisierung von Streams: ParallelOp, ParallelOpHelper, example ForEachOp, Spliterator, AbstractTask
+
+Nach diesem Blick hinter die Kulissen möchte ich wieder einen Schritt zurück treten, mit dem Blick auf das große Ganze. Wie können Streams im täglichen Entwicklerleben helfen, Code einfacher und lesbarer zu machen und auch komplexe Berechnungen in wiederverwendbare Komponenten auszulagern. Da alle Kollektionen in Java 8 Streams anbieten und die Stream-Operationen umfangreiche Aspekte der funktionalen Listenverarbeitung umfassen, können diese in fast allen Lebenslagen angewandt werden und komplexe Berechnungen, einfach abbilden. 
+
+Und Operationen die es nicht gibt, können durch einfach Nutzung bzw. Kombination existierende Operationen und der einen oder anderen Lambda entwickelt werden. Simples Beispiel: Maximum durch Nutzung von absteigender Sortierung und limit(1) oder besser durch ein reduce mit einem minimalen Startwert im Akkumulator und einem ternären Ausdruck:
+
+int max = Arrays.asList(1, 10, 3, 100, 5).stream().reduce(0, (a, x) -> x > a ? x : a);
+
+Oder mittels der zweiten Form von Reduce die als Startwert einfach den ersten Wert der Liste benutzt:
+
+Optional<Integer> max = Arrays.asList(1, 10, 3, 100, 5).stream().reduce((a, x) -> x > a ? x : a);
+
+"Optionals" sind fast eine eigene Kolumne wert, aus funktionalen Sprachen kennt man sie als Maybe-Monaden. Jedenfalls eine interessante Alternative mit nicht-existenten oder Null-Werten umzugehen.
+
+In diesem Fall kann der Ausdruck für Max einfach einer Variablen zugewiesen werden:
+
+final BinaryOperator<Integer> maxOp = (a, x) -> x > a ? x : a;
+final Optional<Integer> max2 = Arrays.asList(1, 10, 3, 100, 5).stream().reduce(maxOp);
+
+Man kann natürlich auch die funktionalen Interfaces und Klassen direkt implementieren. Das bietet sich besonders für komplexere Aufgaben aus dem Business-Kontext an, wie Prädikate, Konverter, Filter und Regel-Bäume. 
+
+Das nicht-repräsentative Beispiel des Maximums (das natürlich als Lambda viel kompakter ist) soll für eine komplexe Business-Regel stehen, die über mehrere Zeilen mit Hilfe anderer Klassen eine anspruchsvollere Berechnung oder Entscheidung durchführt.
+
+static class Max<T extends Number & Comparable<T>> implements BinaryOperator<T> {
+    public T operate(T accu, T value) {
+        return value.compareTo(accu) > 0 ? value : accu;
+    }
+}
+
+final Optional<Integer> max = Arrays.asList(1, 10, 3, 100, 5).stream().reduce(new Max<>());
+
+Leider ist es trotz Erweiterungsmethoden für Interfaces noch nicht möglich, neue Funktionen zu existierenden Klassen hinzuzufügen, das wäre nur über eine entsprechende Subklasse von Stream möglich, die für die jeweilige Anforderung die notwendigen Operationen implementiert und in diesen "iterator()", "wrapSink()" korrekt umsetzt und Meta-Informationen bereitstellt.
+
+[libs] - guava, lambdaj, functional-java, commons-collections
+[specification] - 	http://martinfowler.com/apsupp/spec.pdf
+[RubeGoldberg] http://en.wikipedia.org/wiki/Rube_Goldberg_machine
+[java8-streams] http://blog.jooq.org/2012/04/19/exciting-ideas-in-java-8-streams/
+[java8-overview] http://www.techempower.com/blog/2013/03/26/everything-about-java-8/
+[java8] http://jdk8.java.net/download.html
+[java8-javadoc] http://download.java.net/jdk8/docs/api
+[EffectiveJava] Joshua Block, Effective Java 2nd Edition
+[FunctionalInterface] http://download.java.net/jdk8/docs/api/java/lang/FunctionalInterface.html
+[FunctionPackage] http://download.java.net/jdk8/docs/api/java/util/function/package-summary.html

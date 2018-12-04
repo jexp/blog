@@ -1,0 +1,412 @@
+== "Code"-Generierung in Java
+
+Wir alle sind es gewöhnt, Java als relativ statische Sprache zu betrachten. 
+Wir schreiben Code, dieser wird compiliert und steht dann über den ClassLoader zur Ausführung zur Verfügung.
+
+In anderen Sprachen ist es üblich, ein Programm auch nach dem initialen Laden noch zu verändern, man denke nur an JavaScript oder die Metaprogrammierung von Ruby und Groovy.
+
+Wir können das im begrenzten Rahmen auch, mittels Reflection, Virtual Proxies oder den neuen `MethodHandle` APIs.
+Einige Ansätze gehen sogar noch viel weiter, wie JRebel immer wieder beeindruckend beweist.
+
+=== Warum denn eigentlich?
+
+Für diverse Anforderungen ist es schon praktisch ausführbare Java-Klassen zur Lauf- oder Ladezeit zu erzeugen oder zu modifizieren.
+Insbesondere wenn dynamisches, oder nutzergeneriertes Verhalten nicht nur interpretiert, sondern effizient (inkl. JIT) von der JVM ausgeführt werden soll.
+
+Man denke nur man an dynamische Ausdrücke (siehe SpEL-Artikel von Thomas Darimont), Datenbankabfragen, die zur Laufzeit compiliert werden sollen.
+Oder die flexiblen Proxies von Sven Ruppert und Heinz Kabutz. Ein weiteres Beispiel sind Regeln von Rule- oder BPM-Engines oder andere externe DSLs.
+
+Weitere Anwendungsfälle sind die Generierung von Meta-Data Repräsentationen als Klassen, z.b. für Protokollformate oder Platzhalter für Datenbank-Schemata (Criteria API). 
+Spannend ist auch die Generierung von internen DSLs mit fluent Interfaces und Methoden, z.b. aus Grammatiken oder von Parsern wie zum Beispiel bei ANTLR.
+
+=== Quellcodegenerierung
+
+Mit einem Generierungsansatz kann man den Aufwand zur Pflege eines solchen Codes, der aus einer wohldefinierten Quelle reproduziert werden kann deutlich reduzieren.
+Auch wird durch einen solchen "Single-Source"-Ansatz das etwaige Auseinanderlaufen von manuell gepflegtem Code vermieden.
+
+Auch wenn das endgültige Ziel Java-Bytecode darstellt, führt der "Umweg" über Source-Code genauso zum Ziel und kann teilweise sogar verständlicher sein.
+Seit Java 6 ist in der `tools.jar` des JDK ein Laufzeitcompiler (http://docs.oracle.com/javase/7/docs/api/javax/tools/JavaCompiler.html[`javax.tools.JavaCompiler`]) enthalten, der genutzt werden kann, um Quellcode in Bytecode zu transformieren.
+Dieser kann dann direkt über ClassLoader oder mittels Instrumentierung geladen werden.
+
+Sowohl die JavaDoc des Compilers als auch http://www.javaspecialists.eu/archive/Issue180.html[Heinz Kabutz im Newsletter 180] beschreiben im Detail, wie dieser genutzt wird.
+
+// todo beispiel wenn noch platz
+// todo schaubild
+
+Wer bei der Umsetzung einer solchen Anforderung einmal mit Code-Erzeugung mittels des Verknüpfens von Strings angefangen hat, ist schnell auf die häufige Duplikation von ähnlichen Aufrufen und Fragmenten gestossen und hat sich über die fehlende Typsicherheit und Nutzung von Literalen geärgert. 
+Oft führt das zum kurzfristigen Refactoring in einem interne DSL, die dann angenehmer zu nutzen ist, aber natürlich nicht direkt zielführend für die eigentliche Aufgabe ist.
+
+Daher ist es sinnvoll zu wissen, welche nützlichen Tools es in diesem Bereich schon gibt.
+
+=== Bytecode Generierung
+
+Für manche Anwendungsfälle, besonders aber in Bibliotheken oder Java-Agenten, wo man schnell zur Lauf- oder Ladezeit Integrationscode generieren muss, bietet sich eher die Bytecode Generierung an.
+Genauso bei Anreicherung von existierenden Systemen zur Laufzeit z.b. mit den klassischen Querschnittsfunktionalitäten wie Auditing oder Sicherheitschecks mittels AspectJ ist Bytecode unabdingbar. 
+
+Die JVM ist eine Stack-Maschine ihr Bytecode ist nicht sonderlich schwer zu lesen, man muss nur gut aufpassen was auf den Stack bewegt wird und was wieder herunterkommt.
+Er ist langatmiger als Assembler besonders wegen der Typ- und Methodenliterale.
+
+Zum Glück muss man keinen reinen Bytecode manuell eingeben.
+Viele der Bytecode-Generatoren machen es dem Nutzer aber viel einfacher, da sie diesen entweder über eine DSL oder über das Umwandeln von Code-Fragmenten erzeugen.
+
+Einen anderen, sehr beeindruckenden Weg mit extrem effizientem Ergebnis hatte ich vor einer Weile mit dem AST-Transformer + Compiler Duo Truffle + Graal vorgestellt, das uns hoffentlich in Java 9 dann offiziell beehren wird.
+
+Aus all diesen Gründen, möchte ich heute einmal verschiedene Ansätze zur Codegenerierung für Java vorstellen.
+
+=== Tools
+
+Die Liste der verfügbaren Tools ist erstaunlich lang und bei weitem nicht vollständig.
+Auch wenn es keine alltägliche Aufgabe ist, scheint der Schuh doch oft genug gedrückt zu haben.
+Verschiedene Autoren haben eine Menge Bibliotheken mit unterschiedlichen Ansätzen veröffentlicht, um den diversen Anforderungen gerecht zu werden.
+
+[%header]
+|===
+| Name | Art der Generierung | aktiv? | beschrieben 
+| ASM | Bytecode | ja | ja 
+| CGLib | Bytecode | nein | ja 
+| ByteBuddy | Bytecode | ja | ja
+| Janino | Bytecode,Compiler | kaum | nein
+| AspectJ | Bytecode, Weaving | ja | minimal
+| JavaAssist | Bytecode | ja | ja 
+| JavaPoet | Quellcode  | ja | ja
+| Groovy | Metaprogrammierung | ja | nein
+| javax.tools.JavaCompiler | Bytecode | ja | nein
+| Reflection | Laufzeitinteraktion | ja | nein
+| XText | Quellcode | ja | nein
+|===
+
+
+=== AspectJ
+
+AspectJ wird schon seit 2001 eingesetzt um Java-Systeme nachträglich durch dynamische und Querschnittsfunktionalitäten anzureichern.
+Es kann zur Compile- oder Ladezeitpunkt generierten Bytecode in existierende Klassen hineinweben und damit alle Aspekte der Ausführung beeinflussen.
+Von Feldzugriff über Instanziierung bis zur Methodenausführung.
+
+In *Aspekten* werden die AspektJ Bestandteile definiert. 
+Man kann mit *Erweiterungsmethoden* neue Funktionalität definieren. 
+Über sogenannte *Pointcuts* werden die Stellen (*Join Points*) festgelegt an denen Funktionalität angebunden werden soll.
+Und *Advices* legen fest welche Funktionalität an einem Pointcut auf welche Art und Weise aktiv wird (davor, danach, stattdessen).
+
+AspectJ hatte lange Jahre eine sehr starke Anwendung und Verbreitung (u.a. im SpringFramework), es ist jetzt aber eher in den Hintergrund getreten.
+
+=== ASM
+
+ASM ist eines der ältesten (seit 2000) und bewährtesten Tools zur Bytecode-Manipulation.
+Wegen seiner Kompaktheit und Geschwindigkeit wird es innerhalb vieler anderer Frameworks eingesetzt.
+Es liegt mittlerweile in Version 5 vor.
+Mit ASM kann sowohl direkt Bytecode erzeugt, als auch Transformationen existierender Klassen und Methoden vorgenommen werden.
+Diese basieren auf einem extrem schnellen Bytecode-Scanner, der ereignisgesteuert über eine Visitor-API Informationen an den Aufrufer zurückliefert, aber auch erlaubt währenddessen den Bytecode zu modifizieren.
+Dabei werden gängige Transformationen und Analysen schon mitgeliefert.
+
+Ausgehend vom `Classreader` wird im `ClassVisitor` für jeden Aspekt der Klasse (Felder, Constructor, Methoden, Annotationen usw) eine Callback-Methode aufgerufen, z.b. `visitField` oder `visitMethod`. Einige dieser Methoden geben wieder eigene Vistoren (z.b. `MethodVisitor`,`InstructionAdapter`)  zurück die dann weiterhin aufgerufen werden um tiefere Details zu instrumentieren.
+
+ASM bringt in neueren Versionen ein Tool `ASMifier` mit, das für eine gegebene Klasse, die notwendigen ASM Aufrufe generiert, um eine ebensolche Klasse zu erzeugen. 
+Es wird mittels `java -cp asm-all-<version>.jar org.objectweb.asm.util.ASMifier java.lang.Integer > IntegerVisitor.java` aufgerufen.
+
+Prinzipiell läuft die Erzeugung von Bytecode mit ASM so ab:
+
+1. Erzeugung eines `ClassWriter`
+2. Aufruf von `cw.visit()` und Übergabe von FQN, Superklassen, Interfaces, Modifiern usw.
+3. Für jedes Feld: Aufruf von `cw.visitField(modifier, name, typ, ...)` und Zuweisung an einen `FieldVisitor`
+4. Aufruf von `fv.visit*()` zur Übergabe des Initialisierungscodes
+5. Für jede Methode: Aufruf von `cw.visitMethod(modifier, name, type descriptor, signatur, exceptions)` und Zuweisung an einen `MethodVisitor`
+6. Aufruf von `mv.visit*()` zur Übergabe von Instruktionen für den Methodenrumpf
+7. Aufruf von `cw.visitEnd()`
+8. Aufruf von `cw.toByteArray()` zum Erhalten des Bytecodes
+
+Wenn Klassen nur partiell geändert werden sollen, dann erfolgt das über angepasste Instanzen der Visitoren, die in den entsprechenden `visit*` Methoden, vor, nach oder statt der Superklassen-Aufrufe die entsprechenden Bytecode-Instrumentierungs-Aufrufe durchführen.
+
+[source,java]
+----
+// Ausgabe des Methodennamens in jeder Methode
+... extends MethodVisitor {
+  @Override
+  public void visitCode() {
+      super.visitFieldInsn(GETSTATIC, "java/lang/System", 
+                          "out", "Ljava/io/PrintStream;");
+      super.visitLdcInsn("method: "+methodName);
+      super.visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", 
+                             "println", "(Ljava/lang/String;)V");
+      super.visitCode();
+  }
+}
+----
+
+=== Javaassist
+
+Javassist, jetzt verfügbar in Version 3.20 macht die Generierung von Bytecode einfach, da er auch Java Source-Code Fragmente verarbeitet, die man den API Methoden als Strings übergibt, welche dann direkt umgewandelt werden.
+Der generierte Bytecode kann dann an spezifischen Stellen innerhalb von Methoden oder Klassen eingefügt werden.
+Es gibt auch eine reine Bytecode API, die die direkte Manipulation erlaubt.
+Klassen können zur Laufzeit geändert, aber auch beim Laden durch die JVM modifiziert werden. 
+
+Das ganze basiert auf einer objektorientierten Repräsentation von Klassen (`CtClass`), Methoden (`CtMethod`) und Feldern (`CtField`), die direkt inspiziert, manipuliert und erzeugt werden können. 
+Es gibt einige Einschränkungen, z.b. können keine Methoden gelöscht (sondern nur umbenannt) und auch nicht um Parameter ergänzt werden (stattdessen Overloading und Delegation).
+Neuer Code kann in Methoden am Anfang, am Ende, an bestimmten Zeilen und als umschliessender `try-catch` - Block eingefügt werden. 
+Der Rumpf der Methode kann auch komplett ersetzt werden.
+// Es ist auch möglich bestimmte Ausdrücke in Rümpfen von Methoden durch Alternativen zu ersetzen, dafür wird dann ein `ExprEditor` deklariert.
+// Methoden-, Konstrukturaufrufe sowie Feldzugriffe können auch abgefangen und angepasst werden. 
+Im übergebenen Quellcode können Substitutionen wie z.B. `$0,$1` für Parameter oder `$type` für den Ergebnistyp oder `$_` für das bisherige Ergebnis genutzt werden.
+
+Der Zugriff auf Klassendefinitionen (`CtClass`) über einen `ClassPool`, der sich auch um weitere Aspekte wie Klassenpfade kümmert.
+Das Ergebnis der Manipulation kann dann auf diverse Weise in Bytecode bzw. geladene Klassen überführt werden.
+
+[source,java]
+----
+ClassPool pool = ClassPool.getDefault();
+CtClass cc = pool.get("company.Person");
+// ab hier kann die Klasse modifiziert werden
+cc.setSuperclass(pool.get("company.Entity"));
+
+CtMethod m = cc.getDeclaredMethod("call");
+m.insertBefore("{ System.out.println(\"Are you sure you want to call\"+$0+\"?\"); }");
+
+cc.writeFile();
+byte[] bytes = cc.toBytecode();
+// direkt Klasse erzeugen
+Class clazz = cc.toClass();
+----
+
+Zugriff auf die darunterliegende Bytecodeinformationen kann über `ctClass.getClassFile()` und `ctMethod.getMethodInfo()` erlangt werden. 
+
+Per se können Klassen nur modifiziert werden, wenn sie noch nicht geladen wurden.
+Also entweder vorher, oder während des Ladens mit einem `ClassTransformer` [Bernd Müller: ClassTransformer].
+Mit einem Java-Agent mit der Instrumentation-API und `redefineClasses`, könnte man das Neuladen einer Klasse erzwingen, ebenso mit der Debugger-API, oder mit der Neuerzeugung des ClassLoaders der die Klasse bisher geladen hat.
+Aber natürlich nur, wenn sie den Regeln des JVM-Hot-Reloads entspricht.
+Das alles wird in Bernd Müllers Vortrag gut erklärt.
+
+Zur Zeit unterstützt der Javaassist Compiler keine Enums und Generics, ebensowenig innere (anonyme) Klassen. Zugriff darauf ist nur über die darunterliegenden Bytecode-APIs möglich.
+
+
+=== ByteBuddy
+
+ByteBuddy ist eine moderne, kleine aber schnelle Integrationsbibliothek, von Rafael Winterhalter die darauf spezialisiert ist, existierenden Code miteinander zu verbinden.
+Sie benutzt ASM unter der Haube, um Bytecode zu manipulieren.
+Um die Komplexität des Erzeugens von Bytecode zu vermindern wird zumeist an in statischen Methoden vorliegende Implementierungen delegiert.
+
+Bytebuddy benutzt eine kompakte DSL, um die Verknüpfung von Klassendefinition, Ziel und die neuen Aufrufe zu beschreiben.
+Dabei werden oft Annotationen genutzt um Ziele der Anpassung zu markieren.
+Insofern ähnelt es etwas AspectJ nur dass hier eine interne Java DSL zum Einsatz kommt.
+
+Hier als Beispiel, die Implementation einer einfachen Absicherung von annotierten Methoden für eine notwendige Rolle.
+
+[source,java]
+----
+class ByteBuddySecurityLibrary implements SecurityLibrary {
+ 
+  // "Speicher" für aktuellen User
+  public static User currentUser = User.anonymous;
+ 
+  @Override
+  public  Class<? extends T> secure(Class type) {
+    return new ByteBuddy()
+      // mit @Secured annotierte Mehoden
+      .method(isAnnotatedBy(Secured.class))
+      // Delegation an diese ByteBuddySecurityLibrary.intercept
+      .intercept(MethodDelegation.to(ByteBuddySecurityLibrary.class))
+      .make()
+      .load(type.getClassLoader(), ClassLoadingStrategy.Default.INJECTION)
+      .getLoaded();
+  }
+ 
+  @RuntimeType
+  public static Object intercept(@SuperCall Callable<?> superMethod,
+                                 @Origin Method method) throws Exception {
+    // Abfangen des Aufrufs und Prüfung der Zugriffsrechte
+    Role role = method.getAnnotation(Secured.class).requiredRole();
+    if (currentUser.hasRole(role)) return superMethod.call();
+    throw new SecurityException(method, role, user);
+  }
+}
+----
+// Aufruf mittels
+// ByteBuddySecurityLibrary.secure(MyService.class)
+
+=== JavaPoet
+
+JavaPoet von Square bietet eine interne DSL zum Generieren von Java-Code. 
+Sie nutzt Fluent-Interfaces, um Methoden, Parameter, Felder, Annotationen, Klassen und Dateien zu generieren.
+Im Kern sind die genutzten Spec-Objekte aber unveränderlich und können so partiell und mehrfach genutzt und mit neuen Informationen abgeleitet werden.
+Dabei wird soweit wie möglich mit typsicheren Konstanten und Literalen (z.b. Klassenliterale) gearbeitet.
+
+[source,java]
+----
+// public static void main(String[] args) { System.out.println("Hello JavaPoet!"); }
+MethodSpec main = MethodSpec.methodBuilder("main")
+    .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+    .returns(void.class)
+    .addParameter(String[].class, "args")
+    .addStatement("$T.out.println($S)", System.class, "Hello, JavaPoet!")
+    .build();
+
+// "HelloWorld" Klasse mit der "main" Methode
+TypeSpec helloWorld = TypeSpec.classBuilder("HelloWorld")
+    .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
+    .addMethod(main)
+    .build();
+
+// .java Datei mit import Deklarationen und Package
+JavaFile javaFile = JavaFile.builder("com.example.helloworld", helloWorld)
+    .build();
+
+javaFile.writeTo(System.out);
+----
+
+Für Methodenrümpfe und Ausdrücke werden Strings für Code-Fragmente genutzt.
+Um den Komfort dabei zu erhöhen, gibt es auch da eine kleine Fluent-DSL die Ausdrücke zusammenstellt und sich z.B. um Einrückungen, Umbrüche und Semikolons kümmert.
+
+[source,java]
+----
+private MethodSpec computeRange(String name, int from, int to, String op) {
+  return MethodSpec.methodBuilder(name)
+      .returns(int.class)
+      .addStatement("int result = 0")
+      .beginControlFlow("for (int i = $L; i < $L; i++)", from, to)
+      .addStatement("result = result $L i", op)
+      .endControlFlow()
+      .addStatement("return result")
+      .build();
+}
+----
+
+In Code-Strings kann man semantische Platzhalter nutzen, die unterschiedlich interpretiert werden.
+Somit kann eine Typprüfung mit den übergebenen Parametern vorgenommen werden.
+
+* `$L` für Literale, 
+* `$S` für Strings mit Anführungszeichen, Escapes und Umbrüchen.
+* `$T` für Typen aus Klassenliteralen oder `ClassName` Definitionen, mit automatischer `import` Deklaration am Dateianfang.
+* `$N` wird genutzt um auf Namen anderer Elemente (Spec-Objekte) der generierten Klasse oder Methode zuzugreifen.
+* Für den Quellcode eines Spec-Objektes benutzt man dieses ebenfalls mit `$L`.
+
+// TODO Rätsel, welche Methode wird hier generiert, Idee: Arrays.asList()
+
+JavaPoet unterstützt auch die Erzeugung von Enums und inneren anonymen Klassen.
+
+Ich persönlich fände es schön, wenn JavaPoet einige API Bequemlichkeiten mitbringen würde, das würde duplikaten Code einsparen.
+Z.b. `TypeSpec.publicClassBuilder`, `addPrivateMethod`,`addPrivateFieldWithGetter` `addIfStatement` usw.
+
+=== CGLib
+
+CGLib ist eine schon etwas in die Jahre gekommene, abstraktere API um Bytecode zu erzeugen. 
+Sie wurde bisher zum Beispiel in Hibernate für das Anreichern von Entitäten für das dynamische Nachladen und andere Funktionalitäten genutzt.
+
+Der häufigste Anwendungsfall ist die Erzeugung von Subklassen existierender Klassen, in denen Verhalten von nicht-finalen Methoden verändert wird, ähnlich wie bei (dynamischen) Proxies bei denen CGLib diverse Anleihen nimmt.
+Mittels der `Enhancer` API ist das relativ einfach möglich.
+
+[source,java]
+----
+Enhancer enhancer = new Enhancer();
+// welche Klasse soll abgeleitet werden
+enhancer.setSuperclass(MyFormatter.class);
+// welcher callback für alle Methoden
+// hier mit festem Rückgabewert
+enhancer.setCallback(new MethodInterceptor() {
+  public Object intercept(Object obj, Method method, 
+   Object[] args, MethodProxy proxy) throws Throwable {
+    if(method.getDeclaringClass() != Object.class && 
+              method.getReturnType() == String.class) {
+      return "Fixed Format";
+    } else {
+      return proxy.invokeSuper(obj, args);
+    }
+  }
+});
+Formatter proxy = (Formatter) enhancer.create();
+proxy.format(new Date()) -> "Fixed Format"
+----
+
+Neben diesem mächtigen aber aufwändigen `MethodInterceptor` gibt es für andere Einsatzfälle alternative Callbacks, wie den effizienten `InvocationHandler` sowie den simplistischen `FixedValue`-Callback.
+
+Die Dokumentation für CGLib ist ziemlich spärlich.
+Lustigerweise stammt die ausführlichste Beschreibung, das "missing Manual" aus 2013 von Rafael Winterhalter, dem Autor von ByteBuddy.
+
+// === Janino
+
+=== Fazit
+
+Es gibt noch weitere Ansätze, wie die modellgetriebene Softwareentwicklung, die aus detailliert spezifizierten Modellen große Teile des Basisquelltexts (und andere Artefakte) eines Projekts generiert, der dann mittels Konfiguration, Ableitung oder Delegation konkretisiert wird. 
+Das geht jedoch weit über das hinaus was ich hier vorstelle.
+
+Wie jede andere Methode sollte man Codegenerierung nur bewusst dann einsetzen, wenn es wirklich notwendig ist, und der Nutzen den Aufwand weit überwiegt. 
+Dessen Einsatz zu übertreiben schadet eher als das es hilft.
+Ein wichtiger Aspekt ist die Wartbarkeit. 
+Niemand will generierten Code warten.
+Daher sollte dieser in jedem Build neu erzeugt und nicht in die Versionsverwaltung eingecheckt werden.
+
+
+=== Referenzen
+
+* [Winterhalter Code Generation] http://zeroturnaround.com/rebellabs/how-to-make-java-more-dynamic-with-runtime-code-generation/
+* [Winterhalter ByteBuddy] http://zeroturnaround.com/rebellabs/how-my-new-friend-byte-buddy-enables-annotation-driven-java-runtime-code-generation/
+* [ByteBuddy Tutorial - Security Library] http://bytebuddy.net/#/tutorial
+* [Annotation Processing] https://deors.wordpress.com/2011/10/31/annotation-generators/
+* [Javaassist Tutorial] http://jboss-javassist.github.io/javassist/tutorial/tutorial.html
+* [Bernd Müller: ClassTransformer] http://www.jug-ostfalen.de/assets/wp/2014/08/jug-classloader.pdf
+* [ASM-Tutorial] http://download.forge.objectweb.org/asm/asm4-guide.pdf
+* [ASM-Intro] http://www.javacodegeeks.com/2012/02/manipulating-java-class-files-with-asm.html
+* [AspectJ Programming Guide] https://www.eclipse.org/aspectj/doc/released/progguide/
+* [Groovy Metaprogrammierung] http://www.groovy-lang.org/metaprogramming.html
+* [Hunger Truffle / Graal JS xx/xx]
+* [Janino Homepage] http://unkrig.de/w/Janino
+* [Janino Tutorial] https://today.java.net/pub/a/today/2007/02/15/tackling-performance-problems-with-janino.html
+* [CGLib Tutorial] https://github.com/cglib/cglib/wiki/Tutorial
+* [Kabutz Source Compiler]> http://www.javaspecialists.eu/archive/Issue180.html
+* [Oracle Java Proxy] http://docs.oracle.com/javase/7/docs/api/java/lang/reflect/Proxy.html
+* [Dynamic Proxy Tutorial] http://tutorials.jenkov.com/java-reflection/dynamic-proxies.html
+* [Dynamic Proxy Tutorial DeveloperWorks] http://www.ibm.com/developerworks/library/j-jtp08305/
+* [JavaPoet Dokumentation] https://github.com/square/javapoet/blob/master/README.md
+* [JavaPoet Ankündigugn] https://corner.squareup.com/2015/01/javapoet.html
+* [Kabutz, Ruppert Buch: Dynamic Proxies] http://www.amazon.de/Dynamic-Proxies-Dr-Heinz-Kabutz/dp/3868021531
+* [Kabutz, Ruppert Code-Generierung für Proxies] https://jaxenter.de/es-werde-code-13426
+
+////
+
+
+- - -
+
+
+Wofür?
+
+Sven Rupperts Vortrag zu Proxies (Virtuel, Dynamischen) beim JUG Saxony-Day
+
+Unterscheidung:
+
+- Interpreted Code
+- Source Code + Compile
+- Bytecode generation
+
+
+Java proxies
+The Java Class Library comes with a proxy toolkit that allows for the creation of classes that implement a given set of interfaces. This built-in proxy supplier is handy but also very limited. The above mentioned security framework could for example not be implemented this way since we want to extend classes and not interfaces.
+
+cglib
+The code generation library was implemented during the early years of Java and it did unfortunately not keep up with the development of the Java platform. Nevertheless, cglib remains a quite powerful library but its active development became rather vague. For this reason, many of its users moved away from cglib.
+
+Javassist
+This library comes with a compiler that takes strings containing Java source code which are translated into Java byte code during the runtime of an application. This is very ambitious and in principle a great idea since Java source code is obviously a great way for describing Java classes. However, the Javassist compiler does not compare to the javac compiler in its functionality and allows for easy mistakes when dynamically composing strings to implement more complex logic. Additionally, Javassist comes with a proxy library which is similar to the JCL's proxy utilities but allows extending classes and is not limited to interfaces. The scope of Javassist's proxy tools remain however equally limited in its API and functionality.
+
+http://www.amazon.de/Dynamic-Proxies-Dr-Heinz-Kabutz/dp/3868021531
+
+https://jaxenter.de/es-werde-code-13426 -> source code generirung und compilierung
+
+
+=== Anwendungsfälle
+
+- Hibernate & Co
+- Spring Proxies
+- Subklassen
+- Dynamische
+- cross-cutting concerns
+- expression languages
+- high performance database queries
+
+////
+
+////
+Javassist enables Java programs to define a new class at runtime and to modify a class file when the JVM loads it. Unlike other similar bytecode editors, Javassist provides two levels of API: source level and bytecode level. Using the source-level API, programmers can edit a class file without knowledge of the specifications of the Java bytecode; the whole API is designed with only the vocabulary of the Java language. Programmers can even specify inserted bytecode in the form of Java source text; Javassist compiles it on the fly. On the other hand, the bytecode-level API allows the users to directly edit a class file as other editors.
+
+Javassist (Java Programming Assistant) makes Java bytecode manipulation simple. It is a class library for editing bytecodes in Java; it enables Java programs to define a new class at runtime and to modify a class file when the JVM loads it. Unlike other similar bytecode editors, Javassist provides two levels of API: source level and bytecode level. If the users use the source-level API, they can edit a class file without knowledge of the specifications of the Java bytecode. The whole API is designed with only the vocabulary of the Java language. You can even specify inserted bytecode in the form of source text; Javassist compiles it on the fly. On the other hand, the bytecode-level API allows the users to directly edit a class file as other editors.
+////
+////
+| ClassTransformer | 
+| AnnotationProcessing |
+////

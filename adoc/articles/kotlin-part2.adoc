@@ -1,0 +1,625 @@
+= Kotlin, die Zukunft (Teil 2)
+
+Seit der Veröffentlichung von Version 1.0 wird Kotlin zügig weiterentwickelt, das nächste Release, 1.1  wird beim Erscheinen dieser Kolumne verfügbar sein, die erste Beta von 1.1 erschien am 19. Januar 2017.
+// Apache 2
+
+Das liegt zum einen an der gewachensen Nutzergemeinschaft und der breiteren Anwendung der Sprache als auch an der deutlichen Steigerung der Unterstützung durch JetBrains (mehr als 20 Entwickler über 100 Comitter).
+Die neue C# IDEA Rider ist in Kotlin geschrieben und weitere Teile von IntelliJ IDEA und der Plattform werden umgeschrieben.
+Neben Entwicklung, Dokumentation, Support gibt es auch immer mehr Kotlin Events und Präsentationen, sogar eine Konferenz ist geplant.
+
+Die ersten vier Kotlin Bücher sind verfügbar und die beiden O'Reilly Kurse von Hadi Hariri erfreuen sich großer Beliebtheit.
+In der Kotlin Slack Gruppe tummeln sich mittlerweile schon über 5500 Nutzer, es gibt sogar einen Chat in Deutsch.
+
+Kotlin für die eigene Nutzung zu testen ist keine esoterische Angelegenheit mehr, es hat es mittlerweile auf Platz 87 im TIOBE Index geschafft.
+Für die Entwickler der Sprache ist Feedback aus den verschiedensten Nutzergruppen wichtig, daher keine Angst und rein ins Vergnügen.
+
+Im Teil 2 unserer Betrachtungen wollen wir uns auf fortgeschrittene und neue Eigenschaften der Sprache konzentrieren, die sonst weniger Beachtung finden.
+
+== Neu in Kotlin 1.1
+
+Die quell- und binärkompatible Version Kotlin 1.1 bringt einige Neuerungen mit sich, die die Sprache noch vielfältiger einsatzfähig machen.
+Die Entwicklung wurde mittels des "Kotlin Evolution and Enhancement Process" (KEEP) vorangetrieben, der alle geplanten Änderungen in einem offenen Repository dokumentiert.
+
+Zum einen sind das Koroutinen, die eine leichtgewichtige Realisierung nebenläufiger Programmierung darstellen.
+
+Deklaration der Delegation von Methoden und Feldern einer Klasse an eine andere Instanz wird mit der `by` Syntax möglich.
+
+Typ-Aliase besonders für komplexe Signaturen von Typen, Funktionen und Tuples machen Quellcode (besonders bei Parametern) leichter lesbar.
+
+----
+typealias Multimap<K, V> = Map<K, List<V>>
+----
+
+Methodenreferenzen gibt es jetzt nicht nur statisch auf Typen, sondern auch auf Instanzen, das ist dann wie eine Fixierung (Currying) des Ziel-Objektes.
+
+----
+val validCountry: Predicate<String> = Set(countries)::contains
+validCountry("DE")
+----
+
+Bisher konnten Datenklassen `data class` keine Vererbungshierarchien eingehen, das ändert sich in 1.1., so dass gemeinsame Attribute von Superklassen übernommen werden können.
+Diese Funktionalität sollte trotzdem mit Vorsicht verwendet werden, (tiefe) Vererbungshierarchien deuten eher auf ein Modellierungsproblem hin und sind ein Codesmell.
+
+Endlich kann die Dekomposition von Strukturen, wie Tupel für Lambdaparameter erfolgen, das macht es einfacher, selektiv Teile komplexerer Strukturen weiterzureichen.
+
+----
+myMap.forEach {
+  (k, v) -> println("$k => $v")
+}
+----
+
+Property-Zugriffsmethoden können jetzt geinlined werden, das sollte den sauberen Zugriff auf Felder deutlich beschleunigen.
+
+Und auch die funktionslokale Delegation von Properties ist jetzt möglich, z.B. für nachgelagerte Berechnungen via `lazy`.
+
+----
+fun renderStocks() {
+    val stocks: Map<String,Double> by lazy { /* Netzwerkzugriff */ }
+    if (pendingRenderRequest()) {
+        println(stocks)   // stocks wird erst jetzt ermittelt
+    }
+}
+----
+
+Kotlin 1.1 bringt ein paar nützliche neue Erweiterungsfunktionen mit:
+
+* `onEach( (T)->Unit)`, wie `forEach` für Seiteneffekte, man kann Operationen auf der Sequenz aber danach fortsetzen
+* `takeIf()` überpüft das Ziel auf eine Bedingung und gibt es dann zurück (oder `null`)
+* `also()` ist wie `apply()` nur mit `it` statt `this` für die Variable
+* `minOf`, `maxOf`
+* `Map.toMap`, `Map.toMutableMap`
+* `groupingBy` 
+* `String.toDoubleOrNull([radix])` usw.
+
+Mit Kotlin 1.1 soll volle Kompatibilität mit Java 8 (`-jvm-target 1.8`) hergestellt werden, dann werden z.B. Lambdas von Java 8 direkt benutzt um Kotlin Lambdas abzubilden, Probleme mit der Streams API beseitigt und `default` Methoden in interfaces unterstützt.
+Praktischerweise gibt es Unterstützung für die JSR-223 Script Engine, damit kann Kotlin auch dynamisch in Skripten eingesetzt werden.
+Für Java 7 und 8 gibt es angepasste Artefakte der Standardbibliothek mit Unterstützung erweiterter Funktionaliät, die in diese Java Versionen verfügbar ist.
+// und z.B. `invokedynamic` genutzt, um dynamische Aufrufe zu realisieren.
+
+Die Unterstützung für JavaScript als Zielplattform wird in 1.1 produktionsreif und holt in Bezug auf Funktionalität zur Java Implementierung auf.
+Besonders die volle Unterstützung der JavaScript Standardbibliothek, verschiedener Modulsysteme und Bibliotheken (mittels Typdefinitionen von DefinitelyTyped) sollen die Entwicklung von JavaScript Anwendungen mittels Kotlin zu einer guten Erfahrung machen.
+
+=== Koroutinen
+
+Koroutinen sind leichtgewichtige Funktionen deren Ablauf unterbrechbar ist, sie dabei aber ihren Zustand beibehalten und später fortgesetzt werden können.
+Sie kapseln Funktionalität die in verschiedenen Kontexten ausgeführt werden kann und an andere, parallele Ausführungseinheiten weitergereicht werden können.
+
+Sie wurden letzter Zeit von Go popularisiert (Goroutines), dort sind Koroutinen zusammen mit den Channels, der Hauptmechanismus für nebenläufige Programmierung.
+
+In Kotlin sollen ähnliche Funktionen wie z.B. C# 5.0's - async/await mit Hilfe von Koroutinen umgesetzt werden.
+Die internen Grundbausteine bilden die `start/suspendCoroutine` Funktionen der Standardbibliothek von Kotlin.
+
+Dabei legt sich der Ansatz auf keine Implementierungsdetails fest, sondern stellt eine API dar, die dann mittels verschiedener, darunterliegender Infrastrukturen implementiert wird.
+
+// generators/yield, async/await, composable сontinuations
+
+In der [kotlinx.coroutines] Bibliothek werden ganz verschiedene Arten nebenläufiger APIs basierend auf der Koroutinen-API bereitgestellt.
+
+* `launch(context) { ... }` um eine Koroutine im Kontext zu starten
+* `run(context) { ... }` für Kontextwechsel
+* `runBlocking(context) { ... }` um nebenläufige APIs in blockierend auszuführen
+* `defer(context) { ... }` um eine verzögerte Ausführung zu erreichen
+* `delay(...)` ist eine asynchrone Implementierung von `sleep`
+* Verschiedene Kontexte `Here`, `CommonPool`, `newSingleThreadContext(...)`, `newFixedThreadPoolContext(...)`
+* `future { ... }` Koroutine, die `CompletableFuture` und `CommonPool` in Java 8 benutzt
+* `.await()` Funktion auf `CompletableFuture` die die Ausführung parkt
+* uvm. wie Unterstützung von NIO, RxJava, JavaFX, Swing
+
+.Beispiel für `yield`-basierten Generator
+----
+val seq = buildSequence {
+    println("Yielding 1")
+    yield(1)
+    println("Yielding 2")
+    yield(2)
+    println("Yielding a range")
+    yieldAll(3..5)
+}
+
+for (i in seq) {
+    println("Generated $i")
+}
+----
+
+.Beispiel für `async/await` aus kotlinx.coroutines
+----
+async {
+    val original = asyncLoadImage(...) // erzeugt eine Future-Instanz
+    val overlay = asyncLoadImage(...)   // erzeugt eine Future-Instanz
+    ...
+    // pausieren bis beide Bilder geladen sind
+    // dann `applyOverlay` anwenden
+    return applyOverlay(original.await(), overlay.await())
+}
+----
+
+Sie können z.B. auf der Basis von Java 8's `CompletableFuture` realisiert werden.
+
+Für die Version 1.1. werden sie als experimentelles Feature mittels `-Xcoroutines=enable` aktivierbar sein.
+
+// With Kotlin's design, the implementation of co-routines is part of the libraries rather than the language, meaning developers are not bound to a specific programming paradigm or concurrency library.
+
+////
+=== Typ Aliase
+
+TODO
+
+=== JavaScript
+
+TODO
+
+- on the roadmap for many years
+- things missing from std-libs
+- interop with package/module systems
+- co-routines
+// "Numerous popular JS libraries will be available through typed headers (converted from DefinitelyTyped)," Breslav said.
+// JetBrains is supporting popular runtime module systems for JavaScript, along with webpack and other important tools. With Kotlin 1.2 and beyond, JetBrains plans to improve JavaScript tooling. "Our goal is to enable pleasant full-stack development with Kotlin," Breslav said.
+
+////
+
+== Weiterführende Sprachelemente
+
+===  Generics
+
+Generics sehen in Kotlin zuerst einmal nicht viel anders aus als in Java für Klassen, Interfaces und Methoden, nur dass die Typinferenz viel besser funktioniert.
+Dh. man muss generische Deklarationen bei der Benutzung viel seltener vornehmen.
+
+----
+data class Box<T : Number>(val value : T)
+
+Box(Math.PI)
+// Box(value=3.141592653589793)
+
+Box(42)
+// Box(value=42)
+
+Box("foo")
+// error: type parameter bound for T in constructor Box<T : Number>(value: T)
+// is not satisfied: inferred type String is not a subtype of Number - Box("foo")
+----
+
+Mit `<T: SuperTyp>` kann man eine obere Grenze angeben, weitere Obergrenzen kommen in eine `where T:SuperTyp2` Klausel.
+
+////
+Der große Unterschied ist die Type Erasure zur Laufzeit, anders als Java behält Kotlin die Informationen über generische Typspezialisierungen bei, und man kann auch zur Laufzeit darauf zugreifen.
+Das gilt sowohl für Informationen an deklarierten oder übergebenen Typen, als auch Parametern.
+////
+
+Sehr nützlich, ist dass generische Typen das Ziel von Erweiterungsfunktionen sein könenn.
+
+[source,java]
+----
+fun <T : Foo> T.foo() = this.toString() 
+fun <T,U> Iterable<T>.apply( f : (T) -> U ) : Iterable<U> = this.map(f)
+----
+
+Für generische Methodenparameter von `inline` Funktionen kann man auch zur Laufzeit den Typ ermitteln, wenn diese as `reified` deklariert wurden.
+
+----
+inline fun <reified T : Any> inspect() = T::class.java.toString()
+
+inspect<Int>()
+// class java.lang.Integer
+
+inspect<List<Int>>()
+// interface java.util.List
+----
+
+=== Ko- und Kontravarianz
+
+Ko-, Kontra-, und Invarianz (bes. in Java Generics) sind nicht trivial zu verstehen, in den Referenzen gibt es Links detaillierteren Erklärungen.
+
+////
+TODO
+Covariant: List<String> subtype of List<Object>
+Contravariant: List<Object> subtype of List<String>
+Generics are invariant in Java.
+Arrays are covariant.
+////
+
+Bei der *Kovarianz*, kann ein Subtyp statt des Supertyps genutzt werden, was z.B. bei Rückgabewerten von Methoden in Java seit 1.5 erlaubt ist.
+Eine Subklasse kann einen konkreteren Subtyp zurückgeben, also z.b. statt Number, Integer als Rückgabetyp einer überschriebenen Methode deklarieren.
+
+Auch Arrays sind kovariant in Java, Generifizierte Typen sind dagegen invariant, d.h. sie müssen exakt übereinstimmen, es sei denn man benutzt Platzhalter (?-Wildcards).
+
+*Kontravarianz* ist die Nutzung von Supertypen anstatt eines Subtypen, d.h. eigentlich dürften Methodenparameter überschriebener Methoden auch Superklassen sein, in Java ist es aber nicht so.
+
+Kontrollierte Varianz generischer Typen wird mittels Platzhaltern wie `<? super E>` oder `<? extends E>` erreicht, die das ganze aber nicht wirklich leichter verständlich machen.
+
+////
+.Beispiel für kovarianten Rückgabetyp und kontravarianten Parametertyp (ausser in Java).
+----
+class Parent {
+    Number compute(Integer value);
+}
+class Child extends Parent {
+    Integer compute(Number value);
+}
+----
+
+Die Invarianz generischer Typen, soll ein Problem verhindern, dass es z.B. bei Arrays gibt, die Zuweisung zu einem Supertyparray (z.b. Object[]) und Hinzufügen "falscher" Elementinstanzen.
+
+Um die Varianz von Methodenparametern und Rückgabetypen generifizierter Klassen zu kontrollieren, wurden die Platzhalter, wie `? extends T` oder `? super T` eingeführt, z.B. in `Collection<E>.add(<? extends E>)`, das hinzuzufügende Elemente auf Subklassen des Typparameters beschränkt.
+Damit erreicht man nun auch Kovarianz für generische Typen, z.B. ist `List<String>` ein Subtyp von `List<? extends Object>`.
+Dagegen ist `List<? super String>` ein Oberklasse von `List<Object>`, gibt uns also Kontravarianz, in Methodenparametern.
+////
+
+Kotlin vereinfacht, vor allem die Undurchsichtigkeit von Platzhaltern in Generics, mit 3 Ansätzen: 
+
+*Angabe der Varianz bei Deklaration von generischen Typen:*
+
+Ein Typparameter, wird mit `out T` explizit als *nur* kovarianter Rückgabetyp deklariert `List<out T> { get(idx:Int) : T }` oder mittels ` in T` als *nur* kontravarianter Methodenparameter `Comparator<in T> { compare(v1:T, v2:T) : Int }.
+
+Dann können Instanzen der Klasse mit `out` Typparameter jeweils dem Supertyp zugewiesen werden: `List<Object> l = List<String>`.
+Klassen mit `in` Typparameter dagegen dem Subtyp `Comparator<Double> c = Comparator<Number>`.
+
+*Typprojektionen (Restriktionen):*
+
+Für Klassen, die `T` in beiden Positionen nutzen, wie `MutableList` oder `Array`, hat man wie in Java erst einmal Invarianz der Typen.
+Die Typprojektion ist äquivalent zur Platzhalteransatz von Java, aber leichter zu verstehen.
+
+Dafür können dann bei der Nutzung (use-site variance) Restriktionen deklariert werden, z.B. mit `out Int` dass von einer Instanz nur gelesen wird, es also sicher ist, den generischen Typ `Int` und seine Subtypen als Ergebnistyp zu erwarten.
+Das beschränkt dann im gleichen Zug die Nutzung der Methoden, die diesen Typparameter als Methodenparameter besitzen, d.h. aktualisierende Methoden.
+
+* `fun  sum(values: Array<out Int>) : Int`, entspricht `<? extends Int>`
+* `fun fill(target: Array<in String>, value: String) : Unit`, entspricht `<? super String>`
+
+*Stern-Projektionen:*
+
+Diese Syntax `<*>` verhält sich so ähnlich wie die Nutzung von `<?>` oder keinen Typdeklarationen (RawTypes) in Java, nur dass die durch originalen Deklarationen vorgegebenen Grenztypen noch eingehalten werden, bei `out T` entspricht `<*>` dem Supertyp von T und bei `in T` entspricht es `Nothing`
+
+=== (Lazy) Sequences 
+
+Um Operationen auf Containern oder Iteratoren verzögert auszführen kann man eine "lazy" Sequenz benutzen, die man z.B. mit `sequenceOf()` oder `asSequence()` erzeugen kann.
+Deren Elemente werden erst zugegriffen, wenn sie benötigt werden und sie wird auch nicht zu einer Liste materialisiert wenn nicht gefordert.
+
+Strings zählen in diesem Sinne auch als Collections von Zeichen.
+
+Hier ein paar Beispiele für (verzögerte) Listenoperationen.
+
+----
+val x = (10 downTo 1).map{ it*it }.filter{ it % 2 == 0}
+// [100, 64, 36, 16, 4]
+
+x.reduce{ a,x -> a + x }
+// 220
+
+val x = (1..10).asSequence().map{ it*it }.filter{ n -> n % 2 == 0 }
+// lazy: kotlin.sequences.FilteringSequence@26aee0a6
+x.toList()
+// [4, 16, 36, 64]
+
+listOf("Alice","Bob","Charlotte").associate{ Pair(it,it.length) }
+// {Alice=5, Bob=3, Charlotte=9}
+
+"Hello World".map{ it + 1 }.joinToString("")
+// Ifmmp!Xpsme
+----
+
+Sehr hilfreich ist es, wenn Null- und Instanzcheck-Metainformation auch bei Listenoperationen mitgeführt werden.
+
+// 
+----
+data class Person(val name:String, val age:Int)
+val users = listOf(Person("Michael",42),null)
+
+users.map{ it.name }
+error: only safe (?.) or non-null asserted (!!.) 
+  calls are allowed on a nullable receiver of type Line1.Person?
+
+users.filterNotNull().map{ it.name }
+// [Michael]
+
+users.filterIsInstance<Person>().map{ it.age }
+// [42]
+----
+
+// TODO 1.1? Es wäre schön, wenn man auf `Pair` Instanzen auch die genannten Listenoperationen ausführen könnte, so muss man erst `toList()` darauf aufrufen.
+
+=== Non-Local Returns
+
+
+In Kotlin, we can only use a normal, unqualified return to exit a named function or an anonymous function. This means that to exit a lambda, we have to use a label, and a bare return is forbidden inside a lambda, because a lambda can not make the enclosing function return:
+
+Eine sehr unerwartete Eigenschaft der Sprache ist, das normale `return` Statements nur in (anoynmen) Funktionen erlabut sind.
+
+In Lambdas sind sie nicht möglich, es sei denn, die Lambda wird einer `inline`-Funktion übergeben.
+Dann wird aber, anders als in Java, wird nicht nur der Scope der Lambda-Funktion verlassen, sonder der darüberliegende Scope.
+
+.Nicht-lokales Return
+----
+fun main(args: Array) {
+    (1..5).forEach {
+        if (it == 3)
+            return
+        print(it)
+    }
+    print("done")
+}
+// Ausgabe: 12, nicht 1245done wie im Java Äquivalent
+----
+
+Die Ursache liegt darin begründet, dass Konstrukte, die in Java zur Sprache gehören, in Kotlin durch Bibliotheken implementierbar sein sollen.
+
+Von Sprachkonstrukten, wie `try`,`synchronized`,`for` usw. würde man in Java auch nicht erwarten, dass ein `return` nur den Block verlässt, sondern die ganze Methode.
+
+Da diese Konstrukte in Kotlin meist durch (Erweiterungs-)Funktionen implementiert werden können, soll dort genau dasselbe gelten.
+
+Ausserdem sind diese Funktionen oft als `inline` markiert, eine Optimierung, die dazu führt, dass ihr Quellcode aus Effizienzgründen vom Compiler an die Aufrufstellen kopiert wird. 
+Für diese `inline` markierten Funktionen, kann sich die Runtime gar nicht anders verhalten, da ja kein Rahmen eines Funktions- oder Lambda-Aufrufes existiert.
+
+----
+public inline fun <T> Iterator<T>.forEach(operation: (T) -> Unit) : Unit {
+    for (element in this) operation(element)
+}
+----
+
+Es gibt aber die Möglichkeit, mittels `return@marker` oder `break@marker`zu einem vorher definierten `marker@` Marker zurückzuspringen.
+Für aufrufende Funktionen, gibt es auch einen Standardmarker, `@funktionsName`, z.b. `@forEach`.
+
+----
+fun main(args: Array) {
+    (1..5).forEach marker@ {
+        if (it == 3)
+            return@marker
+            // oder gleich return@forEach
+        print(it)
+    }
+}
+// Ausgabe 1245done
+----
+
+////
+Wenn bestimmte Lambda Parameter nicht als inline, sondern als ganz normale Funktionspointer behandelt werden sollen, können sie mit `noinline` markiert werden.
+Zumindest eine Lambda einer `inline` function sollte aber  davon ausgenommen sein, sonst macht das ganze Inlining, zum Sparen dynamischer Aufrufe nicht soviel Sinn.
+////
+
+Für innere oder anonyme Funktionen sieht das aber anders aus, diese haben ihren ganz normalen Scope, der mit `return` verlassen wird.
+
+----
+fun p(i : Int) : Unit {
+    if (i == 3) return
+    print(i)
+}
+(1..5).forEach(p)
+print("done")
+
+(1..5).forEach(fun(i:Int -> Unit) { 
+    if (it == 3) return
+    print(it)
+})
+print("done")
+// jeweils 1245done
+----
+
+=== Delegation
+
+Wie wir spätestens seit den Gang-of-Four Entwurfsmustern wissen, ist Komposition und Delegation oft die bessere Art Verhalten und Informationen in einer Klasse zusammenzuführen.
+Anders als in Java gibt es in Kotlin Sprachunterstützung für die Delegation von Interface-Methoden.
+Mittels des `by` Schlüsselwortes kann man ein Interface an Instanzvariablen delegieren.
+
+Hier ein Beispiel für einen Collection-Proxy, der neue Elemente vor dem Hinzufügen mittels eines Filters überprüft
+Die `add` und `addAll` Methoden werden überschrieben und alle anderen delegiert.
+
+[source,java]
+----
+class CheckingCollection<E>(private val coll: MutableCollection<E>, 
+                            private val check: (E) -> Boolean) 
+                           : MutableCollection<E> by coll {
+
+    override fun add(element: E) = check(element) && coll.add(element)
+    override fun addAll(elements: Collection<E>) = coll.addAll(elements.filter(check))
+
+    override fun toString() = coll.toString()
+}
+----
+
+Auch Properties können delegiert werden, 
+
+=== Operator Overloading
+
+Über den Wert von Operator-Overloading kann man sich streiten, einige Ausdrücke werden dadurch leichter verständlich und in Maßen eingesetzt kann man damit kompakte Domänenspezifische Sprachen (DSLs) entwerfen.
+Leider wird es aber meist übertrieben und dann führt es zu viel mehr Verwirrung als Nutzen.
+
+In Kotlin kann eine feste Anzahl, unärer und binärer Operatoren (mathematische und Listen-Operatoren, Index-Zugriffe, Aufrufe und Vergleiche) überschrieben werden.
+Das erfolgt durch (Extension-)Funktionen mit spezifischen Namen und dem `operator` Präfix.
+
+Zum Beispiel für die Konkatenation von Listen könnte man folgenden Operator definieren:
+
+----
+// für unveränderliche Listen
+operator fun <T> List<T>.plus(values : List<T>) :List<T> { val x = this.toMutableList(); x.addAll(values); return x; }
+listOf(1,2,3) + listOf(4,5,6)
+// [1, 2, 3, 4, 5, 6]
+----
+
+== Java Integration
+
+Das Zusammenspiel mit Java verläuft zumeist reibungslos, es gibt aber ein paar Stellen an denen man aufpassen muss.
+
+Um bestimmte Typen, Felder und Methoden von Java aus zugreifbar zu machen, sollten diese in Kotlin mit Annotationen, wie z.B. `@JVMStatic` bzw. `@JVMField` erweitert werden.
+Ansonsten muss eine umständliche Syntax in Java zu Hilfe genommen werden.
+Da Kotlin Java Instanzen erweitern kann und auch die Collections und Arrays von Java benutzt funktioniert in dieser Richtung die Integration gut.
+Klassen und Funktionen in Kotlin sind standardmäßig `public`, aber auch `final`, bei Bedarf sollte man sie mit `open` für Vererbung / Überschreiben öffnen.
+
+////
+
+Zur Integration von Kotlin und Java hier ein Beispiel von Neo4j's benutzerdefinierten Funktionen und Prozeduren.
+
+[source,java]
+----
+class GraphQLProcedure {
+
+    @Context
+    @JvmField var lateinit db: GraphDatabaseService
+
+    class GraphQLResult(@JvmField val result: Map<String, Any>)
+
+    @Procedure("graphql.execute")
+    fun execute(@Name("query") query : String , @Name("variables") variables : Map<String,Any>) 
+                                     : Stream<GraphQLResult> {
+        val result = GraphSchema.getGraphQL(db).execute(query, GraphQLContext(db), variables)
+
+        if (result.errors.isEmpty()) {
+            return Stream.of(GraphQLResult(result.data as Map<String, Any>))
+        }
+        val errors = result.errors.joinToString("\n")
+        throw RuntimeException("Error executing GraphQL Query:\n $errors")
+    }
+}
+----
+
+////
+
+== Weitgehende Unterstützung für Kotlin in Spring 5
+
+Bei Pivotal erfreut sich Kotlin auch wachsender Beliebtheit, das weitverbreitete Framework erhält in seiner zukunftigen Version 5.0 weitreichende Unterstützung Kotlin.
+Schon vor einiger Zeit wurde Unterstützung für Kotlin auf der Spring-Boot-Initializr Startseite: start.spring.io hinzugefügt.
+
+Für das Release 5.0 gibt es in Zusammenarbeit mit Jetbrains besonders in der Interoperabilität und Vereinfachung der Nutzung von Spring(-Boot) Features mittels der kompakten Syntax von Kotlin.
+
+Die standardmäßig als `final` deklarierten Klassen von Kotlin hatten in Spring das Problem, dass sie mit `open` annotiert werden mussten, damit z.B. Java-Config Klassen, durch Bytecodemanipulation erweitert werden können.
+
+Jetzt wird das viel besser durch ein Kotlin-Compiler-Plugin (`kotlin-spring`) erledigt, dass Klassen mit bestimmten Annotationen (bzw. Meta-Annotationen, wie @Component, @Config, @Transactional, @Cacheable) automatisch als `open` deklariert.
+An anderen Stellen werden Extension-Methoden benutzt, um die existierenden APIs für die bequeme Entwicklung von Springanwendungen anzureichern.
+Vor Nutzung der Extensions müssen diese aber in die eigenen Klassen importiert werden.
+
+So kann Kotlin elegant in Bean oder Controller-Definitionen eingesetzt werden.
+
+[source,java]
+----
+val context = GenericApplicationContext {
+    registerBean<MyOrderRepository>()
+    registerBean { OrderService(it.getBean<MyOrderRepository>()) }
+}
+----
+
+.Spring "Functional Web API" in Kotlin
+[source,java]
+----
+fun route(req: ServerRequest) = route(req) {
+    accept(TEXT_HTML).apply {
+            (GET("/user/") or GET("/users/")) { findAllView(req) }
+            GET("/user/{login}") { findViewById(req) }
+    }
+}
+----
+
+Eine interessante Nutzung des Kotlin Typsystems ist die Ableitung von `@Required` und `@Lazy` Informationen für Beans aus der Typdeklaration:
+
+----
+@Autowired lateinit var foo: Foo?
+// entspricht diesem in Java
+@Lazy @Required(false) @Autowired Foo foo;
+----
+
+Die schon diskutierte Erhalt von generischen Typinformationen für Parameter erlaubt kompaktere, typsichere Deklarationen, z.B. ohne SuperClassTypeTokens, wie `ParameterizedTypeReference`.
+
+----
+// Java
+List<Foo> result = restTemplate.exchange(url, HttpMethod.GET, null, 
+                   new ParameterizedTypeReference<List<Foo>>() { }).getBody();
+// Kotlin
+val result: List<Foo> = restTemplate.getForObject(url)
+----
+
+Desweiteren gibt es Kotlin Unterstützung im Projekt *Reactor* von Pivotal und auch für View-Templates, z.b. mit Kotlin's String-Interpolation oder mittels der kotlinx HTML-DSL.
+
+== Schlusswort
+
+Leider ist der Platz ind er Kolumne immer begrenzt, es gibt noch viel mehr über die Sprache zu berichten.
+Zu kurz gekommen ist z.B. die Android Entwicklung, das TornadoFX Framework, Integration in Vert.x, Details zu Properties uvm.
+
+Am besten ist es, wenn Sie sich selbst ein Bild machen und Kotlin in einem Teil ihrer beruflichen oder privaten Entwicklungstätigkeit einfach ausprobieren und Ihre Erfahrungen teilen.
+
+== Referenzen
+
+* [Kotlin-Dokumentation] Kotlin Bücher & Dokumentation: https://kotlinlang.org/docs/reference/ 
+* [Kotlin-GitHub] https://github.com/JetBrains/kotlin
+* [KEEP Repository] https://github.com/Kotlin/KEEP
+* [Kotlin 1.1 Überblick] https://kotlinlang.org/docs/reference/whatsnew11.html
+* [Kotlin 1.1 Beta] https://blog.jetbrains.com/kotlin/2017/01/kotlin-1-1-beta-is-here/
+* [Wikipedia-Koroutinen] https://de.wikipedia.org/wiki/Koroutine
+* [Gegenüberstellung Kotlin-Java] / Kotlin https://kotlinlang.org/docs/reference/comparison-to-java.html
+* [Spring 5 Kotlin] https://spring.io/blog/2017/01/04/introducing-kotlin-support-in-spring-framework-5-0
+* [Advanced Kotlin Kurs] http://shop.oreilly.com/product/0636920052999.do
+* [Inline Funktionen] https://kotlinlang.org/docs/reference/inline-functions.html
+* [TornadoFX Framework] https://dzone.com/articles/a-new-javafx-app-framework-for-kotlin-tornadofx
+* [JOOQ-RETURN] https://blog.jooq.org/2016/02/22/a-very-peculiar-but-possibly-cunning-kotlin-language-feature/
+* [Langer-Generics] http://www.angelikalanger.com/GenericsFAQ/JavaGenericsFAQ.html
+* [Varianz] http://stackoverflow.com/questions/8481301/covariance-invariance-and-contravariance-explained-in-plain-english
+* [Kotlin-Generics] https://kotlinlang.org/docs/reference/generics.html
+* [Concurrency Kotlin] https://blog.egorand.me/concurrency-primitives-in-kotlin/
+
+// * Devoxx US: http://cfp.devoxx.us/2017/talk/VSU-8919/Kotlin_102__-_Beyond_the_basics
+
+
+////
+
+== Vert.x und Gradle
+
+
+
+- inline functions (vs) lambdas (what do they capture), tail recursion, local, nonl-local returns
+
+- kritisch bob
+- async, co-routines
+- generics, reified, avoiding type erasure - Covariance and Contravariance
+- delegation
+- Lazy evaluation with sequences
+- reuse Object invocations and lambdas with receivers for better DSL’s
+- asynchronous programming with coroutines
+- Kotlin 1.1: coroutines, JS, local returns `return@forEach`, local functions, inline functions, non-local returns in lambdas only allowed in inline functions, "returns to closest 'fun'", returns in anonymous functions, see advanced course
+- refer to the advanced course
+- use-cases: tornado-fx (java-fx framework) (delegation, dsl)
+- Spring native support in Kotlin, (java-interop, open classes (compiler-plugin), kotlin-ish-adaptors)
+- vertx: Kotlin
+- android not so much
+- IntelliJ - Community -> Kotlin 
+
+
+type aliases are meant to be an abbreviation mechanisms for longer types declarations, such as function signatures; type aliases will not introduce new types and can be used interchangeably with the original definition.
+
+bound method references will be extended to support taking a reference to a member of an object. In this way, you can take a reference to the equals method of a String object and assign it to a predicate to use it later: val p: Predicate<String> = "foo""::equals. Kotlin 1.0.x already supports this for types.
+
+delegated properties will be allowed at the top level, in a class, or in a function:
+
+fun foo() {
+  val lazyBar by lazy { ... }
+  while (...) {
+    if (...) {
+      lazyBar.doBaz()
+      ...
+    }
+  }
+}
+Delegated properties are a mechanism to implement once and for all certain kinds of properties, such as lazy, observable, and map-stored properties, so they do not need be implemented each time.
+
+data classes will support inheritance, thus making it possible to derive a data class from another. Data classes are classes that just hold data, and for which Kotlin automatically generates accessors, equals, hashCode, and other common methods. This will also make it possible to extend a data class from within a sealed class:
+
+sealed class C() {
+  data class Example(...) : C()
+}
+destructuring will allow to assign composed names to arguments of lambdas, such as in the following example, where the argument to forEach, a pair, is destructured in its two components:
+
+myMap.forEach {
+  (k, v) ->
+    println(“$k => $v”)
+}
+coroutines will provide the backbone for Kotlin async behaviour. According to Breslav, coroutines are more general than the async/await model introduced in C# 5. Kotlin will also provide async/await, but built on top of coroutines, not as primitives:
+
+fun loadImage(url: URL) = async {
+  val bytes = await(loadBytes(url))
+  bytesToImage(bytes)
+}
+On the tooling front, Kotlin 1.1 will include direct support for Java 8/9 features, such as default method generation. Additionally, the JavaScript backend will be brought in line with the actual set of language features.
+
+Kotlin development is driven by the Kotlin Evolution and Enhancement Process (KEEP), based on a GitHub repository where all planned use cases are described.
+
+√ Kotlin 1.1 will be both source and binary compatible with previous versions, meaning that new versions of Kotlin compiler will not break compatibility with older source code and binaries.
+////
+
+
+////
+
+////

@@ -1,0 +1,644 @@
+== Sparkling Coffee - Apache Spark
+
+Bisher haben wir im Rahmen dieser Kolumne meist über die Parallelisierung von Operationen auf einer einzigen Maschine und JVM gesprochen.
+Für viele Anwendungsfälle in Enterprise-Anwendungen ist das auch vollends ausreichend.
+Wenn nun aber doch grosse Datenmengen jenseits des TeraByte-Bereichs verarbeitet werden müssen, dann ist es schon sinnvoll, sich Lösungen anzuschauen, die die Verarbeitung auf einen Cluster von Maschinen verteilen.
+
+Ich stehe dem BigData Hype etwas skeptisch gegenüberstehe, da meist zuerst geschossen und dann nach dem "Warum" gefragt wird.
+Dass heisst zuerst einmal wird festgestellt "wir brauchen das", bevor das "wofür" klar ist.
+Gezielte Verarbeitung von grossen Datenmengen ist dann sinnvoll, wenn dadurch neue und bessere Entscheidungen ermöglicht werden.
+
+Interessanterweise wird die BigData Infrastruktur vor allem von *Java*-Projekten im Apache Umfeld angetrieben.
+Natürlich vor allem von Hadoop, Lucene, HBase und Cassandra, Storm, Kafka, aber seit Neuestem auch von Spark, Flink und Ignite.
+
+Heute wollen wir uns Apache Spark mal genauer anschauen, die Anwendungsgebiete betrachten und die APIs und Implementierung vorstellen.
+An einigen leicht nachvollziehbaren Beispielen soll demonstriert werden, wie statische tabellarische und Graph-Daten verarbeitet werden können,
+aber auch wie diese Daten als Ereignisstrom innerhalb eines Berechnungsfensters aggregiert werden können.
+
+=== Hadoop
+
+In Apache Hadoop [Hadoop] wird der Map-Reduce Ansatz umgesetzt, der von Google 2002 TODO [MapReducePaper] veröffentlicht wurde.
+Dabei wird in 2 Operationen eine Menge von Daten parallel von viele Prozessen auf vielen Maschinen verarbeitet.
+Die Arbeit wird von einer zentralen Steuerung verteilt, Prozesse gestartet und im Fehlerfall Arbeit wiederholt.
+
+Zuerst werden in einem Map-Schritt die Eingabedaten prozessiert und in einen Strom von Schlüssel-Wert Paare umgewandelt.
+Dann werden in einem Reduce-Schritt die Paare mit gleichem Schlüssel gemeinsam verarbeitet.
+Es können prinzipiell beliebig viele Map und Reduce-Schritte hintereinander ausgeführt werden.
+
+Programmiert werden die Map- und Reduce-Funktionen in Java oder anderen JVM-Sprachen.
+
+Für das Erstellen von Hadoop-Jobs muss deutlich mehr Code geschrieben werden, als man eigentlich möchte, selbst wenn die eigentlichen Transformations-Operationen der Businesslogik nur wenige Zeilen bedürfen.
+
+Daher gibt es, wie in der Hadoop-Ökosystem Darstellung ersichtlich, eine ganze Menge (Pig, Hive, Drill, usw.) von alternativen Ansätzen, DSLs und APIs oder SQL, um diesen Aufwand zu vereinfachen. 
+
+TODO bei CodeCentric nachfragen, ggf. gibt es auch bei Sigs-Datacom ein nettes Hadoop Bild im Fundus
+
+image::http://blog.codecentric.de/files/2013/08/hadoop_%C3%BCbersicht.png[]
+
+Als Datenspeicher wird das verteilte HDFS Dateisystem genutzt, die kolumnare HBase Datenbank, die Analyse-Datenbank Impala oder andere (No)SQL Datenbanken als Quellen und Senken für Informationen.
+
+Hadoop und die damit verbundene Infrastruktur wird bekanntlicherweise für die Batchverarbeitung grosser Datenmengen genutzt.
+Es gibt ein reichhaltiges Ökosystem mit verschiedenen Distributionen von verschiedenen kommerziellen Anbietern.
+
+In Hadoop ist Map-Reduce meist durch die Leistungsfähigkeit des I/O Subsystems begrenzt, sowohl Lese- als auch Schreiboperationen nach HDFS und HBase sind "teuer".
+
+=== Warum Alternativen?
+
+Hadoop hat viele Vorteile, und ermöglicht Unternehmen aller Größe hohe Datenvolumnia im Batchbetrieb zu verabeiten.
+Die zwei größten Nachteile sind die hohe Latenz bis die Ergebnsise zur Verfügung stehen und die Leistungsbeeinträchtigung durch die zwangsweise Nutzung von Dateissystem und Datenbanken zur Speicherung von Ein- und Ausgabedaten und Ergebnissen zwischen den Verarbeitungsschritten.
+
+Desweiteren sind vor allem in Cloud-Setups mit Virtualisierung schnelle Festplattezugriffe (bes. Latenz) nicht die Regel oder teuer zu bezahlen.
+
+Heutzutage ist Hauptspeicher reichlich vorhanden, schnell und relativ preiswert.
+Daher bietet sich an, hochperformante Verarbeitung von Daten direkt mittels optimal lokalisierten Operationen im Hauptspeicher vorzunehmen
+Zwischenergebnisse werden direkt über breitbandige Verbindungen zwischen Maschinen in räumlicher Nähe im selben Rechenzentrum transferiert.
+In vielen Fällen ist es sogar schneller, ein Ergebnis für eine Datenteilmenge (Partition) neu zu berechnen, als sie von Festplatte zu laden.
+Festplattenzugriff wird soweit wie möglich vermieden, selbst die Ergebnisse der Transformationen stehen vor allem im Hauptspeicher weiterhin bereit um sie dann interaktiv und performant abzufragen.
+
+Einige Projekte, besonders im Apache Umfeld nutzen einen solchen Ansatz: Spark, Flink und Ignite.
+Heute wollen wir uns *Apache Spark*, eine quelloffene, Hadoop-kompatible Datenverarbeitungsplattform, näher anschauen.
+
+=== Geschichte
+
+Spark entstammt der Feder des AMPLabs (Algorithms, Machine People) des University Berkely als Teil von BDAS (Berkeley Data Analytics Stack).
+
+Heute ist Spark ein Hauptprojekt der Apache Software Foundation, während die Gründer mit Databricks eine Firma zur Vermarktung und Weiterentwicklung einer Rechenzentrums (Cloud) Lösung für Spark gestarted haben.
+In der Industrie gibt es breite Unterstützung für Spark, die großen Hadoop-Distributoren und -anwender sind schnell auf den neuen Zug aufgesprungen und integrierten es in ihre Big-Data Plattformen.
+
+Spark vereint 3 wichtige Anwendungsgebiete in einem System - Batchverarbeitung, Streaming und interaktive Nutzung bzw. Abfragen.
+
+image::https://emerginginsightsnow.files.wordpress.com/2015/05/spark-ecosystem.png?w=1000[]
+
+=== Schneller Einstieg
+
+Mit Spark kommt man sehr schnell zu den ersten Ergebnissen, die Online-Anleitungen sind verständlich geschrieben und enthalten direkt ausführbaren Beispielcode in Scala, Java und Python.
+
+Mittels der Spark-Shell, die eine modifizierte Scala-REPL darstellt, welche schon einen lokalen, minimalen Spark-Cluster hochgefahren hat, können Operationen interaktiv ausgeführt werden.
+
+Hier ein einfaches Beispiel, Worte in einer Datei zählen, das "HelloWorld" von verteilten Datenplattformen.
+
+Dabei wird eine Textdatei eingelesen, auf jede der Zeilen ein Split an Leerzeichen vorgenommen und die Anzahl der Worte pro Zeile aggregiert.
+
+[source,scala]
+----
+val file = sc.textFile("gutenberg.txt")
+val wordsPerLine = file.map( line => line.split(" ").size )
+wordsPerLine.reduce( (a,b) => a+b )
+----
+
+Die Operationen, die man interaktiv mit der Shell ausführt, würden in einer echten Spark-Anwendung so aussehen:
+
+.src/main/scala/WordCountApp.scala
+[source,scala]
+----
+import org.apache.spark.SparkContext
+import org.apache.spark.SparkContext._
+import org.apache.spark.SparkConf
+
+object WordCountApp {
+  def main(args: Array[String]) {
+    val fileName = "gutenberg.txt"
+    val conf = new SparkConf().setAppName("WordCount")
+    val sc = new SparkContext(conf)
+    val file = sc.textFile(fileName)
+    val wordsPerLine = file.map( line => line.split(" ").size )
+    val wordsPerFile = wordsPerLine.reduce( (a,b) => a+b )
+    println("Words in file %s: %d.".format(fileName, wordsPerFile))
+  }
+}
+----
+
+Der Hauptunterschied ist, dass der SparkContext selbst erzeugt wird und nicht wie in der Shell zur Verfügung steht.
+Mittels `sbt` kann man die Spark-Anwendung als Scala Projekt aufsetzen.
+
+.build.sbt
+----
+name := "WordCount"
+version := "1.0"
+scalaVersion := "2.10.4"
+libraryDependencies += "org.apache.spark" %% "spark-core" % "1.3.1"
+----
+
+Nachdem man die Anwendung mit all ihren eigenen Abhängigkeiten mit `sbt package` zu einem Jar zusammengepackt hat, wird sie mittels `spark-submit` an den lokalen Spark-Cluster zur Ausführung übergeben.
+
+----
+bin/spark-submit \
+  --class "WordCountApp" --master local[4] \
+  target/scala-2.10/wordcount_2.10-1.0.jar
+----
+
+////
+Eigene zusätzliche Operationen können z.B. mittels eines Scala "Object"-Singletons zur Verfügung gestellt werden oder mittels Scala's "implicits" Mechanismus auf den Spark-Context oder RDDs bereitgestellt werden.
+Auf den Kontext kann man vom RDD via `rdd.context` zugreifen.
+
+// http://stackoverflow.com/questions/23737804/enriching-sparkcontext-without-incurring-in-serialization-issues
+////
+
+=== Basiskonzepte
+
+Spark integriert sich sehr gut mit Hadoop, es stellt eine kompatible Ausführungsumgebung dar.
+
+Der Hauptvorteil von Spark liegt in seiner viel effizienteren Map-Reduce Implementierung, die ich hier auch im Detail diskutieren möchte.
+
+In Spark wird Datenverarbeitung mit Hilfe einer kompakten Scala, Python oder Java DSL/API notiert, die Operationen auf den Kerndatenstrukturen von Spark, den *Resilient Distributed Datasets (RDD)* darstellen.
+
+=== Resilient Distributed Datasets (RDDs)
+
+Die Kernidee von Spark ist so einfach wie sinnvoll. 
+Operationen werden auf einer Datenstruktur abgebildet, die auf Parallelisierung, Partitionen aufbaut Fehlertoleranz.
+Es sind "resilient distributed datasets" (RDD) also "ausdauernde, verteilte Daten".
+Sie stellen einen unveränderlichen Datencontainer dar, auf dem übliche Transformationen wie map, filter, sort, group-by, distinct usw. möglich sind, die neue RDDs erzeugen.
+Mit Aktionen wie reduce, collect, count und foreach werden stattdessen skalare Werte berechnet, oder normale Collections wie Arrays oder Maps eerzeugt, oder Funktionen auf dem RDD ausgeführt.
+Anders als bei anderen APIs erfolgt die Anwendung von Transformationen nicht sofort, sondern zeitverzögert, nur wenn sie benötigt werden.
+
+Die Operationen auf RDDs werden automatisch über entsprechend viele Datenpartitionen auf den Worker-Instanzen des Spark-Clusters (s.u.) verteilt ausgeführt.
+Partitionen kann man beim Erzeugen von RDDs angeben, aber es ist auch möglich, diese mittels Transformationen zu ändern, für manche Operationen macht Spark das auch selbstständig im Hintergrund.
+
+// TODO mehr Implementierungsdetails
+
+==== Aufgaben in Spark
+
+Der SparkContext wird am Anfang eines Jobs mit einer Konfiguration erzeugt und stellt dann die wichtigsten Funktionen zur Erzeugung von RDDs bereit.
+
+Er ist auch zuständig für die Verbindung zum Cluster und die Verteilung der Tasks der Jobs auf dem Cluster (s.u)
+Wenn erst einmal RDDs aus Rohdaten und Datenströmen erzeugt wurden, werden weitere Transformationen direkt auf den RDDs ausgeführt.
+Dieser Ansatz mittels einer "Fluent-DSL" bietet sich an, um den gewünschten Datenfluss zu beschreiben.
+
+Dabei wird durch diese Transformationen noch keine Ausführung angestossen, sie stellen lediglich die Beschreibung und Verkettung der Operationen dar.
+
+Aus jeder Transformation entsteht ein neues RDD das die Parititionen, Operation mit Parametern und Ergebnismapping enthält.
+Erst wenn die Ergebnisdaten der Transformationskette irgendwo gebraucht / benutzt werden, wird die Gesamtoperation materialisiert, indem sie aufgeteilt in Aufgaben (Tasks) auf dem Cluster entsprechend geplant und ausgeführt wird.
+
+Dieser DSL Ansatz erlaubt auch eine Menge von Optimierungen, von der Generierung von JVM Bytecode für nicht JVM-Sprachen wie Python und R über Selektives Laden von Daten nach ihrer Nutzung (z.b. nur einige Spalten einer Zeile) bis zur Weiterleitung von Filter-Prädikaten zur Datenquelle, die diese ggf. effizienter umsetzen kann. Diese Ansätze werden auch bei Spark-SQL genutzt.
+
+Zwischenergebnisse können zwar in Variablen gehalten werden, aber nur der Aufruf von `rdd.persist()` oder `rdd.cache()` stellt wirklich sicher, dass die Ergebnisse zwischengespeichert werden.
+Der Speicherort (Heap, Off-Heap, Serialisiert, Festplatte, Tachyon-RAM Store) kann dabei angegeben werden.
+
+Beim Verlust eines Workers wird die Arbeit vom Master auf die anderen (oder neuen) Worker verteilt.
+
+Da jedes RDD ja die Beschreibung enthält, wie seine Daten aus den vorhandenen Partitionen berechnet werden, wäre das schnell getan, muss aber nicht, wenn diese nicht gerade aktiv angefragt werden.
+Erst wenn auf das RDD wieder zugegriffen wird, *muss* die Berechnung wieder angestossen werden.
+
+==== Erzeugung von RDDs
+
+Die Erzeugung von RDDs erfolgt mittels Funktionen des SparkContexts aus Dateien (lokales Dateisystem, Amazon S3, HDFS), Hadoop-Job-Ergebnissen oder Integrationen mit anderen Datenquellen (z.B. Cassandra).
+Auch existierende Datencontainer können mit `context.parallelize(collection)` in ein RDD gewandelt werden.
+
+==== Transformationen 
+
+Transformationen sind Operationen auf RRDs die die referenzierte Datenpartition verarbeiten und ein neues RDD erzeugen.
+Dabei wird die Transformation nicht direkt angewandt, sondern nur vorgesehen (lazy evaluation) und erst bei Bedarf ausgeführt.
+
+Beispiele für Transformationen sind im Folgenden aufgeführt:
+
+.Spark RDD Transformationen
+|===
+| map(f) | Wendet eine Funktion auf jeden Wert des RDD an, neues RDD hat Typ des Rückgabewertes der Funktion
+| mapPartitions[WithIndex]() | Wie map() aber jeweils auf einer kompletten Datenpartition
+| filter(p) | Filtert das RDD mittels des Prädikats p
+| groupByKey | Transformiert Tupel in Aggregationen aller Werte pro Schlüssel
+| sortByKey | Sortierung von Tuples
+| repartition(n) | Repartitioniert das RDD auf eine neue Partitionsanzahl n, dies ist eine datentransferlastige Transformation
+| ... | ...
+|===
+
+==== Aktionen
+
+Aktionen sind Operationen auf dem RDD, die Daten aggregieren oder anderweitig auf skalare oder Collection-Ergebnisse projizieren, die dann nicht direkt weiter transformiert werden können.
+Es sei denn man wandelt sie mittels `sc.parallelize(coll)` wieder in ein RDD um.
+
+Aktionen beispielsweise Operationen wie:
+
+.Spark RDD Aktionen
+|===
+| reduce(f) | Aggregiert fortlaufend aus Werten ein skalares Ergebnis
+| collect() | Gibt eine Array Repräsentation des RDD zurück, sollte vorher gefiltert werden
+| count() | Anzahl der Elemente im RDD
+| saveAsTextFile(file) | Speichert pro Zeile die `toString()` Repräsentation jedes RDD Elements
+| foreach(f) | führt Funktion f auf jedem Element aus
+| ... | ...
+|===
+
+==== Ausgabe
+
+Die Ergebnisse von Operationen können entweder direkt parallel von RDDs oder mittels Aktionen auf dem SparkContext in Dateien oder Datenbanken geschrieben werden.
+
+Meist ist das aber nicht notwendig, da die Ergebnisse einer Anwendung jederzeit in Echtzeit aus der Hauptspeicherrepräsentation abgefragt bzw. bereitgestellt werden können. 
+
+Ein Beispiel für eine integrierte Datenvisualisierung von Spark-Ergebnissen ist [Apache Zeppelin].
+
+// TODO Beispiel
+
+=== Spark Cluster
+
+Spark kann sowohl auf existierenden Hadoop-Cluster-Infrastrukturen laufen, als auch selbst das Cluster-Management übernehmen.
+
+Für Entwicklung und Test kann auch lokal auf der eigenen Maschine ein Setup gestartet werden, in dem der Parallisierungsgrad über die Anzahl der Threads kontrolliert wird.
+
+Anders als in anderen Architekturen ist in Spark das Cluster-Management von der Ausführungssteuerung getrennt, daher kann Spark auch auf existierenden Cluster-Managern (Hadoop-YARN, Apache Mesos) laufen, es bringt aber auch einen eigenen (Standalone) Cluster-Manager mit, den man auch einfach auf der EC2-Infrastruktur deployen kann.
+Alles was es benötigt ist die Möglichkeit Ausführungsprozesse (Executors) auf dem Cluster zu erzeugen.
+
+image::https://spark.apache.org/docs/1.1.0/img/cluster-overview.png[]
+
+Dieses Prozessmanagement und die Partitionierung der Arbeit obliegt dem SparkContext(Driver), der pro "Anwendung" existiert. 
+Anwendungen sind voneinander isoliert, sie laufen in verschiedenen JVMs und können nur über externen Speicher miteinander kommunizieren.
+Aktionen auf RDDs werden als Jobs in Spark repräsentiert und über die notwendigen Datenpartitionen und über die einzelnen (voneinander abhängigen) Ausführungsschritte in Aufgaben (Tasks) aufgeteilt die dann entsprechend auf den Prozessen koordiniert platziert werden.
+
+Anwendungen werden als JARs mit Abhängigkeiten (fat-jar) mittels `spark-submit` an den Cluster übergeben (submitted) und dann auf der Driver-Maschine gestartet von wo aus der Spark-Context die weitere Verteilung übernimmt.
+Diese Verteilung kann noch individuell je nach Anforderungen konfiguriert und gesteuert werden.
+
+Netterweise bringt Spark sein eigenens Monitoring mit, dessen Weboberfläche auf der Driver-Maschine auf Port 4040 erreichbar ist:
+
+// todo monitoring image?
+
+=== Spark-SQL & DataFrames
+
+Spark-SQL, das kompatibel mit Hive ist, macht den Einsatz für all diejenigen einfacher, die viel vertrauter mit SQL als mit Java, Scala oder Python sind. 
+Daher können auch DBAs Spark leichter nutzen als andere Frameworks.
+Spark-SQL kann auch mit HBase und mittels JDBC und ODBC mit existierenden relationalen Datenbanken und anderen Quellen / Senken kommunizieren.
+
+Im Februar wurden Spark DataFrames vorgestellt, eine wichtige Erweiterung der Plattform.
+Wie schon vorher in Python und R sind DataFrames Repräsentationen von Tabellen, d.h. eine Gruppe von Spalten mit Werten.
+DataFrames können aus einer Vielzahl von Quellen erzeugt werden, aus RDDs, relationalen Datenbanken oder Hive, CSV oder JSON Dateien uvm.
+
+Auf diesen können wie gehabt Transformationen und Aktionen ausgeführt werden, dabei stehen auch die DataFrame-Operationen von Python (Pandas) und R zur Verfügung.
+Auf DataFrames kann auch mittels eines temporären Schemas Spark-SQL direkt ausgeführt werden.
+Eine sehr nützliche Eigenschaft ist der Join über mehrere Datenquellen, so können Daten aus einer relationalen DB mit JSON aus HDFS verknüpft werden und dann die Ergebnisse aggregiert und projiziert.
+
+.Spark DataFrames
+----
+# people.json
+{"name":"Michael","age":40,"bio":"Michael is father and husband."}
+{"name":"Rana","age":9,"bio":"Rana is a smart and friendly girl."}
+{"name":"Selma","age":7,"bio":"Selma is a clever and wild monkey."}
+
+val people = sqlContext.load("people.json", "json")
+// todo
+val young = people.filter(_.age < 21)
+
+# Increment everybody’s age by 1
+young.select(young.name, young.age + 1)
+
+# Count the number of young users by gender
+young.groupBy("gender").count()
+
+# Join young users with another DataFrame called logs
+young.join(logs, logs.userId == users.userId, "left_outer")
+ 
+
+You can also incorporate SQL while working with DataFrames, using Spark SQL. This example counts the number of users in the young DataFrame.
+
+young.registerTempTable("young")
+context.sql("SELECT count(*) FROM young")
+
+df = context.load("/path/to/people.json")
+# RDD-style methods such as map, flatMap are available on DataFrames
+# Split the bio text into multiple words.
+words = df.select("bio").flatMap(lambda row: row.bio.split(" "))
+# Create a new DataFrame to count the number of words
+words_df = words.map(lambda w: Row(word=w, cnt=1)).toDF()
+word_counts = words_df.groupBy("word").sum()
+----
+
+Der spannende Aspekt an DataFrames ist, dass sie vor der Ausführung massiv optimiert werden können, da mehr über die Struktur bekannt ist.
+So können Operationen und Prädikate schon zur Datenquelle (z.B. Datenbank oder JSON-Loader) geschickt werden, so dass die Filterung, Selektion oder Voraggregation schon dort erfolgen kann.
+
+Desweiteren werden vom "Catalyst"-Optimierer Ausdrücke voroptimiert und dann für die gesamten DataFrame-Operationen JVM-Bytecode erzeugt.
+Damit erhält man mit Python, R und Scala (die dann nur als eine Art DSL betrachtet werden) die gleiche hohe Leistung wie für handoptimierten Java-Code.
+
+=== GraphX
+
+Immer mehr Entscheidungen basieren nicht mehr nur auf der Aggregation, Selektion und Projektion tabellarischer Daten, sondern auf der Auswertung der vielfältigen Beziehungen von Entitäten zueinander. Anwendungsfälle wie Routing, Matchmaking, Empfehlungsberechnung und Netzwerk- und Sensormanagement benötigen die Repräsentation von Informationen als Netzwerk auf dem Berechnungen ausgeführt werden müssen.
+
+In der Vergangenheit habe ich mit Neo4j eine Echtzeit-Graphdatenbank vorgestellt, die besonders im OLTP Umfeld Anfragen sehr schnell beantworten kann, die entlang der Verbindungen meiner Domänenobjekte navigieren, um nützliche Informationen zu ermitteln.
+
+Obwohl Datenbanken wie Neo4j auch globale Berechnungen auf dem Graph annehmbarer Zeit vornehmen können, sind bestimmte Algorithmen ab einer bestimmten Größe (mehr als 1Mrd Beziehungen) auf einer parallelisierten Infrastruktur effizienter und schneller auszuführen.
+
+Hier kommen Ansätze wie Giraph (Hadoop), GraphLab (Dato) und GraphX ins Spiel. Sie stellen eine Graph-Abstraktion auf einer verteilten Architektur bereit. 
+
+GraphX ist der Ansatz von Spark, der sowohl Graph-Strukturen wie Knoten (Vertex) und Kanten (Edge) als auch Operationen darauf zur Verfügung stellt.
+Speichertechnisch werden sie klassisch auf zwei Tabellen abgebildet, einer Knoten-Tabelle (Id + Attribute), und einer Kanten-Tabelle (Start-Id, End-Id, Attribute).
+
+// todo pictures / API table
+
+Die Algorithmen auf dem Graph werden nach dem PregelPrinzip von Google ausgeführt, von Knoten werden Nachrichten mit Werten an ihre Nachbarn geschickt, die diese dann mit ihrem internen Zustand integrieren und neue Nachrichten aussenden.
+
+Hier ist ein Beispiel in Spark für die Implementierung des Page-Rank Algorithmus der prinzipiell aussagt, dass der Rang eines Knoten sich aus der Summe der Ränge der darauf weisenden Nachbarn (Rang durch die Anzahl ihrer ausgehenden Verbindungen) ermittelt.
+Mit jeder Iteration des Algorithmus wird diese Berechnung erneut durchgeführt, bis eine Stabilisierung eintritt, meist in 5-20 Iterationen.
+
+[source,scala]
+----
+// Laden der Kantenliste
+val graph = GraphLoader.edgeListFile(“hdfs://web.txt”)
+// Ermittlung der Kardinalitäten als Initial-Rang
+val prGraph = graph.joinVertices(graph.outDegrees)
+// Page-Rank, Initialisierung und 3 Funktionen zur
+// Nachrichtenverarbeitung und -aggregation und Ermittlung des neuen Inhalts
+val pageRank = prGraph.pregel(initialMessage = 0.0, iter = 10)
+  ((oldV, msgSum) => 0.15 + 0.85 * msgSum,
+          triplet => triplet.src.pr / triplet.src.deg,
+     (msgA, msgB) => msgA + msgB)
+
+// Top 20 Sortiert nach Rang
+pageRank.vertices.top(20) (Ordering.by(_._2)).foreach(println)
+----
+
+In Sparks GraphX wurden zur Beschleunigung der Berechnung von Graph-Funktionen eine Menge von Optimierungen in der Infrastruktur integriert.
+Sowohl die Partitionierung des Graphs zur parallelen Berechnung, Caching von Zwischenergebnissen und Limitierung der Hauptspeichernutzung nur für die auch wirklich genutzten Attribute helfen dabei.
+Es werden auch speziellere Optimierungen genutzt, z.b. die Analyse des Algorithmus-Codes, um nicht benötigte Standardoperationen die sonst ausgeführt würden wegzulassen. 
+Oder die Nutzung effizienter Speicherstrukturen wie Bitmaps oder spezieller Hash-Indizes.
+
+Damit konnten laut der Veröffentlichung [PageRankGraphX] z.B. die Berechnung von PageRank mit 20 Iterationen auf einem Twitter Datenset mit 1.4Mrd Kanten in 570 Sekunden vorgenommen werden. Die Berechnung erfolgte auf einem Cluster von 16 Maschinen mit jeweils 8 Kernen und 68 GB RAM.
+
+=== Zum Schluss
+
+Wie immer gibt es natürlich viel mehr zu berichten, als Platz in einer Kolumne zur Verfügung steht. Da wäre zum einen die Machine-Learning Bibliothek von Spark (MLlib), zum anderen die Integration mit den verschiedenen Hadoop-Distributionen und die Anwendung von Spark im größeren Kontext mit mehr praktischen Beispielen. Ich hoffe, die Referenzen im Anhang sind ein guter Ausgangspunkt für die weitere Arbeit mit Spark.
+
+Ich plane auch in einer weiteren Kolumne mal weiter hinter die Kulissen von Spark und Apache Flink zu schauen und die beiden Frameworks miteinander zu vergleichen.
+
+Wie immer würde ich mich über Feedback freuen, einfach per Tweet oder E-Mail.
+
+////
+--- snip ---
+
+
+From: http://dowhilezero.blogspot.com/ good writeup !
+
+Spark's primary abstraction is a distributed collection of items called a Resilient Distributed Dataset (RDD). RDDs can be created from Hadoop InputFormats (such as HDFS files) or by transforming other RDDs. Let's make a new RDD from the text of the README file in the Spark source directory:
+
+RDDs have _[actions](programming-guide.html#actions)_, which return values, and _[transformations](programming-guide.html#transformations)_, which return pointers to new RDDs.
+
+RDD actions and transformations can be used for more complex computations. Let's say we want to find the line with the most words:
+
+Formally, an RDD is a read-only, partitioned collection of records. RDDs can only be created through deterministic operations on either 
+(1) data in stable storage or 
+(2) other RDDs.
+
+Transformations are lazy, they are not computed unless they are required. At this point it'll be nice to compare RDDs with other distributed architectures like shared memory, distributed hash tables and distributed databases. 
+
+!! As you can see from the above table RDDs define coarse transformations unlike shared memory where reads and writes can be much more fine grained. Also, RDDs are immutable, transformation of an RDD produces a new RDD. 
+
+As it turns out, these two properties of RDD makes is extremely suitable for large scale data processing. One almost never needs fine grained access to large amount of data, the transformations available in RDDs are more than enough for most computations (especially when you think about how many diverse applications are currently working with only map and reduce). 
+
+!! The immutable property of an RDD makes it suitable for running computations in parallel; an RDD can distributed among partitions across multiple machines without worrying about sharing mutable states.
+
+Also because they are lazy, RDDs do not need to be materialized at all times. Instead, an RDD has enough information about how it was derived from other datasets (its lineage) to compute its partitions from data in stable storage. It's sort of like working backwards
+
+
+chain RDD's
+map() -> .reduce()
+
+One common data flow pattern is MapReduce, as popularized by Hadoop. Spark can implement MapReduce flows easily:
+
+{% highlight scala %}
+scala> val wordCounts = textFile.flatMap(line => line.split(" ")).map(word => (word, 1)).reduceByKey((a, b) => a + b)
+wordCounts: spark.RDD[(String, Int)] = spark.ShuffledAggregatedRDD@71f027b8
+{% endhighlight %}
+
+Here, we combined the [`flatMap`](programming-guide.html#transformations), [`map`](programming-guide.html#transformations) and [`reduceByKey`](programming-guide.html#transformations) transformations to compute the per-word counts in the file as an RDD of (String, Int) pairs. To collect the word counts in our shell, we can use the [`collect`](programming-guide.html#actions) action:
+
+{% highlight scala %}
+scala> wordCounts.collect()
+res6: Array[(String, Int)] = Array((means,1), (under,2), (this,3), (Because,1), (Python,2), (agree,1), (cluster.,1), ...)
+{% endhighlight %}
+
+## Caching
+Spark also supports pulling data sets into a cluster-wide in-memory cache. This is very useful when data is accessed repeatedly, such as when querying a small "hot" dataset or when running an iterative algorithm like PageRank. As a simple example, let's mark our `linesWithSpark` dataset to be cached:
+
+<div class="codetabs">
+<div data-lang="scala" markdown="1">
+
+{% highlight scala %}
+scala> linesWithSpark.cache()
+res7: spark.RDD[String] = spark.FilteredRDD@17e51082
+
+caching -> for page-rank !
+
+https://github.com/kbastani/neo4j-dbpedia-importer/blob/master/src/main/scala/DBpediaImporter.scala
+
+
+import org.apache.spark.api.java.*;
+import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.function.Function;
+
+public class SimpleApp {
+  public static void main(String[] args) {
+    String logFile = "YOUR_SPARK_HOME/README.md"; // Should be some file on your system
+    SparkConf conf = new SparkConf().setAppName("Simple Application");
+    JavaSparkContext sc = new JavaSparkContext(conf);
+    JavaRDD<String> logData = sc.textFile(logFile).cache();
+
+    long numAs = logData.filter(new Function<String, Boolean>() {
+      public Boolean call(String s) { return s.contains("a"); }
+    }).count();
+
+    long numBs = logData.filter(new Function<String, Boolean>() {
+      public Boolean call(String s) { return s.contains("b"); }
+    }).count();
+
+    System.out.println("Lines with a: " + numAs + ", lines with b: " + numBs);
+  }
+}
+
+<dependency>
+  <groupId>org.apache.spark</groupId>
+  <artifactId>spark-core_{{site.SCALA_BINARY_VERSION}}</artifactId>
+  <version>{{site.SPARK_VERSION}}</version>
+</dependency>
+
+RDD
+
+Window-Funktionen
+
+At a high level, every Spark application consists of a *driver program* that runs the user's `main` function and executes various *parallel operations* on a cluster. The main abstraction Spark provides is a *resilient distributed dataset* (RDD), which is a collection of elements partitioned across the nodes of the cluster that can be operated on in parallel. RDDs are created by starting with a file in the Hadoop file system (or any other Hadoop-supported file system), or an existing Scala collection in the driver program, and transforming it. Users may also ask Spark to *persist* an RDD in memory, allowing it to be reused efficiently across parallel operations. Finally, RDDs automatically recover from node failures.
+
+A second abstraction in Spark is *shared variables* that can be used in parallel operations. By default, when Spark runs a function in parallel as a set of tasks on different nodes, it ships a copy of each variable used in the function to each task. Sometimes, a variable needs to be shared across tasks, or between tasks and the driver program. Spark supports two types of shared variables: *broadcast variables*, which can be used to cache a value in memory on all nodes, and *accumulators*, which are variables that are only "added" to, such as counters and sums.
+
+
+The first thing a Spark program must do is to create a [SparkContext](api/scala/index.html#org.apache.spark.SparkContext) object, which tells Spark
+how to access a cluster. To create a `SparkContext` you first need to build a [SparkConf](api/scala/index.html#org.apache.spark.SparkConf) object
+that contains information about your application.
+
+Only one SparkContext may be active per JVM.  You must `stop()` the active SparkContext before creating a new one.
+
+{% highlight scala %}
+val conf = new SparkConf().setAppName(appName).setMaster(master)
+new SparkContext(conf)
+{% endhighlight %}
+
+The `appName` parameter is a name for your application to show on the cluster UI.
+`master` is a [Spark, Mesos or YARN cluster URL](submitting-applications.html#master-urls),
+or a special "local" string to run in local mode.
+In practice, when running on a cluster, you will not want to hardcode `master` in the program,
+but rather [launch the application with `spark-submit`](submitting-applications.html) and
+receive it there. However, for local testing and unit tests, you can pass "local" to run Spark
+in-process.
+
+
+In the Spark shell, a special interpreter-aware SparkContext is already created for you, in the
+variable called `sc`. You can set which master the
+context connects to using the `--master` argument, and you can add JARs to the classpath
+by passing a comma-separated list to the `--jars` argument.
+Streaming
+
+./bin/spark-shell --master local[4] --jars code.jar
+
+=== Machine Learning (MLib)
+
+http://mlbase.org/
+
+image::http://www.cs.ucla.edu/~ameet/mlbase_website/mlbase_website/website_images_8_14.png[]
+
+Implementing and consuming Machine Learning at scale are difficult tasks. MLbase is a platform addressing both issues, and consists of three components -- MLlib, MLI, ML Optimizer.            MLbase stack
+ML Optimizer: This layer aims to automating the task of ML pipeline construction. The optimizer solves a search problem over feature extractors and ML algorithms included in MLI and MLlib. The ML Optimizer is currently under active development.
+
+MLI: An experimental API for feature extraction and algorithm development that introduces high-level ML programming abstractions. A prototype of MLI has been implemented against Spark, and serves as a testbed for MLlib.
+
+MLlib: Apache Spark's distributed ML library. MLlib was initially developed as part of the MLbase project, and the library is currently supported by the Spark community. Many features in MLlib have been borrowed from ML Optimizer and MLI, e.g., the model and algorithm APIs, multimodel training, sparse data support, design of local / distributed matrices, etc.
+
+
+// TODO Bild Spark Cluster
+
+
+// TODO Tabelle von Transformationen und Operationen
+
+Spark revolves around the concept of a _resilient distributed dataset_ (RDD), which is a fault-tolerant collection of elements that can be operated on in parallel. There are two ways to create RDDs: *parallelizing*
+an existing collection in your driver program, or referencing a dataset in an external storage system, such as a
+shared filesystem, HDFS, HBase, or any data source offering a Hadoop InputFormat.
+
+List<Integer> data = Arrays.asList(1, 2, 3, 4, 5);
+JavaRDD<Integer> distData = sc.parallelize(data);
+distData.reduce((a, b) -> a + b)
+
+One important parameter for parallel collections is the number of *partitions* to cut the dataset into. Spark will run one task for each partition of the cluster. Typically you want 2-4 partitions for each CPU in your cluster. Normally, Spark tries to set the number of partitions automatically based on your cluster. However, you can also set it manually by passing it as a second parameter to `parallelize` (e.g. `sc.parallelize(data, 10)`). Note: some places in the code use the term slices (a synonym for partitions) to maintain backward compatibility.
+
+Spark can create distributed datasets from any storage source supported by Hadoop, including your local file system, HDFS, Cassandra, HBase, [Amazon S3](http://wiki.apache.org/hadoop/AmazonS3), etc. Spark supports text files, [SequenceFiles](http://hadoop.apache.org/common/docs/current/api/org/apache/hadoop/mapred/SequenceFileInputFormat.html), and any other Hadoop [InputFormat](http://hadoop.apache.org/docs/stable/api/org/apache/hadoop/mapred/InputFormat.html).
+
+Text file RDDs can be created using `SparkContext`'s `textFile` method. This method takes an URI for the file (either a local path on the machine, or a `hdfs://`, `s3n://`, etc URI) and reads it as a collection of lines. Here is an example invocation:
+
+* The `textFile` method also takes an optional second argument for controlling the number of partitions of the file. By default, Spark creates one partition for each block of the file (blocks being 64MB by default in HDFS), but you can also ask for a higher number of partitions by passing a larger value. Note that you cannot have fewer partitions than blocks.
+
+RDDs support two types of operations: transformations, which create a new dataset from an existing one, and actions, which return a value to the driver program after running a computation on the dataset. For example, map is a transformation that passes each dataset element through a function and returns a new RDD representing the results. On the other hand, reduce is an action that aggregates all the elements of the RDD using some function and returns the final result to the driver program (although there is also a parallel reduceByKey that returns a distributed dataset).
+
+
+All transformations in Spark are lazy, in that they do not compute their results right away. Instead, they just remember the transformations applied to some base dataset (e.g. a file). The transformations are only computed when an action requires a result to be returned to the driver program. This design enables Spark to run more efficiently – for example, we can realize that a dataset created through map will be used in a reduce and return only the result of the reduce to the driver, rather than the larger mapped dataset.
+
+
+.sortByKey(),
+Integration
+
+Resilient Distributed Datasets (RDDs)
+Spark revolves around the concept of a resilient distributed dataset (RDD), which is a fault-tolerant collection of elements that can be operated on in parallel. There are two ways to create RDDs: parallelizing an existing collection in your driver program, or referencing a dataset in an external storage system, such as a shared filesystem, HDFS, HBase, or any data source offering a Hadoop InputFormat.
+
+
+
+to add implict functions to spark context -> 
+
+Or, to also add code.jar to its classpath, use:
+
+$ ./bin/spark-shell --master local[4] --jars code.jar
+To include a dependency using maven coordinates:
+
+$ ./bin/spark-shell --master local[4] --packages "org.example:example:0.1"
+
+put implict functions on the spark context by
+set configuration on sc.set("key","value") , e.g. url, user, password
+
+see N1QL
+
+RDD's have to be serializable
+
+Node, Relationship -> check for GraphX equivalents the getNode() getRel() should return the GraphX variant
+
+only remote access -> cypher ?
+
+
+https://github.com/couchbaselabs/couchbase-spark-connector
+https://github.com/couchbaselabs/couchbase-spark-samples
+https://github.com/couchbaselabs/couchbase-spark-connector/wiki
+
+
+RDD transformation table
+-> show the most common ones from https://spark.apache.org/docs/latest/programming-guide.html#transformations
+    
+also javadoc: https://spark.apache.org/docs/latest/api/scala/index.html#org.apache.spark.rdd.PairRDDFunctions
+
+
+While most Spark operations work on RDDs containing any type of objects, a few special operations are only available on RDDs of key-value pairs. The most common ones are distributed “shuffle” operations, such as grouping or aggregating the elements by a key.
+
+In Scala, these operations are automatically available on RDDs containing Tuple2 objects (the built-in tuples in the language, created by simply writing (a, b)), as long as you import org.apache.spark.SparkContext._ in your program to enable Spark’s implicit conversions. The key-value pair operations are available in the PairRDDFunctions class, which automatically wraps around an RDD of tuples if you import the conversions.
+
+For example, the following code uses the reduceByKey operation on key-value pairs to count how many times each line of text occurs in a file:
+
+
+
+Transformations RDD -> RDD
+vs. actions RDD -> Scalar/Array
+
+Shuffle operations
+Certain operations within Spark trigger an event known as the shuffle. The shuffle is Spark’s mechanism for re-distributing data so that is grouped differently across partitions. This typically involves copying data across executors and machines, making the shuffle a complex and costly operation.
+
+
+In Spark, data is generally not distributed across partitions to be in the necessary place for a specific operation. During computations, a single task will operate on a single partition - thus, to organize all the data for a single reduceByKey reduce task to execute, Spark needs to perform an all-to-all operation. It must read from all partitions to find all the values for all keys, and then bring together values across partitions to compute the final result for each key - this is called the shuffle.
+
+Although the set of elements in each partition of newly shuffled data will be deterministic, and so is the ordering of partitions themselves, the ordering of these elements is not. If one desires predictably ordered data following shuffle then it’s possible to use:
+
+mapPartitions to sort each partition using, for example, .sorted
+repartitionAndSortWithinPartitions to efficiently sort partitions while simultaneously repartitioning
+sortBy to make a globally ordered RDD
+Operations which can cause a shuffle include repartition operations like repartition, and coalesce, ‘ByKey operations (except for counting) like groupByKey and reduceByKey, and join operations like cogroup and join.
+
+Performance Impact
+
+The Shuffle is an expensive operation since it involves disk I/O, data serialization, and network I/O. To organize data for the shuffle, Spark generates sets of tasks - map tasks to organize the data, and a set of reduce tasks to aggregate it. This nomenclature comes from MapReduce and does not directly relate to Spark’s map and reduce operations.
+
+Internally, results from individual map tasks are kept in memory until they can’t fit. Then, these are sorted based on the target partition and written to a single file. On the reduce side, tasks read the relevant sorted blocks.
+
+Certain shuffle operations can consume significant amounts of heap memory since they employ in-memory data structures to organize records before or after transferring them. Specifically, reduceByKey and aggregateByKey create these structures on the map side and 'ByKey operations generate these on the reduce side. When data does not fit in memory Spark will spill these tables to disk, incurring the additional overhead of disk I/O and increased garbage collection.
+
+Shuffle also generates a large number of intermediate files on disk. As of Spark 1.3, these files are not cleaned up from Spark’s temporary storage until Spark is stopped, which means that long-running Spark jobs may consume available disk space. This is done so the shuffle doesn’t need to be re-computed if the lineage is re-computed. The temporary storage directory is specified by the spark.local.dir configuration parameter when configuring the Spark context.
+
+
+RDD Persistence
+One of the most important capabilities in Spark is persisting (or caching) a dataset in memory across operations. When you persist an RDD, each node stores any partitions of it that it computes in memory and reuses them in other actions on that dataset (or datasets derived from it). This allows future actions to be much faster (often by more than 10x). Caching is a key tool for iterative algorithms and fast interactive use.
+
+You can mark an RDD to be persisted using the persist() or cache() methods on it. The first time it is computed in an action, it will be kept in memory on the nodes. Spark’s cache is fault-tolerant – if any partition of an RDD is lost, it will automatically be recomputed using the transformations that originally created it.
+
+In addition, each persisted RDD can be stored using a different storage level, allowing you, for example, to persist the dataset on disk, persist it in memory but as serialized Java objects (to save space), replicate it across nodes, or store it off-heap in Tachyon. These levels are set by passing a StorageLevel object (Scala, Java, Python) to persist(). The cache() method is a shorthand for using the default storage level, which is StorageLevel.MEMORY_ONLY (store deserialized objects in memory)
+
+
+
+
+http://tachyon-project.org/
+Tachyon is a memory-centric distributed storage system enabling reliable data sharing at memory-speed across cluster frameworks, such as Spark and MapReduce. It achieves high performance by leveraging lineage information and using memory aggressively. Tachyon caches working set files in memory, thereby avoiding going to disk to load datasets that are frequently read. This enables different jobs/queries and frameworks to access cached files at memory speed.
+
+Tachyon is Hadoop compatible. Existing Spark and MapReduce programs can run on top of it without any code change.
+
+
+////
+
+== Referenzen
+
+* [MapReducePaper] http://research.google.com/archive/mapreduce.html
+* [Apache Spark] https://spark.apache.org/
+* [SortingBenchmark]https://databricks.com/blog/2014/10/10/spark-petabyte-sort.html
+* [SparkEcosystem] http://emerginginsightsnow.com/2015/05/17/apache-spark-ecosystem-grows-rapidly-has-hadoop-met-its-match/
+* [DZone Refcard Spark] http://refcardz.dzone.com/refcardz/apache-spark
+* [SparkSlides]http://slideshare.net/databricks/databricks-primer-spark
+* [Spark Ökosystem]http://emerginginsightsnow.com/2015/05/17/apache-spark-ecosystem-grows-rapidly-has-hadoop-met-its-match/
+* [Apache Flink] http://data-artisans.com/apache-flink-new-kid-on-the-block.html
+* [GraphXPaper] https://amplab.cs.berkeley.edu/wp-content/uploads/2014/02/graphx.pdf
+* [Hadoop] https://blog.codecentric.de/2013/08/einfuhrung-in-hadoop-die-wichtigsten-komponenten-von-hadoop-teil-3-von-5/
+* [Zeppelin Data Visualization for Spark] https://zeppelin.incubator.apache.org/
+////
+* [Apache Flink] http://flink.apache.org/[Apache Flink, war Stratosphere Forschungsprojekt der TU-Berlin] -> 
+
+http://nathanmarz.com/blog/history-of-apache-storm-and-lessons-learned.html
+* [Apache Ignite vs Spark] http://drcos.boudnik.org/2015/04/apache-ignite-vs-apache-spark.html
+* [Apache Ignite] http://www.infoq.com/news/2014/12/gridgain-ignite
+* http://www.heise.de/developer/meldung/Big-Data-Apache-Flink-wird-Top-Level-Projekt-2516177.html
+* http://tachyon-project.org/[Apache Tachyon hauptspeicherzentriertes Speichersystem]
+* http://www.infoq.com/news/2014/12/gridgain-ignite[Apache Ignite, war GridGain]
+
+twitter_rv dataset: http://an.kaist.ac.kr/traces/WWW2010.html
+////
