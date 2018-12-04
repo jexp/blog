@@ -1,5 +1,6 @@
 = Heiße Bohne - Java Profiling mit Flamegraphs
-:img: ../../img
+// :img: ../../img
+:img: https://github.com/jexp/blog/raw/gh-pages/img
 
 Eine meiner liebsten Beschäftigungen ist das Finden von Performance-Hotspots in Programmen und deren Behebung.
 So kann ich mit wenig Aufwand zu of ziemlich beeindruckenden Leistungssteigerungen beitragen und habe auch noch Spass dabei.
@@ -125,13 +126,16 @@ xxxx nutzt den JFR Parser von Marcus Hirt, um die relevanten Informationen für 
 
 === Kombinierte Stacktraces
 
-Usprünglich gab es das Problem, dass man entweder nur OS oder JVM Traces erhalten konnte, für ein ganzheitliches Bild einer Anwendung ist es aber notwendig beide Quellen zu korrelieren.
+Usprünglich gab es das Problem, dass man entweder nur OS oder JVM Traces erhalten konnte, für ein ganzheitliches Bild einer Anwendung ist es aber notwendig beide Quellen zu korrelieren [NetflixFGMixed].
 Daher nutzten verschiedene Tools Workarounds, um diese miteinander zu verbinden.
 
 Im OS enthält das FramePointer Register die Adresse des letzten Methodenaufrufs im Call-Stack und wird von System-Profilern zum Tracing benutzt.
 Virtuelle Maschinen wie die JVM berechnen die Adressen für Aufrufe vom StackPointer und brauchen daher dieses Register nicht und nutzen es für andere Zwecke.
-Seit dem JDK 8u60 gibt es die HotSpot Option `-XX:+PreserveFramePointer` relevante, die HotSpot verbietet, das FramePointer Register zu überschreiben.
+Seit dem JDK 8u60 gibt es die HotSpot Option `-XX:+PreserveFramePointer` relevante, die HotSpot anweist, das FramePointer Register mit dem Wert des StackPointers zu füllen und nicht für Optimierungen zu nutzen.
 Damit ist die Korrelation wieder möglich, kann aber zu Leisungseinbussen führen, wenn die JIT-Optimierungen ein zusätzliches Register benötigt hätten.
+
+Desweiteren wird die Symboltabelle für JIT generierte Methoden für System-Profiler benötigt.
+Das ist ein Feature, welches `perf-map-agent` mitbringt, damit können diese Informationen zu Beginn und Ende der Aufzeichnung in eine Datei geschrieben und mit den Adressen der System-Events verknüpft werden.
 
 .Beispiel für kombinierte Stacktraces
 image::http://www.brendangregg.com/FlameGraphs/cpu-mixedmode-flamegraph-java.svg[]
@@ -310,18 +314,52 @@ Die Optionen des Tools werden über Umgebungsvariablen kontrolliert, z.B. `DTRAC
 | PERF_RECORD_FREQ | DTRACE_FREQ | Samplingfrequenz
 | PERF_FLAME_OUTPUT | DTRACE_FLAME_OUTPUT | Dateiname für Flamegraph
 | PERF_JAVA_TMP | DTRACE_JAVA_TMP | Temp-Verzeichnis, default: `/tmp`
-// | PERF_DATA_FILE | DTRACE_DATA_FILE | Temp-Verzeichnis, default: `type-<pid>.data`
+| PERF_DATA_FILE | DTRACE_DATA_FILE | Temp-Verzeichnis, default: `type-<pid>.data`
 |===
 ////
 
-.Erzeugung eines Flamegraphs unter OSX
+.Erzeugung eines Flamegraphs unter Linux & OSX
 ----
-export DTRACE_FLAME_OUTPUT=/tmp/flamegraph.svg
+# OSX
+DTRACE_FLAME_OUTPUT=/tmp/flamegraph.svg \
 bin/dtrace-java-flames <PID>
-open -a "Google Chrome" /tmp/flamegraph.svg
+
+# Linux
+PERF_FLAME_OUTPUT=/tmp/flamegraph.svg \
+bin/perf-java-flames <PID>
 ----
 
-Wenn möglich sollte man die eigene Anwendung mit `-XX:+PreserveFramePointer` (ab Java 8u60) laufen lassen.
+Hinter den Kulissen erfolgen diese Aufrufe (hier für `perf` statt `dtrace`):
+
+.Detailbeispiel für perf_events mit perf-map-agent und flamegraph
+----
+# Perf Events für 30 Sekunden aufzeichnen
+sudo perf record -F 99 -p <pid> -g -- sleep 30
+
+# Symbol Table ausschreiben mittels perf-map-agent
+java -cp attach-main.jar:$JAVA_HOME/lib/tools.jar \
+  net.virtualvoid.perf.AttachOnce <pid>
+
+# Rechte der Tabellen ändern auf Root
+sudo chown root /tmp/perf-*.map
+
+# Flamegraph erzeugen
+sudo perf script -f comm,pid,tid,cpu,time,event,ip,sym,dso,trace | \
+    stackcollapse-perf.pl | \
+    flamegraph.pl --color=java --hash > /tmp/flamegraph.svg
+----
+
+In [NetflixFGMixed] gibt es eine Reihe weiterer Beispiele für die Nutzung von `perf record` mit `perf-map-agent`, um Flamegraphs für einzelne oder alle Java-Prozesse im System zu erstellen.
+
+`stackcollapse-perf` hat auch Optionen, um separate Säulen pro Prozess `--pid`, Thread `--tid` oder Kernel-Aufufe `--kernel` zu generieren, was bei Bedarf recht nützlich sein kann.
+
+Da die Ausgabe von `stackcollapse-perf.pl` zeilenorientiert ist, kann man sie auch gut nach PID oder bestimmten Informationen mittels grep filtern z.B. `| grep -v cpu_idle`
+
+Wie schon erwähnt, benötigt man `-XX:+PreserveFramePointer` für kombinierte Traces von OS und der JVM.
+
+In den Stacktraces von `perf record` können Java Methoden im Call Stack fehlen, zumeist ist das auf JIT Optimierungen wie Inlining zurückzuführen.
+Mittels `-XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints` kann man dem etwas entgegenwirken.
+Die vollen Stacktraces können mit Hilfe des JVM Tool Interfaces (JVMTI) bzw. einer Option von perf-map-agent (`PERF_MAP_OPTIONS=unfoldall`) wieder restauriert werden, falls notwendig.
 
 === Async Profiler
 
@@ -436,6 +474,27 @@ Damit kann man visuell die Häufung von Ereignissen anhand der Färbung gut iden
 
 image::https://cdn-images-1.medium.com/max/1080/1*v9ooXXqmObcOOWYo87NxjQ.png[]
 
+== IntelliJ Integration
+
+Seit der Version 2018.3 hat IntelliJ diese Funktionalität schon integriert.
+Zumindest auf Linux und OSX (Windows geplant) kann sowohl Programmläufe und Tests mit Async-Profiler durchführen, als auch schon laufende Programme analysieren.
+Dabei werden, wie schon erläutert sowohl JVM als auch OS Aufrufe protokolliert, in Häufigkeit, Zeit und Speichernutzung.
+Schon existierende Dumps von Async-Profiler können auch importiert werden.
+
+image::https://d3nmt5vlzunoa1.cloudfront.net/idea/files/2018/09/ProfilerRun.png[]
+
+Die Ergebnisse des Profilers sind dann gleich als Flamegraphs, Aufrufbäume und Methodenlisten verfügbar.
+Trotz der gewöhnungsbedürftigen Interaktion mit der Visualiserung kann man scrollen, vergrößern und sich mittels Doppelklick auf Ausschnitte fokussieren.
+Es kann auch interakiv nach Methodennamen gesucht oder zum Quellcode gesprungen werden.
+
+image::https://d3nmt5vlzunoa1.cloudfront.net/idea/files/2018/09/Profiler.png[]
+
+=== Java Profiler & FlameGraph Plugin
+
+Das IntelliJ Plugin [FGPlugin] bringt noch ein paar andere Features mit, als die integrierte Unterstützung.
+Zum Beispiel können Aufzeichnungen von JFR, YourKit und dem integrierten Profiler geladen und visualisiert werden.
+Mit letzterem können Methodenfilter genutzt und Methoden-Parameter- und -Rückgabewerte aufgezeichnet werden.
+
 ////
 ==== Jetbrains Plugin
 
@@ -465,21 +524,6 @@ To upload your .jfr or .ser file choose Tools | Flamegraph Profiler | Upload Fil
 Detailed description at github.com/kornilova-l/flamegraph-visualizer
 ----
 ////
-
-== IntelliJ Integration
-
-Seit der Version 2018.3 hat IntelliJ diese Funktionalität schon integriert.
-Zumindest auf Linux und OSX (Windows geplant) kann sowohl Programmläufe und Tests mit Async-Profiler durchführen, als auch schon laufende Programme analysieren.
-Dabei werden, wie schon erläutert sowohl JVM als auch OS Aufrufe protokolliert, in Häufigkeit, Zeit und Speichernutzung.
-Schon existierende Dumps von Async-Profiler können auch importiert werden.
-
-image::https://d3nmt5vlzunoa1.cloudfront.net/idea/files/2018/09/ProfilerRun.png[]
-
-Die Ergebnisse des Profilers sind dann gleich als Flamegraphs, Aufrufbäume und Methodenlisten verfügbar.
-Trotz der gewöhnungsbedürftigen Interaktion mit der Visualiserung kann man scrollen, vergrößern und sich mittels Doppelklick auf Ausschnitte fokussieren.
-Es kann auch interakiv nach Methodennamen gesucht oder zum Quellcode gesprungen werden.
-
-image::https://d3nmt5vlzunoa1.cloudfront.net/idea/files/2018/09/Profiler.png[]
 
 == Praktisches Beispiel: Methodenreferenzen
 
@@ -611,7 +655,7 @@ Für Neo4j haben wir das seit ca. 2 Jahren mit viel Erfolg im Einsatz.
 * [WakartFGPreso] https://qconlondon.com/system/files/presentation-slides/illuminatingthejvm-qconlondon.pdf
 * [FGCodeCentric] https://blog.codecentric.de/en/2017/09/jvm-fire-using-flame-graphs-analyse-performance/
 // * https://nodesource.com/blog/understanding-cpu-flame-graphs/
-* [NetFlixFGDeepDive] https://medium.com/netflix-techblog/java-in-flames-e763b3d32166
+* [NetFlixMixedFG] https://medium.com/netflix-techblog/java-in-flames-e763b3d32166
 
 * [JFR Flamegraphs] https://github.com/chrishantha/jfr-flame-graph
 * [JEP-328] http://openjdk.java.net/jeps/328
@@ -622,7 +666,7 @@ Für Neo4j haben wir das seit ca. 2 Jahren mit viel Erfolg im Einsatz.
 
 * [Netflix-Flamescope] https://medium.com/netflix-techblog/netflix-flamescope-a57ca19d47bb
 * [D3-FlameGraph] https://github.com/spiermar/d3-flame-graph
-* [JB Plugin FG Profiler]: https://plugins.jetbrains.com/plugin/10305-flamegraph-profiler
+* [FGPlugin]: https://plugins.jetbrains.com/plugin/10305-flamegraph-profiler
 * IDEA-EAP: https://blog.jetbrains.com/idea/2018/09/intellij-idea-2018-3-eap-git-submodules-jvm-profiler-macos-and-linux-and-more/
 * [jfr-flame-graph] http://isuru-perera.blogspot.de/2015/05/flame-graphs-with-java-flight-recordings.html
 * [IDEA-ISSUE] https://youtrack.jetbrains.com/issue/IDEA-199810

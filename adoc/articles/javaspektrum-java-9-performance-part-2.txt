@@ -1,0 +1,296 @@
+= Ein Blick hinter die Kulissen von Java 9, Teil 2
+
+Seit der Veröffentlichung meines ersten Artikel über Java 9 ist die Entwicklung und besonders auch der *Test des JDK 9* weiter vorangeschritten.
+
+Bei einem Vortrag von Dalibor Topic beim JUG Saxony Day Ende September in Dresden hat er noch einmal explizit um ein paar Dinge gebeten. 
+
+Zum einen gibt es das Java 9 Qualitätssicherungsprogramm (qualiy outreach), in dem Java Projekte ihre Kompatibilität zu Java 9 überprüfen und veröffentlichen können. 
+Zur Zeit sind 80 Projekte Mitglied des Programms, darunter Programmiersprachen wie Groovy, Build-Tools wie Maven aber auch Server wie Wildfly. 
+Falls Sie an einem größeren, offenen Java Projekt mitwirken, ziehen Sie bitte in Betracht auch an diesen Programm teilzunehmen.
+
+Zudem und das gilt für jeden Anwender von Java, gibt es den Aufruf, schon jetzt die Early Access Builds des Java 9 JDKs zu testen und vor allem Rückmeldung über Probleme und Inkompatibilitäten zu geben.
+
+Nun aber wieder zurück zu spannenden Features in Java 9, die sonst nicht soviel Beachtung wie JigSaw finden.
+
+== JEP 223 Änderung des Formats der Java-Version
+
+Javas Versionsnummer waren schon immer etwas seltsam, sie enthielten aus historischen Gründen noch die führende 1 und das "u" für Update.
+
+Mit Java 9 wird es eine klarere Versionierung geben, die dem üblichen Verständnis entspricht:
+`$MAJOR.$MINOR.$SECURITY+$BUILD`, z.b. für das erste Security nach dem GA, Update, Build 20 `9.0.1+20`.
+
+Das ist zum einen erfreulich, zum anderen, muss man sich dessen bewusst sein, dass Code, der zur Zeit auf Java Versionen tested, dann sehr wahrscheinlich nicht mehr funktioniert.
+Die Dokumentation zum JEP listet Stolperfallen und Tips (z.B. reguläre Ausdrücke) zum Thema.
+
+== JEP 260: Kapselung interner APIs
+
+Teilweise JigSaw geschuldet, aber noch viel mehr den Aufräumarbeiten im JDK, ist der Zugriff auf interne APIs besonders `sun.*` nicht mehr möglich.
+
+Prominentestes Beispiel für die internen APIs ist natürlich `sun.misc.Unsafe`, das sich aufgrund seiner vielen Möglichkeiten (z.B. um effizient auf Hauptspeicher zuzugreifen) großer Beliebtheit erfreut.
+
+Bisher gab es dafür Compiler Warnungen, die auch nicht abschaltbar waren.
+
+Das ist besonders von Bedeutung für Entwickler von leistungskritischen Systemen wie Datenbanken, Netzwerk- und Nachrichtenverabeitungsysteme. 
+
+Aber auch Anwender, die einige der Effizienztips aus vergangenen Kolumnen nutzen, müssten sich umstellen, wie das konkret aussieht, dazu später mehr.
+
+Unsafe selbst soll es für einen Übergangszeitraum zugreifbar bleiben, bis alle Funktionalitäten in andere APIs portiert wurden.
+
+Um zu testen, ob eigene Anwendungen oder genutzte Bibliotheken interne APIs benutzen, kann man das Tool `jdeps` mit dem Flag `-jdkinternals` benutzen. 
+
+Hier ein Beispiel für Neo4j:
+----
+$JAVA_HOME/bin/jdeps -jdkinternals neo4j-io-3.1.0-SNAPSHOT.jar 
+
+neo4j-io-3.1.0-SNAPSHOT.jar -> $JAVA_HOME/jre/lib/rt.jar
+ org.neo4j.io.pagecache.impl.SingleFilePageSwapper (neo4j-io-3.1.0-SNAPSHOT.jar)
+   -> sun.nio.ch.FileChannelImpl                       JDK internal API (rt.jar)
+
+Warning: JDK internal APIs are unsupported and private to JDK implementation that are
+subject to be removed or changed incompatibly and could break your application.
+Please modify your code to eliminate dependency on any JDK internal APIs.
+For the most recent update on JDK internal API replacements, please check:
+https://wiki.openjdk.java.net/display/JDK8/Java+Dependency+Analysis+Tool
+----
+
+Im Zuge der Aufräumarbeiten wurden auch einige APIs entfernt.
+
+Durch Änderungen von APIs und Nutzung neuer APIs von Java9 können damit gebaute Klassen und Jars inkompatibel mit früheren JDK Versionen werden.
+Daher stellt das neue JDK einige Mechanismen bereit, um die Abwärtskompatibilität zu bewahren.
+
+== JEP 247: Cross Compilation
+// 247: Compile for Older Platform Versions
+
+Falls es wirklich notwendig ist, können, wie schon zuvor, Klassen für alte JDK Versionen erzeugt werden. 
+Dazu muss man javac die `-release N` Option übergeben, die das Äquivalent zu `-source N -target N -bootclasspath <bootclasspath-from-N>` darstellt.
+Die API-Klassen und Signaturen der älteren Versionen werden im JDK in `$JDK_ROOT/lib/ct.sym file` bereitgestellt.
+
+== JEP 238: Multi-Release Jars
+
+Um sicherzustellen, dass mit und für Java 9 erzeugte Jar Dateien auch mit älteren Versionen funktionieren, können diese in Zukunft mehrere Versionen einer Klasse enthalten.
+
+Sogenannte Multi-Release-Jars stellen vor allem eine clevere Struktur innerhalb des Archives dar.
+Dabei liegen die Klassen für die ältere Version der JVM im Wurzelverzeichnis.
+
+Im Manifest gibt es dann einen `Multi-Release: true` Eintrag.
+In `META-INF` gibt es ein neues Unterverzeichnis namens `versions`, das dann wieder Verzeichnisse für die anderen JDK-Versionen mit den entsprechenden, abweichenden Klassen enthält.
+
+Dazu mussten diverse Tools, wie `jar`,`javac`, `javap` usw als auch die Classloader angepasst werden.
+
+----
+jar root
+  - B.class
+  - D.class
+  - META-INF
+     - versions
+        - 9
+           - B.class
+----
+
+== JEP 269 Factorymethoden für Collections
+
+Viele hofften auf kompakte literale Notation für Listen und Maps, wie bei Feldern.
+Das hat sich leider nicht erfüllt, aber es hat für einige statische Factory-Methoden auf den `List`,`Set` und `Map` Interfaces gereicht
+Ähnlich APIs bieten viele Collection Bibliotheken es schon seit Jahren an.
+
+Diese sind nicht so elegant und haben wahrscheinlich auch keine Compilerunterstützung, wie Felder oder Stringverknüpfung.
+Zumindest aber Overloads für die Methoden mit bis zu 10 Argumenten
+
+Für `Map.of` gibt es typsichere Überladung mit bis zu 10 Schlüsseln und Werten. 
+Für mehr Elemente muss dann `Map.ofEntries` benutzt werden, denen ein Feld von `Map.Entry<K,V>` Instanzen übergeben wird.
+Dazu gibt es eine neue Factory Methode `Map.entry` die statisch importiert konkrete `Entry` Objekte erzeugen kann.
+
+Es wird keine Einfügereihenfolge garantiert, wer das benötigt, muss dann doch auf LinkedHashMap zurückgreifen.
+Die erzeugten Instanzen sind unveränderlich und optimiert implementiert für kleine Mengen von Werten.
+
+`Null` ist als Wert hier nirgendwo erlaubt, weder bei den Collections noch bei Map als Schlüssel oder Wert.
+
+.Factory Methoden für Collections in jshell
+[source,java]
+----
+Set.of(true,false,false,true) 
+                   // duplicate Element Exception
+List.of(null)      // NullPointerException
+Set.of(true,false) // [true,false]
+List.of(1,2,3)     // [1,2,3]
+Map.of("name","Michael","age",41,"male",true) 
+                   // {name=Michael, male=true, age=41}
+
+import static java.util.Map.entry
+Map.ofEntries(entry("MSFT",57.6),entry("AAPL",113.05),
+              entry("ORCL",39.28))
+                   // {ORCL=39.28, MSFT=57.6, AAPL=113.05}
+----
+
+=== JEP 243:  Java-Level JVM Compiler Interface
+
+In einem früheren Artikel [HungXX] hatte ich Truffle (AST Framework) und Graal (optimierender Compiler) beschrieben.
+
+Dort wurde die Notwendigkeit dargestellt, dass die dynamische Neuübersetzung von Code zur Laufzeit der JVM durch einen externen Compiler eine Schnittstelle benötigt, die in der Standard-JVM nicht vorhanden war.
+Bisher gab es einen spezielle Variante von Java 8 die das ermöglichte, in Java 9 soll das nun direkt in der Standard-JVM funktionieren.
+
+Dazu wird das JVM Compiler Interface (JVMCI) bereitgestellt, dass einem externen Compiler ermöglicht, auf die internen JVM Datenstrukturen für Klassen, Felder, Methoden und Metadaten zuzugreifen.
+Desweiteren wird dieser Compiler für die Neuübersetzung von Methoden aufgerufen und kann dann seine Ergebnisse in der JVM integrieren.
+
+In Java 9 ist die Schnittstelle noch experimentell und muss durch geeignete Flags aktiviert werden:
+
+----
+-XX:+UnlockExperimentalVMOptions -XX:+EnableJVMCI -XX:+UseJVMCICompiler -Djvmci.Compiler=<name of compiler>
+----
+
+Sicherheitsüberlegungen sind hier ein wichtiger Aspekt, da der Zugriff auf die internen JVM Daten und die Installation compilierten Codes sehr streng kontrolliert werden muss.
+Zur Absicherung der Schnittstelle wurde das Modul-System von Java 9 benutzt (JSR261).
+
+Ich finde das sehr spannend, da man so die Möglichkeiten des Truffle-Graal Gespanns für hochperformante Ausführung anderer Sprachen und DSLs in Java 9 direkt nutzen kann. 
+Ich denke wir werden für Java 9 sehr effiziente Varianten von Ruby, R, Python usw. nutzen können.
+
+
+////
+== Verbesserungen im Java-Compiler
+=== JEP 165:  Compiler Control
+
+Provide compiler flags for dedicated areas (classes, methods), e.g to work around bugs or enable certain features in restricted areas.
+=== JEP 199:  Smart Java Compilation, Phase Two
+=== JEP 215:  Tiered Attribution for javac
+=== JEP 197:  Segmented Code Cache
+=== JEP 270:  Reserved Stack Areas for Critical Sections
+////
+
+== Schneller Zugriff auf Variable und Methoden mittels Reflection und Invoke-Dynamik
+
+=== JEP 193:  Variable Handles
+
+Mit der schon erläuterten späteren Absicht, `sun.misc.Unsafe` zu ersetzen, muss für die notwendigen APIs die Unsafe bereitstellt, Ersatz geschaffen werden.
+
+Für den direkten, atomaren Zugriff auf Felder von Objekten, Feldelementen und Speicherbereichen wird diese Aufgabe in Zukunft von VarHandles übernommen.
+
+Dabei sollen die gewünschten Zugriffseffekte in Bezug auf das Java Speichermodell möglich sein, wie zum Beispiel eine volatile oder atomare Schreiboperation.
+
+Anders als bei Unsafe dürfen aber bestimmte Sicherheitsmechanismen nicht ausgehebelt werden, wie z.B. der Zuweisungstypcheck eines Objektfeldes oder die Indexüberprüfung bei Array-Zugriffen.
+
+Ein Ziel bei der Entwicklung war diesselbe Geschwindgkeit wie aber bessere Nutzerfreundlichkeit als für Unsafe.
+Der vom Java Compiler generierte Assembler-Code sollte dem von Unsafe genutzen weitgehend entsprechen.
+
+Für ihre Realisierung mussten Erweiterungen im JDK, der JVM und im Compiler vorgenommen werden.
+
+Warum ist das alles notwendig?
+
+Besonders in hochparallelen, perfomance-kritischen Anwendungen wie z.B. Big Data Frameworks und Datenbanken will man mit minimalem Aufwand and Speicher und CPU sichere Programme schreiben. 
+Dazu sind atomare Operationen auf Feldern eine Grundvoraussetzung.
+
+Man kann das ganze zwar korrekt mit dem Hilfsklassen in `java.util.concurrent` erreichen, die CAS benutzen, wie `AtomicInteger` oder die verschiedenen `FieldUpdater`, aber halt nicht effizient.
+Daher wurde in der Vergangenheit meist zu Unsafe gegriffen, um solche Operationen umzusetzen.
+In Zukunft sollen das VarHandles übernehmen. 
+
+*Wie sieht deren API aus?*
+
+Zum einen werden VarHandles ähnlich wie MethodHandles über `MethodHandles.lookup()` ermittelt.
+
+Dann enthält VarHandle (siehe [VarHandle] sehr viele Methoden für Lese-, Schreib-, Bit-, CompareAndSwap-, Additions- und andere Zugriffsoperationen auf die Felder, wobei nicht jede Operation auf jedem Datentyp definiert ist.
+Z.B. gibt es keine Modifikationen auf `final` Feldern, keine `add*`-Operation auf booleschen Feldern, oder zur Zeit noch keine Bitoperationen auf `float` und `double`.
+Jede dieser Methoden hat dokumentierte Speicher-Sichtbarkeitsregeln, wie zum Beispiel volatiler Zugriff (auch ohne dass die Variable als `volatile` definiert ist).
+
+Desweiteren gibt es eine Handvoll von statischen Marker-Methoden, wie z.B. `loadLoadFence()`, die die erlaubten  Operations-Reordering-Regeln abbilden (siehe Java-Memory-Modell Artikel [Hung]).
+
+Hier ist ein einfaches Beispiel:
+
+[source,java]
+----
+class Transactions {
+    int count;
+}
+VarHandle counter = 
+  MethodHandles.lookup().in(Transactions.class)
+  .findVarHandle(Transactions.class, "count", int.class);
+
+Transactions tx = new Transactions();
+
+int vol = (int)counter.getAndAdd(tx,1); // 0
+counter.get(tx); // 1
+counter.compareAndSet(tx,1,2); // true
+counter.getVolatile(tx); // 2
+----
+
+Um von den Compiler Optimierungen (Intrinsics, Constant-Folding) zu profitieren, sollte das VarHandle aber in einer `static final` Konstante abgelegt werden (und in einem static Initializer Block initialisiert).
+
+Ein interessanter Aspekt ist wie die Implementierung von VarHandles mit einer einzigen abstrakten Klasse vorgenommen werden kann, deren Methodensignatur aus einem Object-varargs und einem Object Rückgabewert bestehen, zum Bespiel: `Object VarHandle.getAndAdd(Object...args)`.
+
+Diese Methoden werden "signature-polymorphic" genannt, da sie nicht auf Subklassenvererbung beruhen, sondern rein vom Compiler und der Runtime gehandhabt werden. 
+Für die Bestimmung der Zieltypen der Methodenparameter werden die Typen der übergebenen Parameter genutzt.
+
+Damit wird die Compilierbarkeit sichergestellt, der Bytecode enthält die Informationen über die genutzen Typ-Parameter. Es wird aber kein Boxing von Objekten vorgenommen, das sieht nur so aus.
+
+Intern wird dann der Methodenaufruf komplett durch die Implementierung der Operation ersetzt, wie bei einer intrinsischen Methode.
+
+Der Rückgabetyp wird noch nicht aus Ziel-Typ der Call-Site inferiert, so dass immer noch ein Type-Cast notwendig ist.
+
+Ein cooles Feature ist die Behandlung eines Speicherbereiches (byte-Array) als die Repräsentation eines anderen Datentyps, z.B. `long` oder `double`.
+
+Ein Fallstrick ist hier aber die Berechung des Indexes für den Wert, den man selbst mit der Datenbreite (z.b. 8 bytes pro long Wert) inkrementieren muss.
+
+----
+byte[] bytes = new byte[100]
+VarHandle view = MethodHandles
+  .byteArrayViewVarHandle(long[].class, ByteOrder.BIG_ENDIAN);
+
+view.get(bytes,8) // 0
+
+view.set(bytes,8,-1L)
+
+view.get(bytes,8) // -1
+
+view.set(bytes,0,98L)
+
+// byte[10000] { 0, 0, 0, 0, 0, 0, 0, 98, -1, -1, -1, -1, -1, -1, -1, -1, 0, 0, 0
+----
+
+Leider wurde in diesem JEP nicht die Gelegenheit genutzt, ähnlich wie für Methoden-referenzen, eine Feld-Referenz einzuführen, ala `Transactions::count`.
+
+////
+
+=== JEP 274:  Enhanced Method Handles
+
+MethodHandles, die API, die geschaffen wurde, um einen Zugriff auf `invokevirtual` von Java aus zu erreichen, ist schon ziemlich umfangreich.
+Trotzdem gibt es diverse Anwendungsfälle, die mit der API zur Zeit noch nicht, oder nur schwierig realisiert werden können.
+
+////
+
+== JEP 248:  Make G1 the Default Garbage Collector / JEP 158: Unified JVM Logging / GC Logging
+
+Nachdem in Java 7 und 8 reichlich Gelegenheit war, den G1 Collector in vielen Projekten und Anwendungen auf Herz und Nieren zu testen, und die doch vorhandenen Probleme zu beseitigen, fühlt sich Oracle für Java 9 sicher genug, diesen Garbage Collector zum Standard zu erklären.
+
+Damit können Java Anwendungen größere Heaps als bisher mit besserer Latenz und weniger Pausen nutzen.
+Der G1-GC ist ein Garbage Collector (compacting, concurrent), der parallel zu den Anwendungsthreads arbeitet und Speicherbereiche des Heaps reorganisiert.
+Er ist für Server-Anwendungen ausgelegt ist, die mehrere Prozessoren zur Verfügung haben. 
+
+Damit einhergehend, werden einige der alten, schon länger als deprecated markierten GCs entfernt und auch diverse Flags für den Garbage-Collector aufgeräumt, die alten Flags werden transparent übersetzt.
+
+Als Teil der Aufräumarbeiten in der JVM werden auch die verschiedenen Log-Formate und Ansätze vereinheitlicht, so dass alle Ausgaben der JVM und der Collectoren ein konsistentes Format haben.
+
+////
+
+== JEP 102:  Process API Updates
+
+
+== JEP 228:  Add More Diagnostic Commands
+
+
+== JEP 265:  Marlin Graphics Renderer
+
+////
+
+Ich hoffe, meine zwei Artikel konnten etwas Licht in die performance-bezogenen Änderungen in Java 9 geben und Sie neugierig auf mehr machen.
+
+Die Liste der JEPs für Java 9 ist wirklich beeindruckend und die individuellen Vorschläge geben einen guten Überblick.
+
+Laden Sie sich das JDK 9 heute schon einmal herunter und versuchen Sie es regelmäßiger zu benutzen.
+Das Team freut sich über Feedback zur Vollständigkeit und Korrektheit.
+
+== Referenzen:
+
+* Quality Outreach Program https://wiki.openjdk.java.net/display/quality/Quality+Outreach
+* Java 9 Download: https://jdk9.java.net/download/
+* Jdeps Wiki: https://wiki.openjdk.java.net/display/JDK8/Java+Dependency+Analysis+Tool
+* Offene Diskussion zu Unsafe: https://www.infoq.com/news/2015/07/oracle-plan-remove-unsafe
+* JEP 223 Version String: http://openjdk.java.net/jeps/223
+* VarHandle: http://download.java.net/java/jdk9/docs/api/java/lang/invoke/VarHandle.html

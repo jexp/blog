@@ -1,0 +1,911 @@
+= Space-Force in Action - Micronaut Teil 2
+
+// :toc:
+
+Aufgrund der vielen coolen Features von Micronaut reichte ein Artikel einfach nicht aus, um das Framework hinreichend zu behandeln.
+Daher geht es heute weiter mit Themen wie Cloud-Deployment und Orchestrierung, Unterstützung für Serverless und Cloud-Functions, sowie der neuen Kafka Integration.
+
+Seit dem letzten Heft gab es einige neue Micronaut-Releases, gerade eben ist Milestone 4 veröffentlich worden. 
+Wenn dieser Artikel erscheint, halten wir ggf. schon das 1.0 Release in den Händen.
+Die Änderungen pro Release sind in der Dokumentation [MicroChanges] aufgeführt, ebenso die "breaking-changes" zwischen den Milestones.
+
+
+== Neue "Features"
+
+Im letzten Artikel wurden einige Features schon behandelt, unter anderem
+
+* Http-Server und -Client
+* Jobs
+* Datenbankintegration
+* Unterstützung für Java, Kotlin, Groovy
+
+Neue interessante Feature-Flags der letzten Milestones sind:
+
+[%autowidth]
+|===
+| jrebel oder spring-loaded | dynamisches Laden von geänderten Klassen während der Entwicklung
+| cassandra | Cassandra Unterstützung
+| postgres-reactive | reaktiver Treiber für Postgres
+| annotation-api | Unterstützung für Java 9 und 10
+| jdbc-dbcp, jdbc-hikari, jdbc-tomcat | JDBC Connection Pools
+| kafka, kafka-streams | Kafka Support
+| management | Management Endpunkt
+| micrometer, micrometer-* | Micrometer Unterstützung für diverse Reporter (Graphite, Prometheus etc.)
+| picocli | Kommandozeilenverarbeitung
+| netflix-archius | Netflix Archaius Konfigurationsmanagement
+|===
+
+////
+annotation-api        Adds Java annotation API
+  netflix-archius       Adds support for Netflix Archius in the application
+  spek                  Adds support for the Spek testing framewokr
+  spock                 Adds support for the Spock testing framework
+  tracing-jaeger        Adds support for distributed tracing with Jaeger (https://www.jaegertracing.io)
+  tracing-zipkin        Adds support for distributed tracing with Zipkin (https://zipkin.io)
+////
+
+
+
+== Über den Wolken: Cloud Native
+
+Für neue Anwendungen und die Migration existierender Anwendungen zu einem Set von unabhängigen Diensten ist nicht nur Unterstützung des Entwicklungsprozesses wichtig, sondern auch Deployment und Operations besonders mit einem Fokus auf Cloud-Infrastruktur.
+
+Durch die vielen verschiedenen Anbieter, Bibliotheken und Komponenten die im Cloud Umfeld um Aufmerksamkeit kämpfen, kann man schnell die Übersicht verlieren.
+
+image::https://objectcomputing.com/files/3415/3028/8047/1807-SETT-img01.png[]
+
+Prinzipiell sind allen "cloud-native" Anwendungen die meisten der folgenden Aspekte zu eigen:
+
+* Service Discovery / Orchestrierung
+* Konfiguration
+* Immutable Deployments
+* Effiziente Serviceinteraktion
+* Elastische Skalierung
+* Cloud-Awareness
+* Monitoring
+* Tracing
+* Security
+* Resilienz (auch Degrading)
+* Cloud-Functions
+
+Micronaut unterstützt die meisten dieser Anforderungen schon von Hause aus.
+Dazu werden entsprechende Bibliotheken über "Features" integriert.
+Für spezielle Anwendungstypen (Service oder Funktion) und deren Zusammenfassung als "Federation" gibt es Profile, die die entsprechenden Code-, Konfigurations- und Abhängigkeitstemplates enthalten.
+Große Teile der ausführlichen Micronaut Dokumentation [MicroDoc] erklären die notwendigen Schritte, Features und Konfigurationen im Detail.
+
+Die notwendigen Cloud Dienste (z.B. Consul oder Eureka) kann man lokal über Docker oder Kubernetes starten.
+Zum Teil stehen sie für Tests auch als eingebettete Bibliotheken zur Verfügung.
+
+== Service Discovery & Orchestrierung
+
+Da man in einer dynamischen Umgebung Abhängigkeiten zwischen Diensten nicht festzurren kann, wird auf eine Infrastruktur zur Auflösung von Namen zu Adressen und Konfigurationen aufgesetzt.
+Micronaut enthält Unterstützung für Consul, Eureka und Kubernetes, dafür gibt es auch ausführliche Anleitungen [Consul], [Eureka].
+Für bestimmte Umgebungen kann die Namensauflösung auch fest auf eine Liste von Diensten konfiguriert werden.
+
+Nachdem man den Namensservice als Feature aktiviert und konfiguriert hat, melden sich Micronaut Service-Instanzen _automatisch_ beim Verzeichnisdienst an und ab.
+Clients werden mittels Namensauflösung (Name in `@Client` Annotation) mit den Adressen von benötigten Diensten versorgt.
+// Bei Ausfall können Fallbacks (Circuit-Breaker) oder Wiederholungen (Retry) definiert werden.
+
+*Hier ein Beispiel für Consul*
+
+Zuerst sollte man Consul z.B. mittels Docker starten.
+Es gibt eine UI auf http://localhost:8500/ui auf der man die angemeldeten Dienste sieht.
+
+----
+docker run -p 8500:8500 consul
+----
+
+.src/main/resources/application.yml
+[source,yaml]
+----
+micronaut:
+      application:
+          name: meetup-city
+  consul:
+    client:
+      registration:
+        enabled: true
+      defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
+----
+
+// TODO update image with our federation
+image::http://guides.micronaut.io/micronaut-microservices-services-discover-consul/img/consului.png[]
+
+Dann können andere Services unseren Dienst nur über seinen Namen finden:
+
+[source,java]
+----
+@Client(id = "meetup-city")
+public interface CityClient {
+        //...
+}
+----
+
+== Load Balancing
+
+Sofern Dienste auf mehr als eine Instanz skaliert wurden, nutzt die Micronaut Client Implementierung eine client-seitige "round-robin" Verteilung.
+Dienste können Anfragen auch an andere Instanzen weiterleiten sofern sie überlastet sind.
+
+Es können aber auch spezifische Load-Balancer eingebunden werden, wie Netflix "Ribbon".
+
+.src/main/resources/application.yml
+[source,yaml]
+----
+ribbon:
+      VipAddress: test
+      ServerListRefreshInterval: 2000
+----
+
+Natürlich werden auch auf Cloud-Seite IP basierte Load Balancer wie HA-Proxy oder Elastic Load Balancer (ELB) unterstützt.
+
+== Resilienz
+
+In verteilten Systemen treten Ausfälle kontinuierlich auf.
+Daher sollte schon bei der Entwicklung vorgesehen werden, dass abhängige Systeme mit entsprechenden Resilienz-Mustern [Friedrichsen] geschützt werden.
+
+In Micronaut erfolgt das mit entsprechenden Annotationen (z.B. `@Retryable` und `@CircuitBreaker`) auf Client-Interfaces, die über AOP-Advices automatisch implementiert werden.
+Das kann pro Methode oder für die ganze API (Interface oder Paket) erfolgen.
+Alle Muster kommen mit sinnvollen Defaults, können aber beliebig konfiguriert werden.
+
+.Beispiel für Wiederholung von Aufrufen
+[source,java]
+----
+@Retryable( attempts = "${retry.attempts:3}", 
+               delay = "${retry.delay:1s}" )
+@Client("city")
+public interface CityClient { ... }
+----
+
+Mit `CircuitBreaker` wird beim wiederholten (`attempts`) Fehler der Aufruf des fremden Dienstes für einen gewissen Zeitraum (`reset`) unterbunden und nach einer "Abkühlungszeit" wieder versucht.
+Damit können sowohl kurzfristige Ausfälle als auch Überlastsituationen gehandhabt werden.
+
+Für beide Muster können mit `@Fallback` annotierte Dienste vorgesehen werden, die sbei Ausfall eine lokale Implementierung bzw. Auditing umsetzen.
+
+Wichtig ist, dass alle Resilienz-Integrationen ihren Status und Verlauf an eine Monitoringkomponente melden, so dass Zusammenhänge von Problemen festgestellt und Alarme bzw. Behebungsmassnahmen ausgelöst werden können.
+
+Nutzer von Netflix' Hystrix Bibliothek können auch diese Resilienz-Lösung mit Micronaut integrieren, mit `@HystrixCommand` annotatierte Methoden werden dann von der Bibliothek gewrappt und als resiliente Kommandos ausgeführt.
+
+== Monitoring 
+
+Für das Monitoring von Diensten und Anwendungen stellt Micronaut verschiedene Arten von Endpunkten bereit.
+Jeder Endpunkt kann individuell konfiguriert und aktiviert werden.
+
+[%autowidth,cols="m,a"]
+|===
+| /beans | Informationen über geladene Beans
+| /info | Statische Applikationsinformationen (aus Konfiguration und `InfoSource` Beans)
+| /health | Verfügbarkeit der Anwendung (UP:HTTP-200, DOWN:HTTP-503 aggregiert aus `HealtIndicator` Beans)
+| /metrics | Metriken (via Micrometer)
+| /refresh | Neuladen von Beans (`@Refreshable`)
+| /routes | Routinginformationen
+| /loggers | Loggerinformationen & Loglevel
+|===
+
+Alle Management-Endpunkte integrieren automatisch mit den Security-Features von Micronaut.
+Falls Informationen auch nicht-angemeldeten Nutzern gezeigt werden sollen, muss `details-visible: ANONYMOUS` gesetzt sein.
+Für spezielle Anforderungen können auch eigenen Management-Endpunkte mittels `@Endpoint` annotierten Klassen bereitgestellt werden.
+
+Seit Milestone 4 integriert Micronaut Monitoring mit [Micrometer] via das `micrometer` Features.
+Sobald dieses aktiv ist, werden die in der `MeterRegistry` registrierten `Meter` vom `/metrics` Endpunkt zurückgegeben.
+
+----
+curl -s http://localhost:8080/metrics/system.cpu.usage | jq .
+{
+  "name": "system.cpu.usage",
+  "measurements": [
+    {
+      "statistic": "VALUE",
+      "value": 0.27009646302250806
+    }
+  ]
+}
+----
+
+Micronaut stellt verschiedene Modifikatoren, Filter und Binder (Quellen wie JVM, System, Web-Requests, Logging) für Micrometer bereit.
+Natürlich können auch eigene Metriken integriert werden.
+Für das Reporting der Metriken zu den unterstützten Diensten (Graphite, Prometheus, Statsd, Atlas) gibt es noch einmal individuelle Konfigurationen.
+
+----
+curl -s http://localhost:8080/metrics/jvm.memory.max | jq .
+{
+  "name": "jvm.memory.max",
+  "measurements": [
+    {
+      "statistic": "VALUE",
+      "value": 5609357311
+    }
+  ],
+  "availableTags": [
+    {
+      "tag": "area",
+      "values": [
+        "heap",
+        "nonheap"
+      ]
+    },
+    {
+      "tag": "id",
+      "values": [
+        "Compressed Class Space",
+        "PS Survivor Space",
+        "PS Old Gen",
+        "Metaspace",
+        "PS Eden Space",
+        "Code Cache"
+      ]
+    }
+  ]
+}
+----
+
+
+== Tracing
+
+Besonders in verteilten Architekturen ist es wichtig, Anfragen über Dienstgrenzen hinweg zu verfolgen.
+Dazu kann die [OpenTracing] API mittels der Integration von "Zipkin" (von Twitter) bzw. "Jaeger" (von Uber) genutzt werden.
+
+Nach Aktivierung des Features werden benannte Request- und andere Laufzeit-Informationen ("spans") erzeugt aber nur Bruchteile (z.b. 0.1% davon) den jeweiligen Dienst übermittelt.
+Diese Tools können daraus einen Laufzeitgraphen erzeugen und aggregierte Latenz-, Abhängigkeits-, und Fehlerreports visualiseren.
+
+Micronaut stellt mittels verschiedener Mechanismen (z.B. Instrumentation, Http-Header) sicher dass die relevanten Informationen über Thread- und Service-Grenzen hinweg propagiert werden.
+
+Die Namensinformation und Payload-Informationen für die Tracing-API kommen aus Annotationen auf Service-Methoden.
+Mittels `@NewSpan("name")` wird ein neuer Trace gestartet, der dann auf Methoden mit `@ContinueSpan` fortgesetzt wird. 
+Parameter annotiert mit `@SpanTag("tag.name")` werden dem Trace hinzugefügt.
+
+[source,java]
+----
+@Singleton
+@Controller
+class RecommendationController {
+
+    @NewSpan("event-recommendation")
+    @Get("/recommend")
+    public Event recommend(@SpanTag("user.id") String id) { 
+        return computeRecommendation(userService.loadUser(id));
+    }
+
+    @ContinueSpan 
+    public Event computeRecommendation(User user) {
+        return eventService.recommend(user, 1);
+    }
+}
+----
+
+Die jeweiligen Clients können natürlich noch individuell konfiguriert werden, es gibt auch die Möglichkeit, eigene Tracer einzubinden.
+
+// todo update to our own image
+
+image::https://zipkin.io/public/img/web-screenshot.png[]
+
+
+open http://localhost:9411/
+----
+docker run -d -p 9411:9411 openzipkin/zipkin
+----
+
+----
+compile "io.micronaut:tracing"
+runtime 'io.zipkin.brave:brave-instrumentation-http:4.19.0'
+runtime 'io.zipkin.reporter2:zipkin-reporter:2.5.0'
+compile 'io.opentracing.brave:brave-opentracing:0.30.0'
+----
+
+.application.yml
+----
+tracing:
+    zipkin:
+        enabled: true
+        http:
+            url: http://localhost:9411
+# Sampling-Frequenz
+        sampler:
+            probability: 0.01 
+----
+
+
+== Das Federation Profil
+
+Da Microservice Anwendungen aus mehreren, überschaubaren Diensten bestehen, die miteinander kommunizieren, ist es sinnvoll sie in getrennten Modulen zu verwalten.
+Viele der Infrastrukturdienste (Orchestrierung, Monitoring, Resilienz, Eventprotokoll) sind aber in jedem der Teilprojekte notwendig.
+Andere Features wie Datenbankanbindung, oder Machine-Learning Bibliotheken sind pro Projekt verschieden.
+
+Mit dem "Federation" Profil kann so ein Gesamtprojekt generiert werden, dass die Teilprojekte mit erzeugt und konfiguriert, aber auch eine Build-Konfiguration für das Gesamtprojekt bereitstellt.
+
+----
+mn create-federation meetup --services users,groups,events,locations,recommendation 
+   --feature config-consul,discovery-consul,http-client,http-server,security-jwt,... --profile service --build gradle
+----
+
+// TODO directory-listing
+
+
+
+== Cloud Funktionen
+
+Mit Micronaut's "function" bzw. "function-aws" Profilen, ist es einfach einzelne Funktionen für "serverless" Infrastruktur zu entwickeln und deployen. 
+Mittels `mn create-function` erzeugt man diese statt einer Anwendung.
+
+In Groovy werden einfach Top-Level Funktionen und in Java/Kotlin Beans mit annotierten Methoden genutzt, dort werden auch die funktionalen Interfaces aus `java.util.function.*` implementiert.
+
+----
+mn create-function recommend 
+----
+
+[source,java]
+----
+@FunctionBean("recommend")
+public class RecommendFunction implements Function<User, Single<Event>> {
+
+    @Inject RecommendationService service;
+
+    @Override
+    public Single<Event> recommend(User user) {
+        return service.recommend(user).singleOrError();
+    }
+}
+----
+
+Wie auch Services, melden sich Funktionen beim ggf. konfigurierten Service Discovery Dienst an.
+
+Konsumiert werden Funktionen über einen speziellen Client, der ähnlich wie der HttpClient funktioniert, nur mit `@FunctionClient("name")` annotiert ist.
+Jede Methode des Client-Interfaces repräsentiert eine Funktion, die natürlich auch wieder reaktive Typen als Ergebnisse benutzen kann.
+Die generierte Implementierung des Clients kümmert sich dann z.B. mittels Service Discovery um den Lookup der Funktion und die nachfolgende Ausführung.
+
+----
+@FunctionClient("meetup")
+static interface MeetupClient {
+
+    Single<Event> recommend(User user); 
+
+    @Named("rating")
+    int stars(Group group);
+}
+----
+
+
+Um Funktionen zu testen, kann man diese direkt im Test aufrufen, oder auch mittels des `function-web` Features im HTTP-Server laufen lassen.
+Dann sind sie entweder als GET oder POST Operation verfügbar, je nachdem ob sie Parameter entgegennehmen oder nicht.
+
+----
+curl -X POST -d'{"userId":12345}' http://localhost:8080/recommend
+----
+
+----
+@Test
+void testStars() {
+    EmbeddedServer server = ApplicationContext.run(EmbeddedServer.class)
+    MeetupClient client = server.getApplicationContext().getBean(MeetupClient.class)
+
+    assertEquals(4, client.stars(new Group("4-Stars")))
+}
+----
+
+Funktionen können auch als CLI-Anwendungen ausgeführt werden.
+Das ausgeführte Fat-Jar nimmt Parameter über `std-in` entgegen und gibt Ergebnisse über `std-out` zurück.
+
+
+AWS Lambda Funktionen können im "function-aws" Profil mit zusätzlich aktivierten Gradle Plugins direkt nach AWS deployed und dort aufgerufen werden, sofern AWS Zugangsdaten verfügbar sind.
+
+Diese Funktionen können dann für den `FunctionClient` in der `application.yml` bekannt gemacht werden.
+// , dabei werden konfigurierte Attribute direkt auf dem darunterliegenden `com.amazonaws.services.lambda.model.InvokeRequest` übertragen.
+
+----
+aws:
+    lambda:
+        functions:
+            recommend:
+                functionName: recommendEvent
+    region: us-east-1
+----
+
+Mittels Docker wird auch "OpenFaaS" Deployment unterstützt, dazu muss nur das "openfaas" Feature aktiviert werden.
+Hier wird die Ausführung von Funktionen als Kommandozeilenanwendung genutzt.
+
+// == Konfiguration
+
+== Deployment
+
+=== Docker
+
+Standardmässig generiert Micronaut ein `Dockerfile` für jedes Projekt, das direkt im Build-Prozess genutzt werden kann und auch für "immutable deployments" geeignet ist.
+Es basiert auf dem Alpine-Image und inkludiert das Fat-JAR aus dem Buildprozess dass dann über `java -jar` gestartet wird.s
+
+----
+mn create-app micronaut-docker-beispiel
+----
+
+.Dockerfile 
+----
+FROM openjdk:8u171-alpine3.7
+RUN apk --no-cache add curl
+COPY target/micronaut-example*.jar micronaut-docker-beispiel.jar
+CMD java ${JAVA_OPTS} -jar micronaut-docker-beispiel.jar
+----
+
+----
+./gradlew shadowJar
+docker build .
+docker run cd21fba541e5 -p 8080:8080
+01:31:04.314 [main] INFO  io.micronaut.runtime.Micronaut - Startup completed in 1231ms. Server Running: http://localhost:8080
+----
+
+=== Google Cloud Platform (GCP)
+
+Micronaut kann auf die Google Cloud über ein Fat-JAR, dass die Anwendung mit dem notwendigem Server und Bibliotheken enthält mit den `gcloud` Kommandozeilentools deployed werden.
+Im [GCPGuide] werden die einzelnen Schritte erläutert, prinzipiell lädt man das JAR in einen Bucket und schreibt dann ein Start-Script für die Instanz, das das Jar lädt, Java installiert und es mittels `java -jar` startet.
+Dieses Script wird von `gcloud compute instances create` benutzt, danach wird für Port 8080 eine Firewall-Regel angelegt und nach ein paar Minuten ist der Dienstes gestartet und steht zur Verfügung.
+
+////
+
+=== Kubernetes
+
+TODO Jar deployment
+
+=== AWS
+
+EC2 / EKS
+
+////
+
+=== AWS-Lambda
+
+Mittels eines Gradle Plugins können Lambda Funktionen direkt aus dem Build-Prozess deployed und aufgerufen werden, sofern man valide AWS Zugangsdaten in `.aws/credentials` vorliegen hat.
+
+----
+if(new File("${System.getProperty("user.home")}/.aws/credentials").exists()) {
+    task deploy(type: jp.classmethod.aws.gradle.lambda.AWSLambdaMigrateFunctionTask, dependsOn: shadowJar) {
+        functionName = "echo"
+        handler = "io.micronaut.function.aws.MicronautRequestStreamHandler"
+        role = "arn:aws:iam::${aws.accountId}:role/lambda_basic_execution"
+        runtime = com.amazonaws.services.lambda.model.Runtime.Java8
+        zipFile = shadowJar.archivePath
+        memorySize = 256
+        timeout = 60
+    }
+   
+    task invoke(type: jp.classmethod.aws.gradle.lambda.AWSLambdaInvokeTask) {
+       functionName = "echo"
+       invocationType = com.amazonaws.services.lambda.model.InvocationType.RequestResponse
+       payload = '"foo"'
+       doLast {
+          println "Lambda function result: " + new String(invokeResult.payload.array(), "UTF-8")
+       }
+    }
+}
+----
+
+./gradlew deploy
+----
+BUILD SUCCESSFUL in 1m 48s
+4 actionable tasks: 3 executed, 1 up-to-date
+----
+
+./gradlew invoke
+----
+> Task :invoke
+Lambda function result: "foo" "foo"
+----
+
+== Message Driven Microservices
+
+In Microservices-Architekturen setzten sich eventbasierte Integrationsschichten immer mehr durch.
+Obwohl Micronaut mit den reaktiven Http-Servern in Bezug auf Flow-Control schon mithalten konnte, sind andere Aspekte verteilter, persistenter Event-Logs natürlich sehr vorteilhaft.
+Daher wurde im Milestone 4 Unterstützung für Apache Kafka bereitgestellt.
+
+Dazu gibt es auch ein neues Profil für reine Kafka-Services, ohne HTTP-Server.
+Aber auch andere Dienste und Funktionen können mittels Feature-Flag Unterstützung für Kafka bzw. Kafka-Streams erhalten.
+Die ggf. aktivierte Micrometer-Registry enthält dann auch die Kafka-Metriken, und der `/health` Endpunkt gibt Auskunft über den Zustand der Verbindung.
+
+.Kafka Dienst ohne Http-Server erzeugen
+----
+mn create-app rsvp-loader --profile kafka
+----
+
+Dieser Dienst kommuniziert wie konfiguriert mit Kafka über `localhost:9092`.
+Ein oder mehrere Kafka-Server können in der Anwendungskonfiguration, aber auch über `KAFKA_BOOTSTRAP_SERVERS` gesetzt werden.
+
+.Konfiguration in application.yml
+----
+kafka:
+    bootstrap:
+        servers: localhost:9092
+----
+
+Zum Testen kann man entweder `EmbeddedKafka` (mittels `kafka.embedded.enabled`) benutzen, oder Kafka mittels Docker [KafkaDocker] starten. 
+// , was etwas mehr Aufwand bedeutet.
+
+=== Kafka Produzenten
+
+Micronaut Services und Funktionen können deklarativ mittels Annotationen als Konsumenten und Publisher von Events auf Topics definiert werden.
+// Metriken von Kafka werden automatisch an die Micrometer Registry übertragen.
+
+// TODO Kafka tracing?
+
+Etwas verwirrend benannt, ist ein mit `@KafkaClient` annotiertes Bean eine Quelle von Events.
+// Es kann wie üblich injiziert oder vom `ApplicationContext` geladen werden.
+
+----
+mn create-kafka-producer Rsvp
+| Rendered template Producer.java to destination src/main/java/rsvp/loader/RsvpProducer.java
+----
+
+[source,java]
+----
+@KafkaClient
+public interface RsvpProducer {
+    @Topic("rsvps") 
+    void sendRsvp(@KafkaKey String id, Rsvp rsvp);
+}
+----
+
+Wie gehabt, wird die Implementierung des Interfaces von Micronaut vorgenommen. 
+Neben dem Payload können auch noch weitere, annotierte Parameter übergeben werden, wie Partition oder Header.
+Auch hier können reaktiven Typen wie `Flowable` oder `Single`für Payload und Ergebnisse genutzt werden, so dass man auch auf die Ergebnisse der Publikation abonnieren kann.
+Man kann auch ein Kafka - `RecordMetadata` zurückgeben, das enthält dann alle Detailinformationen des Sendevorgangs.
+
+Batching wird mit `@KafkaClient(batch=true)` aktiviert, dann werden Listen von mehreren Entitäten als Batch behandelt und nicht als einzelner, grosser Payload serialisiert.
+
+[source,java]
+----
+@KafkaClient(batch=true)
+public interface RsvpBatchProducer {
+    @Topic("rsvps") 
+    Flowable<RecordMetadata> sendRsvp(@KafkaKey Flowable<String> ids, Flowable<Rsvp> rsvps);
+}
+----
+
+Benutzt wird der Produzent wie folgt:
+
+[source,java]
+----
+@Inject RsvpProducer producer;
+// oder
+RsvpProducer producer = applicationContext.getBean(RsvpProducer.class);
+
+producer.sendRsvp("293y89dcd", new Rsvp(....));
+----
+
+Für produktive Deployments von Kafka wird eine Vielzahl von Konfigurationsoptionen in `@KafkaClient("producer-id")` unterstützt - Serialisierung, Retries, Acknowledgement, usw.
+Standardmässig werden Jackson-Serializer für JSON genutzt, diese sind aber entweder global oder pro Producer/Consumer konfigurierbar.
+Für sehr spezielle Anwendungsfälle kann man sich auch direkt `KafkaProducer` der Kafka-API injizieren lassen und hat dann die volle Flexibilität.
+
+=== Kafka Konsumenten
+
+Mittels `@KafkaListener` werden Nachrichten von einem oder mehreren Topics abonniert.
+
+----
+mn create-kafka-listener Rsvp
+| Rendered template Listener.java to destination src/main/java/rsvp/loader/RsvpListener.java
+----
+
+----
+@KafkaListener(offsetReset = OffsetReset.EARLIEST)
+public class RsvpListener {
+   @Inject RsvpRepository repo;
+
+   @Topic("rsvps") 
+   public void receiveRsvp(@KafkaKey String id, Rsvp rsvp) { 
+       repo.storeRsvps(Flowable.fromArray(rsvp));
+   }
+}
+----
+
+Auch hier können eine Menge zusätzlicher Parameter angegeben werden, wie Offset, Partition, Zeitstempel, Topic, Header, oder halt gleich ein Kafka `ConsumerRecord`.
+Für Batchverarbeitung kann auch hier `@KafkaListener(batch=true)` genutzt werden und dann entweder Listen oder reaktive Streams von Parametern verarbeitet werden.
+
+----
+@KafkaListener(batch=true, offsetReset = OffsetReset.EARLIEST)
+public class RsvpBatchListener {
+   @Inject RsvpRepository repo;
+
+   @Topic("rsvps") 
+   public void receiveRsvp(@KafkaKey Flowable<String> ids, Flowable<Rsvp> rsvps) { 
+        repo.storeRsvps(rsvps);
+   }
+}
+----
+
+Praktischerweise kann mittels `@SendTo("topic",...)` Annotation das Ergebnis des Methodenaufrufs an einen weiteren Topic weitergeleitet werden.
+
+Es gibt noch weitere Konfigurationen für Thread-Management, Timeouts, Serialisierung für einzelne Consumer oder Gruppen, die in der Dokumentation im Detail erläutert werden.
+Offset Commit-Management ist ein eigenes Thema für sich, das auch Fehlerbehandlung, asynchrone Verarbeitung, Bestätigungsmanagement, Offset-Recovery und Re-Delivery Bezug nimmt.
+
+=== Kafka Streams
+
+Streaming Data (Fast Data) Architekturen (Akka, Kafka, Flink, Spark) werden immer verbreiteter. 
+Dabei läuft der eigene Code als Prozessoren auf dem Stream, die Daten aggregieren, filtern oder neue Streams erzeugen können.
+Micronaut's schlanke Runtime sollte für solche Verarbeitung entsprechend wenig Overhead verursachen.
+
+
+Für Kafka-Streams ist nem den Bibliotheken und der Kafka-Konfiguration eine `@Factory` notwendig, deren "process" Methode, einen `ConfiguredStreamBuilder` entgegennimmt und einen typisierten `KStream` der Kafka-Streams API zurückgibt.
+
+Hier ist ein minimales Beispiel, ohne den Konfigurationscode für Serialisierung.
+
+----
+@Factory
+public class NoRsvpFilterStream {
+
+    public static final String INPUT = "streams-plaintext-input"; 
+    public static final String OUTPUT = "streams-wordcount-output"; 
+
+
+    @Singleton
+    KStream<String, Rsvp> yesRsvpFilter(ConfiguredStreamBuilder builder) { 
+        // Serializer Konfiguration ...
+
+        KStream<Rsvp, Rsvp> source = builder.stream("rsvps");
+        return source
+                .filter( rsvp -> rsvp.yes ).to("yes-rsvps");
+    }
+}
+----
+
+Die Topics dieser Streams können dann ganz regulär von "Upstream"-Produzenten mit Daten versorgt und ihre Ergebnisse von Downstream-Konsumenten verarbeitet werden.
+
+////
+
+== Event System
+
+For example:
+
+Using the @Adapter annotation
+import io.micronaut.aop.*;
+import io.micronaut.context.event.*;
+
+@javax.inject.Singleton
+class MyBean{
+
+    @Adapter(ApplicationEventListener.class)
+    void onStartup(StartupEvent event) {
+        // startup logic
+    }
+}
+The above example will create a new bean at compile time that implements the ApplicationEventListener interface and delegates to the onStartup method of MyBean. Micronaut will automatically align the generic type arguments (if the SAM type features any) and will also perform checks at compile time to verify the method is a valid candidate, failing compilation if it isn’t.
+
+For more information see the section on Adapter Advice in the documentation.
+
+Publishing Events
+The ApplicationEventPublisher API supports events of any type, however all events that Micronaut publishes extend ApplicationEvent.
+
+To publish an event, obtain an instance of ApplicationEventPublisher either directly from the context or through dependency injection, and execute the publishEvent method with your event object.
+
+@Singleton
+public class MyBean {
+
+    @Inject ApplicationEventPublisher eventPublisher;
+
+    void doSomething() {
+        eventPublisher.publishEvent(...);
+    }
+
+}
+Publishing an event is synchronous by default! The publishEvent method will not return until all listeners have been executed. Move this work off to a thread pool if it is time intensive.
+
+
+Improved Events API
+The @Adapter annotation can be used as an annotation stereotype (meta annotation), and in fact is already used that way - the new @EventListener annotation allows more elegant definition of application event listeners:
+
+Using the @EventListener annotation
+import io.micronaut.aop.*;
+import io.micronaut.context.event.*;
+import io.micronaut.runtime.event.annotation.EventListener;
+
+@javax.inject.Singleton
+class MyBean{
+
+    @EventListener 
+    void onStartup(StartupEvent event) {
+        // startup logic
+    }
+}
+Simply define the @EventListener annotation on any method to create a new listener
+In addition the @Async annotation can be used to make any @EventListener asynchronous:
+
+@EventListener 
+@Async 
+void onStartup(StartupEvent event) {
+    // startup logic
+}
+An @EventListener is defined
+The @Async annotation tells Micronaut to run the operation asynchronously (by default on the scheduled executor)
+For more information, see the section on Application Context Events.
+////
+
+
+== Kommandozeilenanwendungen
+
+Zusammen mit der Neuentwicklung des `mn` Tools mittels `picocli` gibt es jetzt sowohl ein `cli` Profil für reine Kommandozeilenanwendungen.
+Man kann mittels `create-cli-app` so eine Anwendung erzeugen und dann in dieser mittels `create-command` weitere Kommandos anlegen.
+Mehr Informationen zur API gibt es bei PicoCLI
+
+----
+mn create-cli-app list
+----
+
+Das Kommando sieht dann (angepasst) so aus:
+
+----
+@Command(name = "list", description = "Listing of entities",
+        mixinStandardHelpOptions = true)
+public class ListCommand implements Runnable {
+
+    @Option(names = {"-c", "--cities"}, description = "list cities")
+    boolean listCities;
+
+    @Inject CityClient cities;
+
+    public static void main(String[] args) throws Exception {
+        PicocliRunner.run(ListCommand.class, args);
+    }
+
+    public void run() {
+        if (listCities) {
+            cities.list().map(c -> c.name).forEach(System.out::println);
+        }
+    }
+}
+----
+
+Neben `gradlew run` kann man mit `gradlew assemble` die Kommandozeilen Anwendung auch in eine Zip distribution packen, die dann alle Abhängigkeiten und Shell-Skripte für OSX, Unix und Windows enthält.
+
+Die können wir dann mit `bin/list -c` ausführen.
+
+Es wäre schön in der Zukunft für diese vielleichte eine Graal-VM Variante, oder ein auf der Shell ausführbares Jar wie bei Spring-Boot zu unterstützen.
+
+
+== Fundgrube
+
+* Mit `create-cli-app` kann man Kommandozeilenanwendungen erzeugen, die Dienste wie reguläre Konsumenten oder Produzenten benutzen
+* `@Singleton` Beans können mit `@Parallel` annotiert werden, um parallele Initialisierung zu ermöglichen.
+* Lombok's Annotation Prozessor sollte vor Micronaut laufen.
+* JDBC Connections können jetzt den Spring-JDBC Transaction Manager nutzen
+* Es werden JDBC Connection Pools unterstützt
+* spring-loaded oder jrebel helfen bei dem dynamischen Neuladen von Klassen 
+* Eine neue AOP-Advice "Method-Adapter" mit der Meta-Annotation `@Adapter`, erlaubt es annotierte Methoden, als Single-Abstract-Method (SAM) Beans bereitzustellen, die ein bestimmtes Interface implementieren. +
+Das wird z.B. für die `@EventListener` Annotation genutzt, die Methoden für die Verarbeitung Application-Events markiert.
+
+Eigentlich ist Micronaut ja kein klassisches Web-Framework, um HTML und andere Inhalte zu rendern.
+Seit neuestem werden aber mittels des `io.micronaut:views` Moduls, und die jeweiligen Bibliotheken der Template-Engines wie Thymeleaf, Velocity und Handlebars unterstützt.
+Die Template Dateien liegen in `src/main/resource/views` und Controllermethoden die mit `@View("name")` annotiert sind sowie Maps, POJOs bzw. `ModelAndView` zurückgeben, stellen die Render-Informationen bereit.
+
+Die `@Requires` Annotation für das dynamische Aktivieren von Beans abhänging von externen Bedingungen ist extrem flexibel, hier sind ein paar Beispiele 
+
+* `@Requires(beans = DataSource.class)`
+* `@Requires(property = "enabled")`
+* `@Requires(missingBeans = EmployeeService)`
+* `@Requires(sdk = Sdk.JAVA, value = "1.8")`
+
+////
+
+Reactive programming with Micronaut
+Micronaut supports reactive streams out-of-the-box, so there’s not much thinking to be done. Let’s slightly modify the HelloController class:
+
+@Controller("/hello")
+public class HelloController {
+    @Get("/{name}")
+    public Single<String> hello(String name) {
+        return Single.just("Hello " + name);
+    }
+    @Get("/count")
+    public Publisher<Event<Integer>> count() {
+        return Flowable.just(1, 2, 3, 4, 5)
+                .zipWith(Flowable.interval(500, TimeUnit.MILLISECONDS),
+                        (item, interval) -> Event.of(item)).doOnComplete(() -> {});
+    }
+}
+The first method will return string as soon as its ready, but the second method will send to the client just one integer with 500ms gap between each. The technology that stands behind it is called Server-Sent Events. Shortly, SSE allows client (i.e. web browser) to obtain updates from the server without asking for them.
+
+
+
+We have started developing endpoints using AWS API Proxy and AWS Lambda but as a serverless technology there is no easy way how to run the HTTP handler locally. API Proxy Requests needs to be handled on the low level.
+Micronaut support serverless functions out of the box but they are just pure functions without any notion of AWS API Proxy.
+
+For illustration, here is the example how would the Micronaut's Groovy function have to look like at the moment:
+ApiProxyResponse handle(ApiProxyRequest request, Context ctx) {
+    switch(request.httpMethod) {
+        case 'GET':
+            if (request.path == '/hello') {
+                return new ApiProxyResponse(200, "hello")
+            }
+            break;
+        // other endpoints
+    }
+    return new ApiProxyResponse(405, "Not Supported")
+}
+////
+
+== Fazit
+
+Mit Micronaut ist man bestens gewappnet, auch komplexe service-basierte Systeme zu entwickeln, integrieren, deployen, robust laufen zu lassen und zu überwachen.
+Dank der Aktualität des Frameworks sind moderne Tools für diese Aufgaben schon integriert.
+Für die Nutzung der verschiedenen Cloud-Provider, zB. für Cloud-Functions ist noch einiges zu tun, zur Zeit wird nur AWS automatisch unterstützt.
+Dank der Kafka Integration hat man die Wahl für die Inter-Service-Kommunikation HTTP- oder ereignisbasierte Protokolle zu nutzen.
+
+Micronaut kann aber nicht nur für klassische Backend-Dienste genutzt werden. 
+OCI Entwickler Ryan Vanderwerf zeigt im [GalecinoCar] Projekt wie Micronaut zusammen mit ML-Frameworks und Robo4j ein selbstfahrendes Modellauto auf einem Raspberry PI steuert.
+
+Ich freue mich schon auf die weitere Entwicklung des Frameworks.
+Bisher sind die durchdachten Features, Hilfe und Aktivität in der Community und die schnellen Bugfixes sehr beeindruckend.
+
+Ich vermisse eigentlich nur die Möglichkeit, "Features" in existierenden Projekten mittels `mn --feature` zu aktivieren, und so konsistent und korrekt neue Abhängigkeiten und Konfigurationen hinzuzufügen.
+// Auch die Möglichkeit eines Features, Kommandos zum Generieren von Code mitzubringen wäre cool.
+
+== Referenzen
+
+* [MicroDoc] https://docs.micronaut.io/
+* [MicroChanges] https://docs.micronaut.io/latest/guide/index.html#whatsNew
+* [MicroIntro] https://objectcomputing.com/resources/publications/sett/july-2018-micronaut-framework-for-the-future
+// todo guides zusamemnfassen
+* [MicroGuides] http://guides.micronaut.io u.a. für Consul, Eureka, Zipkin, Jaeger
+* [GuideConsul] http://guides.micronaut.io/micronaut-microservices-services-discover-consul/guide/index.html
+* [GuideEureka] http://guides.micronaut.io/micronaut-microservices-services-discover-eureka/guide/index.html
+* [GuideZipkin] http://guides.micronaut.io/micronaut-microservices-distributed-tracing-zipkin/guide/index.html
+* [GuideJaeger] http://guides.micronaut.io/micronaut-microservices-distributed-tracing-jaeger/guide/index.html
+* [MicroWorkshop] https://alvarosanchez.github.io/micronaut-workshop/
+* [GalecinoCar] https://objectcomputing.com/resources/events/webinars/galecino-car/recording
+* [Friedrichsen] http://www.informatik-aktuell.de/entwicklung/methoden/resilient-software-design-robuste-software-entwickeln.html
+* [OpenTracing] http://opentracing.io
+* [OpenFaaS] https://www.openfaas.com/
+* [KafkaDocker] https://docs.confluent.io/current/installation/docker/docs/configuration.html
+* [Baeldung] http://www.baeldung.com/micronaut
+
+////
+
+Consul is a distributed service mesh to connect, secure, and configure services across any runtime platform and public or private cloud
+We will use a self‑registration pattern. Thus, each service instance is responsible for registering and deregistering itself with the service registry. Also, if required, a service instance sends heartbeat requests to prevent its registration from expiring.
+
+Services register when they start up:
+We will use client‑side service discovery, clients query the service registry, select an available instance, and make a request.
+
+The quickest way to start using Consul is via Docker:
+
+Alternatively you can install and run a local Consul instance.
+
+Modify build.gradle to add discovery-client dependency.
+
+bookcatalogue/build.gradle
+dependencies {
+    ...
+    ..
+    .
+    runtime "io.micronaut:discovery-client"
+}
+Append to bookcatalogue service application.yml the following snippet:
+
+bookcatalogue/src/main/resources/application.yml
+consul:
+  client:
+    registration:
+      enabled: true
+    defaultZone: "${CONSUL_HOST:localhost}:${CONSUL_PORT:8500}"
+Previous configuration registers a Micronaut app with Consul with minimal configuration. Discover a more complete list of Configuration options at ConsulConfiguration.
+
+Modify BookInventoryClient and BookCatalogueClient to use the service id instead of a harcoded ip.
+
+Netflix Eureka:
+
+Eureka is a REST (Representational State Transfer) based service that is primarily used in the AWS cloud for locating services for the purpose of load balancing and failover of middle-tier servers.
+4.1 Eureka Server
+
+Improve this doc
+Spring-Cloud-Netflix provides a very neat way to bootstrap Eureka. To bring up Eureka server using Spring-Cloud-Netflix:
+
+Clone the sample Eureka server application.
+
+Run this project as a Spring Boot app (e.g. import into IDE and run main method, or use mvn spring-boot:run or gradle bootRun or ./gradlew bootRun). It will start up on port 8761 and serve the Eureka API from /eureka.
+
+This tutorial solution contains a folder named eureka with the cloned sample Eureka server application.
+
+eureka:
+  client:
+    registration:
+      enabled: true
+    defaultZone: "${EUREKA_HOST:localhost}:${EUREKA_PORT:8761}"
+
+Open http://localhost:8761 in your browser.
+
+You will see the services registered in Eureka:
+
+image::http://guides.micronaut.io/micronaut-microservices-services-discover-eureka/img/eurekaui.png[]
+////

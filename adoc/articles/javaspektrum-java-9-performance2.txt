@@ -1,0 +1,427 @@
+= Performance relevante Java 9 Features (Teil 1)
+
+_Die offizielle Verfügbarkeit von Java 9 wurde zwar auf März 2017 verschoben,
+das heisst aber nicht, dass wir nicht jetzt schon auf einige Features schauen können, die Relevanz für die Leistungsfähigkeit von Java-Anwendungen haben werden._
+
+Einige Trends werden sich definitiv in den nächsten Jahren fortsetzen und auch verstärken, die sich auch in den Verbesserungen in Java 9 widerspiegeln:
+
+* Mehr Parallelität wird die Normalität, sowohl innerhalb einer Maschine als auch in immer größeren Clustern, wobei Netzwerklatenz und -durchsatz relevanter werden.
+* Effizientere Resourcenutzung, besonders im Bezug auf Energieersparnis in Rechenzentren, aber noch mehr bei mobilen Geräten, Automation und Sensornetzwerken, bei denen Leistung, Speicher und Energie immer knapp sind.
+* Sichere Kommunikation und Datenspeicherung und die sichere Ausführung von Anwendungen auf nicht-vertrauenswürdiger Hardware
+
+Java 9 wird wie schon seid längerem durch JDK Enhancements Proposals (JEP) vorangetrieben, die neue Fähigkeiten und Features in genug Detail für Implementierung im OpenJDK und deren Nutzung beschreiben.
+
+Aktuell sind ca 80 JEPs auf der Java 9 Projektseite gelistet, die ihren Weg in die neue Version nehmen werden.
+
+Davon wollen wir uns einige Bereiche näher anschauen, die die Leistungsfähigkeit der JVM und von Java-Awendungen steigern werden.
+Weitbekannte JEPs wie Jigsaw zur Modularisierung lasse ich bei der Betrachtung aus.
+
+_Aufgrund der schieren Menge von interessanten Änderungen wird dieser Artikel in 2 Teilen erscheinen._
+
+Mit dem 26. Mai 2016 sind die Änderungen der JEPs in Java 9 fixiert und mit Tests im Master Branch integriert, ab jetzt wird sich auf Tests, Feedback, Leistungsoptimierung und Fehlerbehebung konzentriert.
+
+Man kann sich Java 9 von [Java 9 Download] herunterladen und die benannten Änderungen selbst testen.
+
+.Tabelle: Zeitplan für Java 9
+[width=50]
+|===
+|2016/05/26 	|	Feature Complete
+|2016/08/11 	|	All Tests Run
+|2016/09/01 	|	Rampdown Start
+|2016/10/20 	|	Zero Bug Bounce
+|2016/12/01 	|	Rampdown Phase 2
+|2017/01/26 	|	Final Release Candidate
+|2017/03/23 	|	General Availability
+|===
+
+== Locking und Parallelität
+
+Mit Mehrkernprozessoren und vielen Prozessoren in Servern (z.B. 160 Kernen in IBM's Power8), setzt sich der Trend zur nebenläufigen Programmierung fort.
+Java 8 hat da mit den parallel-Streams, Fork-Join-Pool und Stamped Lock (siehe [Hung15]) schon deutliche Fortschritte gemacht, mit Java 9 geht die Arbeit in diesem Bereich weiter.
+
+=== JEP 143:  Improve Contended Locking
+
+Locks sind ein Fluch und Segen der nebenläufigen Programmierung.
+Man benötigt sie um Zugriff zu Resourcen zu kontrollieren, z.B. für exclusives Schreiben oder paralleles Lesen.
+Oft wäre es schöne Algorithmen nutzen zu können die ohne Sperren auskommen (lock-free), aber diese zu entwickeln ist ungleich schwerer.
+Für Sperren wird oft der Fall optimiert, wenn kein konkurrierender Zugriff erfolgt, dass heisst den Overhead zu minimieren, wenn die Sperre nicht benötigt wird.
+Der Negativfall, d.h. (massiv) paralleler Zugriff wird meist als "worst-case" dargestellt und nicht besonders optimiert.
+Mit der Zunahme der Nebenläufigkeit wird das aber immer mehr der Normalfall.
+An bestimmten, kritischen Stellen (z.b. Kopf-Element einer Queue (siehe [Hung11])) ist der konkurrierende Zugriff besonders hoch.
+
+Dieser JEP macht es sich zum Ziel, diesen Aspekt von Sperren und `synchronized` (Monitors) in Java 9 deutlich zu verbessern, Verbesserungen für die internen Mechanismen in der JVM sind kein Fokus.
+Dazu wird eine Reihe von Benchmarks (u.a. SPECjbb2013, Volano, DaCapo) genutzt um die Optimierungen nachzuweisen.
+
+Eine Beschleunigung des Verhaltens folgender Operationen ist am aussichtsreichsten für die Zielerreichung dieses JEPs:
+
+* `unpark()`
+* Betreten und Verlassen der kritischen Regionen (Monitor-enter und -exit)
+* `notify()`, `notifyAll()`
+
+Die Stress-Tests für diese Verbesserungen untersuchen eine ausreichend hohe Anzahl von parallelen Threads, die die kritischen Regionen nach bestimmten Mustern durchqueren (enter-exit, enter-wait-exit).
+Dabei ist zum einen das Betreten und Handhabung der Warte/Block-Operation bei hoher Konkurrenz als auch das Verlassen, wenn potentiell viele Kandidaten-Threads auf den Zugriff warten.
+Ein weiterer zu testender Aspekt ist das Management vieler Objekt-Monitors, dabei ist besonders wichtig dass keine Speicherlecks entstehen und keine Korruption der Management-Datenstrukturen, ebenso sollte CPU Cache-Line-Sharing minimiert werden.
+
+=== JEP 266: More Concurrency Updates - Reactive Streams Support
+
+Unter dem unscheinbaren Titel versteckt sich eine wichtige Inititative von Doug Lea. 
+Die von Erik Meijer in .Net eingeführten "Reactive Extensions", haben ihren Weg über alle Sprachen gefunden und sind mit Reactive Java schon seit längerem erfolgreicher Teil des Java Ökosystems.
+Immer mehr Frameworks setzen auf diese oder unterstützen sie zumindest, es gibt sogar jetzt sogar ein "Reactive Manifesto" für skalierbare, robuste Anwendungsentwicklung.
+
+Mit diesem JEP sollen innerhalb der Klasse `java.util.concurrent.Flow` Interfaces und Implementierungen bereitgestellt werden, 
+die zu denen in Reactive Streams kompatibel sind und damit die Zusammenarbeit der verschiedenen asynchronen Frameworks auf der JVM unterstützen.
+Diese Komponenten sind schon seit einer Weile (Jan 2015) in Entwicklung und Review und halten jetzt endlich Einzug ins OpenJDK.
+
+[source,java]
+----
+TODO Beispiel
+----
+
+Weiterhin sollen die Erfahrungen und Probleme mit der CompletableFuture API in Java 9 berücksichtigt werden, so kommen Verzögerungen und Timeouts hinzu, sowie einige andere Verbesserungen.
+
+=== JEP 285: Spin-Wait Hints
+
+Zum Thema "Spin-Wait-Hints" (JEP 285), habe ich von Gil Tene beim Abendessen aus erster Hand erfahren, wie schwierig es ist, eine Gruppe engagierter Java Experten auf Namen, Platzierung und Semantik einer "no-op" Methode, die überhaupt nichts macht, zu einigen. 
+Mit der Methode `Thread.onSpinWait()` kann in Code der aktiv einen in einer Dauerschleife auf das Eintreffen einer Bedingung wartet, die JVM darüber benachrichtigt werden.
+Bei Unterstützung durch die Hardware (z.b. der PAUSE Prozessor-Befehl auf x86 CPUs) eine effizientere und stromsparendere Variante des CPU Betriebs gewechselt werden.
+Schleifen, die im Dauerbetrieb auf eine Bedingung warten werden, z.b. bei bestimmten CAS (Compare-And-Swap) Operationen genutzt, beim Stamped-Lock, aber auch bei und bei den Wartestrategien des LMAX Disruptor [Hung11].
+Zumindest für die sehr kurzen, ersten optimistische Versuche, wird damit verhindert dass teure Threadwechsel, inkl. Register und Cache-Konsistenzwechsel, stattfinden die die Parallelisierbarkeit beeinträchtigen würden und unseren wartenden Thread sehr wahrscheinlich viel länger pausieren würden als er minimal müsste.
+
+== Strings in Java 9
+
+Strings sind überall, jeder Text den wir verarbeiten, erzeugen, loggen, unseren Nutzern senden oder als HTML/JSON/XML bereitstellen, wird aus einzelnen Strings zusammengesetzt die einen Großteil des Heaps ausmachen.
+In Java 9 sind diverse JEPs vorgesehen, die versuchen, diesen Bereich der JVM deutlich sparsamer zu gestalten, und die Verwendung von Strings zu verringern und ihre Größe einzusparen.
+In den Studien und Benchmarks die dafür vorgenommen wurden und in denen eine Vielzahl von Anwendungen untersucht wurde, wird zum Beispield dargestellt, dass durchschnittlich 25% der Objekte auf dem Heap Strings sind, mit einer Länge von ebenso durchschnittlich 45 Zeichen. 
+Details können den referenzierten Quellen [StringDensity] entnommen werden.
+
+=== JEP 254  Compact Strings
+
+Ein wichtiger Beitrag zur Einsparung von Hauptspeicher wird der JEP 254 (Compact Strings) darstellen.
+Wie wir alle wissen, benötigen die meisten Strings kein UTF-16 sonder bestehen nur aus Zeichen aus dem Latin1 (8bit) oder sogar ASCII (7bit) Zeichentabellen.
+In Java wird aber jeder String als char-Array abgespeichert, so das zumeist die Hälfte ungenutzt bleibt.
+
+Der JEP ändert die interne Repräsentation von Strings in ein Flag für das Encoding (ISO-Latin1 oder UTF-16) und ein byte-Array in dem der String dann entweder mit einem oder zwei Byte pro Zeichen gespeichert wird.
+Damit wird erheblich Platz gespart, bei entsprechenden Betrachtungen wurde festgestellt dass in normalen Anwendungen ca 95% der Strings kompakt repräsentiert werden können.
+
+Im zweiteren Fall gibt es Mehraufwand beim Abspeichern und Lesen.
+Dieser soll durch Einsparungen bei der Garbage Collection und CPU- und Speicheroperationen kompensiert werden.
+Gerade heutige CPUs sollten von der Nutzung von Byte-Arrays stark profitieren, das sie damit ein bessers Vorladen von Speicherbereichen vornehmen können.
+
+Auswirkungen sollte das in allen Bereichen haben, da wir überall Text als Ein- und Ausgabeformate benutzen.
+Die öffentlichen APIs für Strings werden nicht geändert, das ist eine reine Anpassung der internen Repräsentation.
+
+Trotzdem erfordert eine solche grundlegende Änderung umfangreiche Kompatibilitäts- und Performance Tests.
+
+Abhängig von der Nutzungshäufigkeit der String-Operationen für den jeweiligen Format-Typ (oder auch deren Kombination für Operationen mit mehreren String-Parametern), macht sich der Mehraufwand mehr oder weniger stark bemerkbar. 
+Dabei sind häufige Operationen wie `hashCode`, `equals` und Stringverknüpfung besonders ausschlaggebend.
+
+In Mikrobenchmarks zeigten sich die kompakten Strings bis zu 20% schneller bei bis zu 30% weniger Speichernutzung, siehe auch [StringDensity].
+Besonders in speicherkritischen Umgebungen macht sich die Ersparnis bemerkbar.
+
+Nach verschiedenen Ansätzen wurde das "Flag" einfach als ein-Byte Konstante im String realisiert und in den Operationen eine Fallunterscheidung gemacht, ähnlich wie beim polymorphen Inlining-Dispatch des JIT.
+
+[source, java]
+----
+public class String {
+    private final byte[] value; private final byte coder;
+
+    // sample implementation
+    public int compareTo(String str) {
+        byte[] v1 = value;
+        byte[] v2 = str.value;
+        if (coder == str.coder) {
+            return (coder == LATIN1) ? 
+                StringLatin1.compareTo(v1, v2) :
+                StringUTF16.compareTo(v1, v2);
+        }
+        return (coder == LATIN1) ? 
+                StringLatin1.compareToUTF16(v1, v2) :
+                StringUTF16.compareToLatin1(v1, v2);
+     }
+}
+----
+
+=== JEP 192:  String Deduplication in G1
+
+Ein weiterer JEP in diesem Bereich ist *Nummer 192*, der das _Entfernen von String-Duplikaten durch den G1 Garbage Collector_ zum Inhalt hat.
+Von den schon erwähnten Anteil von 25% String Objekten stellen rund 50% Duplikate dar. 
+Somit kann man durch deren Entfernung ca. 10% Platz im Speicher gewinnen.
+In einem String ist der Hashcode in einem int-Feld und die Zeichenkette (noch) in einem Array (zur Zeit noch 2-Byte-Characters aber nach JEP 254 Bytes) abgelegt. 
+Beide stellen private Implementierungsdetails dar, die von aussen unsichtbar und nicht exponiert sind.
+Die Zeichenkette wird nur einmal erzeugt, nie verändert und seit Java8 auch nicht mehr von Substrings geteilt, es gibt auch keine Synchronisierung auf dem Feld.
+
+Daher kann die Referenz auf das Feld gleichen Inhalts von mehreren String-Objekten genutzt werden.
+Damit bleiben zwar die Strings als unabhängige Objekte mit ihren 32 Bytes Overhead erhalten, aber zumindest die Zeichenkettenfelder werden geteilt.
+Das hat den Vorteil, dass es für die Nutzer vollkommen transparent ist, was beim Ändern der String-Objekt-Referenzen hinter dem Rücken durch den GC nicht der Fall wäre.
+
+Der G1 Garbage Collector kann nun also String Objekte, sobald sie den "Young-Heap" verlassen und ein bestimmtes Mindestalter haben, als Deduplikationskandiaten betrachten.
+Diese werden in einer Warteschlange zwischengespeichert bis ein asynchroner Thread kontrolliert, ob deren Zeichenkette schon einmal aufgetreten ist.
+Wenn ja wird die Referenz auf das char-Array umgelegt, wenn nein, wird ihre eigene Zeichenkette als potentieller Partner in der internen Hashtable eingetragen.
+Internalsierte Strings werden automatisch als Kandidat für die Deduplikation behandelt.
+
+
+=== JEP 250: Store Interned Strings in CDS Archives
+
+Passend dazu gibt es auch noch einen Vorschlag im *JEP 250*, Strings die internalisiert wurden (interned), in einem Archiv (CDS class data sharing archive) zwischen JVM zu teilen, und damit erneut Speicher zu sparen.
+Das würde vor allem häufig vorkommende Konstanten, Symbole und Klassennamen betreffen.
+
+Das wird aber nur in 64-bit JVMs und mit dem G1 Garbage Collector funktionieren, da nur diese fixierte (pinned) Speicherbereiche unterstützt, in die dieses Archiv eingeblendet wird.
+
+Beim Starten der JVM würde dieses Archiv geladen und sein Inhalt auch in der Deduplikations-Hashtable von JEP 192 abgelegt.
+
+=== JEP 280: Indify String Concatenation
+
+Der Vorschlag von Aleksey Shipilev in *JEP 280* ist auch sehr interessant.
+Wie allgemein bekannt, wird seit Java 5 die Stringverknüpfung mittels `+` vom Java Compiler, auf die effizientere Kette von `StringBuilder.append` Aufrufen abgebildet.
+Dabei werden auch aufeinanderfolgende String-Literale zusammengefasst, mittels `-XX:+OptimizeStringConcat` ist es sogar möglich noch aggressivere Optimierungen einzuschalten, wie z.B. die Vorinitialisierung der StringBuilder mit der richtigen Endlänge des Strings.
+
+Diesen Aufwand möchte der JEP 280 vom Compiler in die Java-Laufzeitumgebung verlagern. 
+Damit können komplexe Regeln aus dem Compiler entfern werden und bei neuen Optimierungen muss er nicht mehr modifiziert werden.
+Erreicht werden soll das ganze durch die Nutzung von "invoke-dynamic" der dynamischen Wunderwaffe der JVM.
+Damit soll eine "virtuelle" API geschaffen werden, die das Konzept der Stringverknüpfung ausdrückt und dann von der Laufzeitumgebung beim Laden der Klassen und Methoden, auf vielfältige Weise umgesetzt, optimiert und angepasst werden kann.
+
+Die konkreten Verbesserungen sind noch nicht Bestandteil dieses JEP.
+
+== Sicherheit
+
+Im Zeitalter von Cloud Anwendungen, Abhöraffären, Speicherung und Zugriff von immer mehr privaten Informationen, sind Sicherheitsfunktionen systemkritisch.
+
+In Java wurde schon immer eine Vielzahl von Kryptomechanismen unterstützt.
+Auch das Sicherheitsmodell von Java, die Sandbox des SecurityManagers war von Anfang an dabei, auch wenn es immer wieder einmal Lücken in der Implementierung gab, die von Schadsoftware ausgenutzt wurde.
+
+Mit Java 9 wird die Unterstützung der Sicherheitsmechanismen weiter ausgebaut.
+
+=== JEP 246: Leverage CPU Instructions for GHASH and RSA
+
+Für die immer wichtiger werdenden kryptographischen Operationen wie AES-CBC (JEP 164 in JDK8), RSA, GHASH sollen, sofern möglich native CPU Befehle genutzt werden (z.B auf Intel x64 und SPARC).
+
+Neben der höheren Leistung (bis 8x schneller), ist auch die Reduzierung der Abhängigkeit von externen Krypotbibliotheken und damit eingesparte Komplexität und JNI-Aufrufe ausschlaggebend für diesen JEP.
+
+Diese Funktionaltität würde dann von de Hotspot-VM direkt angeboten und kann in die Security-Provider (z.b. SunPKCS11 und SunJCE) integriert werden.
+
+=== JEP 232:  Improve Secure Application Performance
+
+Für Anwendungen (JavaSE, JavaEE) die mit dem SecurityManager laufen, ist bekannt, das die häufige Überprüfung von Rechten deutliche Leistungseinbussen (bis zu 10-15%) zur Folge haben kann.
+
+Im Rahmen dieses JEPs wurden verschiedene Optimierungen angedacht, getested und mit JMH (siehe [Hung14]) die Leistungsverbesserungen nachgewiesen (oder nicht).
+
+Einige der Verbesserungen wurden dann im Rahmen des JEP umgesetzt und integriert, die meisten davon beziehen sich auf Synchronization und Locking beim parallelen Zugriff auf Instanzen des Sicherheitssystem.
+
+Diese wurden jetzt aktualisiert und machen von den Möglichkeiten Gebrauch, die uns allen seit Java 5 zur Verfügung stehen (z.B. ConcurrentHashMap).
+Codeblöcke die bisher mittels exklusiver Synchronization geschützt wurden und damit den Zugriff praktisch serialisierten, skalieren nun beim Lesezugriff und blockieren nur während des Schreibens auf die Datenstrukturen.
+
+Traurig aber wahr, die `hashCode()` Methode von `java.security.CodeSource` machte bisher einen DNS Lookup, der jetzt dankenswerterweise entfällt.
+
+=== JEP 273:  DRBG-Based SecureRandom Implementations
+
+Zur Zeit gibt es 2 sichere Zufallszahlengeneratoren in Java.
+Die eine Variante greift auf die Betriebssystemfunktionen zurück, wie `/dev/urandom` in Unix, und die zweite ist eine schwächere, in Java implementierte Version.
+Der von [NIST] veröffentlichte, moderne Algorithmus (Deterministic Random Bit Generator (DRBG)) nutzt starke Kryptoalgorithment wie SHA-512 und AES-256 und ist auch noch konfigurierbar.
+
+Ein wichtiger Aspekt ist das für die Zufallszahlengenerierung eine Entropiequelle für kontinuierlich neue Seeds zur Verfügung stehen sollte.
+Die existierenden Java APIs in `SecureRandom` müssen dafür erweitert werden.
+Bei dieser Gelegenheit soll sie auch für die Bedürfnisse anderer, zukünftige Ansätze generalisiert werden.
+Als Teil des JEP wird vor allem auch der genannte DRBG Algorithmus implementiert, sowie einige weiere Kryptomechanismen (z.B: SHA-512/2xx).
+
+Im nächsten Artikel zu Java 9 wird es um Verbesserungen im Java Compiler, den schnelleren Zugriff auf Variablen bzw. Methoden mittels Reflection und Invoke-Dynamik und weitere JEPs gehen, die für die Leistungsfähigkeit von Java 9 relevant sind.
+ 
+== Referenzen:
+
+* Java 9 Projektseite: https://jdk9.java.net/
+* Java 9 Download: https://jdk9.java.net/download/
+* Java 9 Features und Zeitplan, Liste der JEPs: http://openjdk.java.net/projects/jdk9/
+* [StringDensity]Performance-Betrachtungen für kompakte Strings http://cr.openjdk.java.net/~shade/density/state-of-string-density-v1.txt 
+* Deterministic Random Bit Generator (DRBG): http://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90Ar1.pdf
+* [Hung11] M. Hunger, Disruptorangriff: Hochperformanter Java-Code bringt Prozessoren an ihr Limit?, in: JavaSPEKTRUM, 6/2011
+* [Hung14] M. Hunger, Java Microbenchmark Harness (JMH), in: JavaSPEKTRUM, 3/2014
+* [Hung15] M. Hunger, StampedLock, in: JavaSPEKTRUM, 1/2015
+* [Flow] Reactive Streams in JEP 266 http://gee.cs.oswego.edu/dl/jsr166/dist/docs/java/util/concurrent/Flow.html
+* [ReactiveStreams] http://www.reactive-streams.org/
+
+= Ein Blick hinter die Kulissen von Java 9, Teil 2
+
+Seit der Veröffentlichung meines ersten Artikel über Java 9 ist die Entwicklung und besonders auch der *Test des JDK 9* weiter vorangeschritten.
+
+Bei einem Vortrag von Dalibor Topic beim JUG Saxony Day Ende September in Dresden hat er noch einmal explizit um ein paar Dinge gebeten. 
+
+Zum einen gibt es das Java 9 Qualitätssicherungsprogramm (qualiy outreach), in dem Java Projekte ihre Kompatibilität zu Java 9 überprüfen und veröffentlichen können. 
+Zur Zeit sind 80 Projekte Mitglied des Programms, darunter Programmiersprachen wie Groovy, Build-Tools wie Maven aber auch Server wie Wildfly. 
+Falls Sie an einem größeren, offenen Java Projekt mitwirken, ziehen Sie bitte in Betracht auch an diesen Programm teilzunehmen.
+
+Des weiteren, und das gilt für jeden Anwender von Java, gibt es den Aufruf, schon jetzt die Early Access Builds des Java 9 JDKs zu testen und vor allem Rückmeldung über Probleme zu geben.
+
+Nun aber wieder zurück zu spannenden Features in Java 9, die sonst nicht soviel Beachtung wie JigSaw finden.
+
+== JEP 223 Änderung des Formats der Java-Version
+
+Javas Versionsnummer waren schon immer etwas seltsam, sie enthielten aus historischen Gründen noch die führende 1 und das "u" für Update.
+
+Mit Java 9 wird es eine klarere Versionierung geben, die dem üblichen Verständnis entspricht:
+`$MAJOR.$MINOR.$SECURITY+$BUILD`, z.b. für das erste Security nach dem GA, Update, Build 20 `9.0.1+20`.
+
+Das ist zum einen erfreulich, zum anderen, muss man sich dessen bewusst sein, dass Code, der zur Zeit auf Java Versionen tested, dann sehr wahrscheinlich nicht mehr funktioniert.
+Die Dokumentation zum JEP listet Stolperfallen und Tips (z.B. reguläre Ausdrücke) zum Thema.
+
+== JEP 260: Kapselung interner APIs
+
+Teilweise JigSaw geschuldet, aber noch viel mehr den Aufräumarbeiten im JDK, ist der Zugriff auf interne APIs besonders `sun.*` nicht mehr möglich.
+Prominentestes Beispiel ist natürlich `sun.misc.Unsafe`, das sich aufgrund seiner vielen Möglichkeiten (z.B. um effizient auf Hauptspeicher zuzugreifen) großer Beliebtheit erfreut.
+
+Bisher gab es dafür Compiler Warnungen, die auch nicht abschaltbar waren.
+
+Das ist besonders von Bedeutung für Entwickler von leistungskritischen Systemen wie Datenbanken, Netzwerk- und Nachrichtenverabeitungsysteme. 
+
+Aber auch Anwender, die einige der Effizienztips aus vergangenen Kolumnen nutzen, müssten sich umstellen, wie das konkret aussieht, dazu später mehr.
+
+Für Unsafe selbst soll es für einen Übergangszeitraum ein Kompatibilitätsflag TODO geben, bis alle Funktionalitäten in andere APIs portiert wurden.
+
+Um zu testen, ob eigene Anwendungen oder genutzte Bibliotheken interne APIs benutzen, kann man das Tool `jdeps` mit dem Flag `-jdkinternals` benutzen. 
+
+Hier ein Beispiel für Neo4j:
+----
+$JAVA_HOME/bin/jdeps -jdkinternals neo4j-io-3.1.0-SNAPSHOT.jar 
+
+neo4j-io-3.1.0-SNAPSHOT.jar -> $JAVA_HOME/jre/lib/rt.jar
+ org.neo4j.io.pagecache.impl.SingleFilePageSwapper (neo4j-io-3.1.0-SNAPSHOT.jar)
+   -> sun.nio.ch.FileChannelImpl                       JDK internal API (rt.jar)
+
+Warning: JDK internal APIs are unsupported and private to JDK implementation that are
+subject to be removed or changed incompatibly and could break your application.
+Please modify your code to eliminate dependency on any JDK internal APIs.
+For the most recent update on JDK internal API replacements, please check:
+https://wiki.openjdk.java.net/display/JDK8/Java+Dependency+Analysis+Tool
+----
+
+Im Zuge der Aufräumarbeiten wurden auch einige APIs entfernt.
+
+Durch Änderungen von APIs und Nutzung neuer APIs von Java9 können damit gebaute Klassen und Jars inkompatibel mit früheren JDK Versionen werden.
+Daher stellt das neue JDK einige Mechanismen bereit, um die Abwärtskompatibilität zu bewahren.
+
+== Cross Compilation (JEP 247) & Multi-Version Jars (JEP 238)
+// 247: Compile for Older Platform Versions
+
+Falls es wirklich notwendig ist, können Klassen für alte JDK Versionen erzeugt werden. 
+Dazu muss man javac die `source`, `target` und `TODO: bootClassPath` Optionen für die vorhergehende Version mitgeben.
+
+Multi-Jars stellen vor allem eine clevere Struktur innerhalb des Archives dar.
+Dabei liegen die Klassen für die ältere Version der JVM im Wurzelverzeichnis.
+Im schon existierenden `META-INF` gibt es ein Unterverzeichnis namens `Versions`, das dann wieder Verzeichnisse für die anderen JDK-Versionen mit den entsprechenden Klassen enthält.
+
+TODO Image / Structure
+
+TODO How to build a multi-jar
+
+== JEP 269 Factorymethoden für Collections
+
+Viele hofften auf kompakte literale Notation für Listen und Maps, wie bei Feldern.
+Das hat sich leider nicht erfüllt, aber es hat für einige Statische Factory-Methoden auf den List und Map Interfaces gereicht
+Ähnlich APIs bieten viele Collection Bibliotheken es schon seit Jahren an.
+
+Diese sind nicht sehr elegant und haben wahrscheinlich auch keine Compilerunterstützung, wie Felder oder Stringverknüpfung.
+Zumindest aber Overloads für die Methoden mit bis zu 10 Argumenten
+Für Maps ist keine Einfügereihenfolge garantiert, wer das benötigt, muss dann doch auf LinkedHashMap zurückgreifen.
+Die erzeugten Instanzen sind unveränderlich.
+
+[source,java]
+----
+List.of(1,2,3)
+Map.of("name","Michael","age",41)
+Map.ofEntries(entry("name","Michael"),entry("age",41))
+----
+
+== Verbesserungen im Java-Compiler
+
+=== JEP 165:  Compiler Control
+=== JEP 199:  Smart Java Compilation, Phase Two
+=== JEP 215:  Tiered Attribution for javac
+=== JEP 197:  Segmented Code Cache
+=== JEP 243:  Java-Level JVM Compiler Interface
+=== JEP 270:  Reserved Stack Areas for Critical Sections
+
+
+== Schneller Zugriff auf Variable und Methoden mittels Reflection und Invoke-Dynamik
+
+=== JEP 193:  Variable Handles
+=== JEP 274:  Enhanced Method Handles
+
+== Anderes 
+
+=== JEP 248:  Make G1 the Default Garbage Collector
+158: Unified JVM Logging / GC Logging
+
+=== JEP 102:  Process API Updates
+=== JEP 228:  Add More Diagnostic Commands
+=== JEP 265:  Marlin Graphics Renderer
+
+== Referenzen:
+
+* Quality Outreach Program https://wiki.openjdk.java.net/display/quality/Quality+Outreach
+* Java 9 Download: https://jdk9.java.net/download/
+* Jdeps Wiki: https://wiki.openjdk.java.net/display/JDK8/Java+Dependency+Analysis+Tool
+* Offenes Diskussion zu Unsafe: https://www.infoq.com/news/2015/07/oracle-plan-remove-unsafe
+* JEP 223 Version String: http://openjdk.java.net/jeps/223
+
+////
+
+////
+JEP 213: Milling Project Coin
+Innerhalb des "Coin" JEPs gab es schon einige Nettigkeiten, die Java Syntax kompakter gestalten.
+
+Diamond for anonymous inner classes Desweiteren können bei 
+////
+
+== Other JSRs
+| 220|  Modular Run-Time Images
+
+110: HTTP 2 Client
+158: Unified JVM Logging
+200: The Modular JDK
+201: Modular Source Code
+211: Elide Deprecation Warnings on Import Statements
+212: Resolve Lint and Doclint Warnings
+214: Remove GC Combinations Deprecated in JDK 8
+216: Process Import Statements Correctly
+217: Annotations Pipeline 2.0
+219: Datagram Transport Layer Security (DTLS)
+221: Simplified Doclet API
+222: jshell: The Java Shell (Read-Eval-Print Loop)
+223: New Version-String Scheme
+225: Javadoc Search
+226: UTF-8 Property Files
+227: Unicode 7.0
+229: Create PKCS12 Keystores by Default
+231: Remove Launch-Time JRE Version Selection
+233: Generate Run-Time Compiler Tests Automatically
+235: Test Class-File Attributes Generated by javac
+236: Parser API for Nashorn
+237: Linux/AArch64 Port
+240: Remove the JVM TI hprof Agent
+241: Remove the jhat Tool
+244: TLS Application-Layer Protocol Negotiation Extension
+245: Validate JVM Command-Line Flag Arguments
+249: OCSP Stapling for TLS
+251: Multi-Resolution Images
+252: Use CLDR Locale Data by Default
+253: Prepare JavaFX UI Controls & CSS APIs for Modularization
+255: Merge Selected Xerces 2.11.0 Updates into JAXP
+256: BeanInfo Annotations
+257: Update JavaFX/Media to Newer Version of GStreamer
+258: HarfBuzz Font-Layout Engine
+259: Stack-Walking API
+261: Module System
+262: TIFF Image I/O
+263: HiDPI Graphics on Windows and Linux
+264: Platform Logging API and Service
+267: Unicode 8.0
+268: XML Catalogs
+271: Unified GC Logging
+272: Platform-Specific Desktop Features
+275: Modular Java Application Packaging
+276: Dynamic Linking of Language-Defined Object Models
+278: Additional Tests for Humongous Objects in G1
+279: Improve Test-Failure Troubleshooting
+281: HotSpot C++ Unit-Test Framework
+282: jlink: The Java Linker
+284: New HotSpot Build System
+
+////

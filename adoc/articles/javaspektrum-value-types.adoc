@@ -1,0 +1,405 @@
+= Werte bewahren - Value Types in Java 10
+
+Java ist schon seit Anfang an als nicht besonders speichereffizient bekannt.
+Damals als CPU Operationen nicht schneller waren, als Speicherzugriff, war das "nicht so schlimm".
+Heute ist der Unterschied allerdings dramatisch und damit werden Speicherzugriffe zum Flaschenhals.
+
+Ausser den 8 primitiven (vorwiegend numerischen) Datentypen ist alles ein Objekt, mit allem Ballast, der damit einhergeht.
+Selbst wenn nur ein konstanter Wert im Speicher abgebildet wird, müssen wir die Kosten des Objektlayouts dafür bezahlen und Indirektionen in Kauf nehmen.
+
+Nachdem wir zuletzt Java 9 ausführlich unter die Lupe genommen haben, wollte ich heute ein Feature beleuchten, dessen Realisierung schon seit vielen Jahren diskutiert wird, aber es nicht in das nächste JDK geschafft hat. 
+// James Gosling’s call for “efficient classes”.
+Werttypen (Value Types oder Structs) für Java, sie sind besser bekannt unter ihrem Codenamen "Project Valhalla".
+
+== Objekte
+
+Objekte kapseln veränderlichen Zustand (Attribute) und Operationen (Methoden) an einer benannten Adresse.
+Der Zustand sollte dabei hinter der API gekapselt sein, die das Objekt anbietet, jedes Objekt ist aber zwangsweise zustandsbehaftet.
+Die Objekt-API können komplexe Änderungsoperationen (`leaveJob()`), oder Repräsentationen (`toString()`) sein aber auch die (un)geliebten Getter und Setter von JavaBeans gehören dazu.
+
+Objekte werden auf dem Heap angelegt, eine Objektreferenz ist nur ein Pointer auf deren Speicherstruktur, dem jedes Mal gefolgt werden muss.
+Dadurch kann eine Äquivalenz von Objekten nicht nur durch Vergleich der Pointer abgeleitet werden. 
+Man muss korrekterweise auch deren Werte vergleichen, was im Allgemeinen durch korrekt implementierte `equals` Methoden erfolgt.
+
+Durch die Indirektion auf den dynamischen Heap muss nach dem Ende der Existenz eines Objektes der Garbage Collector dafür sorgen, das die nicht mehr erreichbaren Referenzen freigegeben werden, was zum einen aufwändig ist und zum anderen einen fragmentierten Speicher zur Folge hat.
+Diese indirekten Zugriffe auf zufällige Speicherbereiche führen zu Cache-Fehlern in der CPU und beim parallelen Zugriff auf grosse Mengen von Objekten (z.b. in einer Liste von `Double`-Werten) erreicht man die Grenzen der Speicherbandbreite.
+
+image::https://dl.dropboxusercontent.com/u/14493611/javaspektrum-value-types.png[]
+
+Das Speicherlayout von Objekten enthält einen Header von 12 Bytes mit Verweis auf die Klassendefinition, `identityHashCode` und Flags für die Synchronisierung.
+// Selbst Klassen mit nur finalen Feldern benötigen aufgrund des `java.lang.Object` Kontraktes, dass sie für Synchronisation genutzt werden können, nicht auf den Header verzichten.
+Danach wird auf 16 Bytes Speichergrenze (8-Byte Alignment) aufgerundet und ab dann beginnen die eigentlichen Instanzvariablen des Objekts.
+Deren Anordnung kann aus Effizienzgründen vom Compiler geändert werden, es hat nichts mit der Reihenfolge im Quellcode zu tun.
+
+Zum Beispiel kann eine Variable die noch in die 4 Auffüll-Bytes des Headers passt, dahin verlagert werden.
+
+Instanzvariablen von Superklassen bleiben aber separariert. 
+Das wird z.B. bei Optimierungen zur Vermeidung von Cacheline-Sharing genutzt, da man die Position von Auffüll-Feldern (Padding) erhalten wird, was z.B. in JMH, LMAX und Netty genutzt wird.
+
+// TODO Picture
+
+Das Layout von Objekten kann mittels des Java Object Layout (JOL) Tool von Alexey Shipolev ?spelling? angezeigt werden.
+
+Bei der Anzeige wird unterschieden zwischen:
+
+* internal - Layout und Werte der Felder, Objekt-Header, Verluste durch Padding
+* external - erreichbare Objekte und Erreichbarkeits - Graph
+* estimated - Anzeige für verschiedene JVMs (z.b. 32- und 64 bit)
+
+Hier ein Beispiel mit java.awt.Point:
+
+[source,java]
+----
+public class java.awt.Point extends java.awt.geom.Point2D 
+                        implements java.io.Serializable {
+  public int x;
+  public int y;
+}
+----
+
+`java -jar jol-cli/target/jol-cli.jar internals java.awt.Point`
+
+----
+# Objects are 8 bytes aligned.
+# Field sizes by type: 4, 1, 1, 2, 2, 4, 4, 8, 8 [bytes]
+# Array element sizes: 4, 1, 1, 2, 2, 4, 4, 8, 8 [bytes]
+
+Instantiated the sample instance via default constructor.
+
+java.awt.Point object internals:
+ OFFSET  SIZE   TYPE DESCRIPTION                              
+      0     4        (object header)                          
+      4     4        (object header)                          
+      8     4        (object header)                          
+     12     4    int Point.x                                  
+     16     4    int Point.y                                  
+     20     4        (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+----
+
+Man sieht dass jede Point Instanz 24 bytes belegt obwohl die 2 int-Werte für x und y nur 8 bytes ausmachen.
+Davon werden 12 Byte für die Header-Informationen benutzt und 4 für das Alignment auf 8 Byte-Grenzen im Speicher.
+
+Z.B. ist `java.lang.Integer` mit genau 16 Bytes vier-mal so gross wie der 4-byte int Wert der gekapselt wird, genau so gross wie `java.lang.Byte`
+
+In einigen Sprachen, wie Scala gibt es Typdefinitionen, die aber eher wie Aliase auf (primitiven) Typen gehandhabt werden, so kann man dort einen `Long` Typ als `Identity` benutzen oder ein `Tuple[Double,Double]` als Koordinaten.
+
+Tupel, die in vielen funktionalen Sprachen existieren sind schon ein Schritt in Richtung Structs (besonders mit Aliasen), sie stellen die Kapselung einer Reihe getypter Werte in einen unveränderlichen Typ dar.
+In einem Tupel sind diverse Operationen, wie `equals, hashCode, toString` und ggf. `filter, map`, usw. implementiert.
+Aber zumindest auf der JVM sind es immer noch Objekte, mit all ihren Problemen.
+
+== Structs und Wert-Typen
+
+In C, C#, Rust, Swift und anderen Sprachen sind effiziente, fixe, (teilweise unveränderliche) Datenstrukturen (structs) fester Bestandteil der Sprache.
+Sie mappen einen Pointer auf einen Speicherbereich auf ein fixe Struktur, die diesen Bytes Bedeutung und einen Typ gibt.
+Dabei kann derselbe Speicherbereich auf mehrere Repräsentationen enthalten (zum Beispiel in C-Structs).
+
+Schon seit der Anfangszeit des JDK gibt es Objekte, die definitiv keine Entitäten im klassischen Sinne sind:
+
+* Point und Color in AWT
+* Strings
+* Numerische Objekttypen
+* UUID, URL, InetAddress
+
+Dasselbe gilt für viele Werte in Anwendungen, wie
+
+* ISBN, SV-Nummer
+* Bundesland, Stadt, PLZ
+* EMail
+* Einheiten
+
+Auch in Datenbanken und APIs sind diese benannten, wohldefinierten Typen sinnvoll.
+
+Zum einen kommunizieren sie ihren Typ, Wertebereichen und Einsatzzweck und verhindern zum anderen die Nutzung im falschen Kontext.
+Da sie meist unveränderlich sind und sich über ihren Werte definieren, können sie kopiert und nebenläufig darauf zugegriffen werden.
+
+Zu diesem Thema hat sich auch Eric Evans ausführlich in Domain Driven Design geäussert, es gibt ein komplettes Kapitel zu Value-Typen.
+Nach seiner Definition haben Entitäten, eine Identität und einen Lebenszyklus in dem sie ihren Zustand ändern.
+Die Äquivalenz von Entitäten hängt nur an ihrer Identität.
+
+Werttypen dagegen existieren zeitlos und repräsentieren nur ihre getypten Werte, die auch ihre Äquivalenz darstellen.
+Sie sollten unveränderlich sein, für Modifikationen wird eine abgeleitete Kopie gemacht.
+
+== Project Valhalla
+
+Im April 2014 wurde, von John Rose zusammen mit Guy Steele und Brian Goetz ein Artikel "State of the Values" veröffentlicht, der die existierenden Probleme analysiert und potentielle Lösungen aufzeigt.
+
+Das Credo war "Codes like a class, works like an int!", d.h. die Nutzung von Werttypen sollte so bequem aussehen und funktionieren, wie bei Klassen, aber ihre Speicher und Resourceneffizienz (z.B. mögliche Allokation auf dem Stack) den primitiven Werten entsprechen.
+
+Bei der Einführung von Werttypen müssen sowohl die Sprache, als auch die JVM (Allozierung, neue Bytecodes, ggf. Intrinsics) erweitert werden.
+Besonders für die Nutzung von Werttypen mit Generics muss auch der Compiler anders mit generifizierten Typen umgehen, und ggf. spezialisierten Code erzeugen.
+
+Brian Goetz hat die Diskussion im Oktober 2016 [GoetzGoals] auf weitere wichtige Ziele des Projektes gelenkt, die nichts mit Effizienz zu tun haben.
+Sauber in die Sprache integrierte Werttypen ermöglichen eine performante Abstraktion, Kapselung, Wartbarkeit und Kompatibilität von primitiven Werten.
+Das geht einher mit den Betrachtungen von Werttypen in Domain Driven Design, das die Nutzung reiner primitiver Werte nicht gutheisst, da sie keine Semantik in der Domäne kommunizieren und überprüfbar machen.
+Einem `int`-Wert für ein Alter können auch -100 oder 10^9 zugewiesen werden, ein `Age` Wert-Typ hätte nur Werte im Bereich von 0 bis 150 erlaubt, mit Zusatzmethoden zur Berechunung von Altersunterschieden usw.
+Mit den neuen Werttypen erhalten wir also "programmierbare primitive Werte".
+
+Mit der Einführung von Werttypen auf allen Ebenen wird eine vorwärtskompatible Lösung geschaffen, die auch alle bisherigen Werttypen abdeckt, mit Generics und Interfaces funktioniert und ähnliche Möglichkeiten wie bisher mit Objekten bereitstellt, nur halt mit dem Effizienzbonus.
+Für existierende Bibliotheken im JDK und anderswo soll es eine gute Lösung geben, die es erlaubt dass sie mit minimalen Quellcodeänderungen von Werttypen profitieren können und so somit viel nützlicher werden als sie schon sind.
+
+Im Artikel von John Rose wird auch der Aufwand diskutiert, ein Feld von *unveränderlichen* Objekten zu allozieren, iterieren und aufzuräumen.
+All das sind Operationen bei denen wertvolle Vorteile moderner CPUs bei Co-Location, Iteration über Speicherbereiche, Nutzung von Registern, Stack und Caches durch die Objektsemantik verlorengehen.
+
+Bisher wird in solchen Fällen zur Optimierung meist ein (oder mehrere) primitive Felder angelegt, die die Werte enthalten und der Zugriff auf diese dann entweder mittels Funktionen, wiederverwendeter Flyweight-Objekte oder interne Iteratoren mit Callbacks gekapselt.
+
+.Beispiel Wrapper um primitive Arrays
+[source,java]
+----
+// nicht thread-sicher, Point Instanzen dürfen nicht gehalten werden
+class Points implement Point, Iterable<Point> {
+   interface Point {
+       double getX();
+       double getY();
+   }
+   private int position;
+   private final double[] pointX;
+   private final double[] pointY;
+
+
+   public Points(int size) {
+      pointX = new double[size];
+      pointY = new double[size];
+   }
+   public Point pointAt(int p) {
+      if (p < 0 || p >= pointX.length) throw new IllegalArgumentException();
+      this.position = p;
+      return this;
+   }
+   public double getX() { return pointX[position]; }
+   public double getY() { return pointY[position]; }
+
+   public Iterator<Point> iterator() {
+       new Iterator<Point>() {
+          int idx=-1;
+          Point p=new Point() {
+             public double getX() { return pointX[idx]; }
+             public double getY() { return pointY[idx]; }
+          }
+          public boolean hasNext() { return idx < pointX.length; }
+          public Point next() { idx++; return p; } 
+       }
+   }
+}
+----
+// todo beispiel?
+
+== Implementierung
+
+Es wird angenommen, dass für die Definition von Werttypen der Mechanismus zur Klassendefinition wiederverwendet werden kann.
+Auf dem Level von Bytecode Instruktionen soll es aber eine klare Unterscheidung von Objekten und benutzerdefinierten, primitiven Werten geben.
+
+Die Komponentenfelder, sollen aber, anders als in z.B. C# unveränderlich sein.
+Ich halte das für einen guten Ansatz, der nebenläufige Programmierung vereinfacht und Gelegenheit für weitere Optimierungen gibt.
+
+Neben der klassischen Datenstruktur werden noch weitere, konkrete Anwendungen für Werttypen dargestellt, die zur Zeit alle über Objekte realisiert werden müssen.
+
+* vielfältigere numerische Typen
+* Tuples, mehrelementige Rückgabewerte
+* void- und Mengentypen
+* algebraische Datentypen, wie auch `Optional<T>` oder `Choice<A,B>`
+* Cursors als transportierbare Offsets in Datenstrukturen
+* Flattening - Vereinfachung komplexer Objektdatentypen
+
+Auf dem JVM-Level können viele Optimierungen für Werttypen vorgenommen werden.
+Ihre Komponenten können direkt nebeneinander gespeichert werden, in Feldern auch aufeinanderfolgend und in Objekten geinlined.
+// Wenn möglich werden Register und Stack genutzt, auch gerade da Werte nicht per Referenz sonder per-value weitergegeben werden, das betrifft auch ihre Nutzung als Rückgabewerte.
+Es sollen auch interne (private) Werte möglich sein, auf die man von aussen nicht zugreifen kann, die aber für Optimierungen oder aus Sicherheitsgründen gehalten werden müssen.
+Für die Kompatibilität zu existiereden APIs müssen für jeden Werttyp auch (automatisch generierte) Objekttypen vorliegen, die das notwendige Boxing bereitstellen.
+Werttypen sollen keine anämischer Datenstrukturen sein, sondern genau wie Objekte Methoden auf ihre unveränderlichen, aber benannten Werte anbieten.
+Überschreibbare Standardmethoden wie `toString, equals, hashCode` werden normalerweise vom Compiler generiert.
+Die Implementierung von Interfaces wäre sehr praktisch, hat aber einige Komplikationen, da das Java-Basisobjekt ja nicht mehr verfügbar wäre (z.B für die Zuweisung von Null).
+
+Da Werte direkt übergeben werden, sind sie nicht für große Mengen an Elementen sinnvoll, dort würde sich der redundante Kopier- und Speicherbedarf negativ auswirken. 
+Wenn man mal vom typischen [ValueBasedClasses] ausgeht, würde ein Payload von 32 bytes, ca 50% Platzgewinn bringen.
+D.h ein solcher Werttyp könnte 8 int/float oder 4 long/double Komponenten enthalten, das ist schon eine schöne Menge an Information die man da unterbringen kann.
+
+Einige Operationen, die heutzutage auf Objekten möglich sind, wie Locking wären auf Werttypen ausgeschlossen.
+Vergleiche mit `==` würden auf `equals` abgebildet und der `hashCode` würde sich statt aus `identityHashCode` aus den (öffentlichen) Komponenten ergeben.
+
+Werte haben keine "offiziellen" Pointer, in der JVM muss es aber auch möglich sein, mit Verweisen auf die Speicherstellen zu arbeiten.
+Nur ihre geboxten Objekttypen können als Referenzen benutzt werden.
+Daher gibt es auch kein "Null", man würde Werte bei denen alle Komponenten auf ihren Standardwert initialisiert sind als Äquivalent zu Null betrachten.
+
+Subklassen sind schwierig zu erreichen, da es ja keinen Header mit Klassenreferenz gibt und verschiedene Werte unterschiedlich groß sind und nicht wie ein Pointer immer 4 bytes.
+
+Falls Komponenten modifizierbar wären, müsste man diesselben Vorkehrungen (`volatile`) für atomare Operationen auf dem Wert treffen, wie schon heute für `long` und `double` auf manchen Plattformen.
+Laut dem Artikel ist der Aufwand in Hardware aber zu hoch, um so ein Standardverhalten zu rechtfertigen.
+
+== Syntaxvorschläge
+
+[source,java]
+----
+value class Point {
+    int x;
+    int y;
+
+    public Point(int x, int y) { 
+        this.x = x;
+        this.y = y;
+    }
+
+    public boolean equals(Point that) {
+        return this.x == that.x && this.y == that.y;
+    }
+}
+
+static Point origin = Point(0, 0);
+static String stringValueOf(Point p) {
+    return "Point("+p.x+","+p.y+")";
+}
+static Point displace(Point p, int dx, int dy) {
+    if (dx == 0 && dy == 0)
+      return p;
+    Point p2 = Point(p.x + dx, p.y + dy);
+    assert(!p.equals(p2));
+    return p2;
+}
+
+----
+
+In der Diskussion ist auch die Unterstützung von Werttypen im erweiterten `switch` statement, potentielle Literale, wie `(47,11)` statt `Point(47,11)` und Typinferenz.
+
+Es gibt natürlich viele Detailfragen, die im Laufe des Projekts Valhalla beantwortet werden.
+
+== Generics
+
+Wie bekannt, werden in Java Generics über Typen definiert die schlussendlich von `java.lang.Object` ableiten.
+Zur Laufzeit sind generische Typinformationen nicht mehr verfügbar, alles ist ein `Object`, auch bekannt als "Type Erasure".
+Und Objekte sind wie wir diskutiert haben nicht besonders effizient, besonders wenn sie nur wenig Zustand enthalten und in grosser Zahl auftreten, wie es bei Collections oft üblich ist.
+
+Werttypen werden auch in generifizierten Typen stiefmütterlich behandelt, es ist nicht möglich, über primitive Typen zu generifizieren.
+Also z.B. keine `List<int>`.
+
+Für die Nutzung z.B. innerhalb einer Collection müssen primitive Werte in Java in Objekte gewandelt werden (boxing), mit allen Kosten die dies mit sich bringt.
+Nur für kleine Integer und Long Werte gibt es einen Cache, der Mehrfacherzeugung verhindert.
+
+So ist der Unterschied zwischen einem byte-Feld der Größe 100 (16 + 100 * 1) = 124 bytes und einer ArrayList<Byte>(100) von (24 + 100 * 4 + 16 + 100*16)  = 2040 bytes schon beträchtlich.
+// todo tabelle
+Desweiteren schlägt jetzt auch die schon erwähnte Garbage Collection und Fragmentierung zu, wobei das Boxing zusätzlich einen erhöhten Speicherdruck verursacht.
+
+Diese Problem ist schon schlimm genug bei den existierenden primitiven Typen, wenn aber Werttypen Teil der Sprache werden, würden viele der Performanzgewinne für sie durch die fehlende Unterstützung in Generics wieder zunichte gemacht werden.
+
+Viele der spezialisierten Typen und Methoden (z.B: `IntStream`, `Predicate`, `XxxConsumer` aus Java 8) werden unnötig wenn Generics über primitive Werte möglich sind.
+Damit könnten viele Bibliotheken sowohl auf Entwickler- als auch auf Anwenderseite vereinfacht werden, in Entwicklung, Test, Dokumentation und Verständnis.
+
+Einige Sprachen wie Scala erreichen das durch eine Spezialisierung zur Compile-Zeit, die dann neuen Byte-Code der generischen Klasse mit den konkreten Wert-Typen generiert.
+In C# werden diese Spezialisierungen erst bei Bedarf zur Laufzeit erzeugt.
+
+Ein ähnlicher Ansatz ist auch für Werttypen in Java geplant, er ist im [JEP-218] "Generics over Primitive Types" festgehalten und wird in "State of Specialization" [GoetzSpecialization] beschrieben.
+
+Ein wichtiger Aspekt ist die graduelle Migration, bei der existierender Byte- und Quellcode nicht beeinträchtigt wird.
+Wie so oft in der Entwicklung von Java wird Kompabilität als eine der wichtigsten Anforderungen genannt.
+Interessanterweise aber auch, die JVM nicht mit spezifischen Extras für die Sprache Java zu belasten, da das Auswirkungen auf die anderen Sprachen auf der JVM hätte.
+
+In existierenden generifizierten Klassen wird oft die Existenz von `Object` als Superklasse angenommen, z.b. in Casts oder Nullzuweisungen.
+Daher sollen Klassen, die mit primitiven Typargumenten umgehen können, dies dem Compiler explizit mitteilen, z.b. mit `<any T>`.
+
+Für Referenztypen würde wie bisher mittels Erasure ein allgemeiner, kompatibler Laufzeittyp bereitgestellt, für Werttypen dagegen werden unterschiedliche Klassen für die Spezialisierungen erzeugt, in denen z.B. Typinformationen und Operationen im Bytecode durch konkrete Variaten für die Werttypen ersetzt werden.
+
+In der zuerst angedachten Strategie haben die erzeugten Klassen keine Beziehung zueinander, anders als bei Referenz-Generics wo gilt, `ArrayList<T> <: List<T> <: List<?> <: List` und es gibts auch keine Interoperabilität.
+
+Dabei wurde die notwendige Zusatzinformation in der Klassendatei angereichert, und dann vom ClassLoader gehandhabt, der bei Bedarf für Werttypen Spezialisierungen erzeugte.
+
+Das Auftretens der Typparameter in der Klassendatei (globale & lokale Variablen, Methodenparameter & Rückgabewerte, weitergegebene generische Typinformationen) wird markiert.
+Im Bytecode würde `java.lang.Object*T` an den Stellen stehen wo auf den aufgelösten Typparameter und nicht auf das echte `java.lang.Object` im Bezug genommen wird.
+
+////
+Es muss nicht nur die Klasse spezialisiert werden, sondern auch ihre Superklassen, um den Vererbungskontrakt aufrechtzuerhalten.
+Das ist gerade bei mehreren, partiell besetzten Typparametern nicht ganz trivial, z.B.
+`+Function<R,P> -> Function<R, long> -> Function<boolean,long> <- Function<boolean,P>+`
+////
+
+Bei der Spezialisierung werden dann die Typinformationen (`T->int`) und Bytecodes (`aload_1*T -> iload_1`) für den Werttyp konkretisiert.
+
+Die Idee war, diesen Ersetzungsprozess so einfach und mechanisch wie möglich zu machen, ohne weitere Überprüfungen zu benötigen.
+Der generierte Bytecode würde dann ganz normal vom Classloader geladen und überprüft.
+
+Leider hat sich der der erste Ansatz aus verschiedenen Gründen nicht bewährt.
+
+Im *zweiten Anlauf* wurde der Weg über eine gemeinsame Typhierarchie von Objekten und Werttypen gelöst, die auch Wildcard-Parameter `<?>` mit einschliesst.
+
+Für Typparameter kann man jetzt deklarieren, ob sie nur für Objekte `<ref T>`, nur für Werttypen `<val T>` oder für beides gelten `<any T>`. 
+Gerade letzteres is für die generifizierten Klassen im JDK wichtig, um gleichzeitig Rückwärtskompatibilität und Nutzbarkeit für Werttypen sicherzustellen.
+
+Um das ganze nach Aussen konsistent _erscheinen_ zu lassen, werden künstliche Interfaces generiert, die mit den (boxed) Objektvarianten der Werttypen deklariert werden, aber dann intern die eigentlichen Werttypen nutzen.
+
+// TODO Beispiel
+Laut Brian Goetz ist dieser Ansatz zwar aufwändiger in der JVM, aber konsistenter in der Sprache, und nach ersten Erfahrungen bei der Anwendung leicht handhabbar.
+// "Mit dem neuen Ansatz hätte ein Student im 3. Semester die Streams API schreiben können."
+
+In diesem letzten Ansatz haben Werttypen die folgende Syntax und Eigenschaften:
+
+* Schlüsselwort `value class`
+* Keine Vererbung ausser Interfaces
+* Sind unveränderlich
+* Können Methoden und Konstruktoren enthalten
+* `equals`, `hashCode` und `toString` werden generiert, können aber überschrieben werden
+//?? Operatoren?
+
+// todo mehr Methoden / multiply / add / sqrt
+[source,java]
+----
+value class ComplexNumber {
+    double real;
+    double imaginary;
+}
+----
+
+== Effizienz
+
+Werttypen haben keine Objekt-Header mehr, sie bestehen nur noch aus ihren eigenen Werten, die entweder primitiv, Werttypen oder Objektreferenzen sein können.
+Dadurch können sie als ihre Elemente auf dem Stack und in Registern abgelegt werden, nur im Notfall auf dem Heap. 
+
+Eine Dereferenzierung auf eine zufällige Speicheradresse ist nicht mehr notwendig und der Heap wird weniger fragmentiert.
+Werttypen werden nicht als Referenz sondern als Wert übergeben, also auf den Stack kopiert.
+Werttypen sind threadsicher, und unveränderlich sie müssen nicht zur Sicherheit dupliziert werden.
+
+In Feldern werden Werttypen als ein fixer Speicherbereich aus ihren Werten repräsentiert, die Iteration über diese Felder ist ein CPU-freundlicher Seek über den Speicher,
+
+Viele Klassen z.B. in `java.util.*` können jetzt intern WertTypen benutzen und somit viel effizienter werden, z.b. `Map.Entry` Instanzen in `HashMap`.
+
+Durch die Unterstützung von Generics für Werttypen, werden diese Collection-Klassen auch optimiert solange intern ebenfalls effiziente Datenstrukturen genutzt werden und ein `<any T>` und nicht `<ref T>` als Typparameter genutzt wird.
+Z.B. wird das Feld in `ArrayList<int>` zu einem `int[]` so dass es sowohl effizient im Speicher abgelegt, als auch effizient iteriert, durchsucht und darauf zugegriffen werden kann.
+
+// Cachelines, pooling, reuse, on stack, inlining,
+
+== Nächste Schritte
+
+Da es Valhalla ja nicht in Java 9 geschafft hat, ist das nächste Ziel jetzt Java 10.
+Wir können einen Branch des OpenJDK [ValhallaBuild] testen, der Anfänge der Unterstützung von Werttypen enthält.
+
+// TODO look for value type branch of the JDK
+
+== Referenzen
+
+[SCHWE] [Henning Schwentner: Project Valhalla: Value Types in Java]https://www.heise.de/developer/artikel/Project-Valhalla-Value-Types-in-Java-3115485.html 
+[VALH] Projekt Valhalla http://openjdk.java.net/projects/valhalla/
+[JEP-169] Value Types http://openjdk.java.net/jeps/169
+[GoetzGoals] Project Valhalla: Goals http://mail.openjdk.java.net/pipermail/valhalla-spec-experts/2016-October/000175.html
+[ValhallaImplementation] First Proposal for Value Types Implementation https://www.infoq.com/news/2016/11/valhalla-Implementation-proposal
+Evans DDD
+[JOL] Java Object Layout Tool http://openjdk.java.net/projects/code-tools/jol/
+[JEP-218] Generics over Primitive Types http://openjdk.java.net/jeps/218 
+[Rose2014] "State of the Values" http://cr.openjdk.java.net/~jrose/values/values-0.html
+[ValueBasedClasses] http://docs.oracle.com/javase/8/docs/api/java/lang/doc-files/ValueBased.html
+[Fowler:ValueObject] https://martinfowler.com/bliki/ValueObject.html
+[RoadToValhalla] http://blog.codefx.org/java/dev/the-road-to-valhalla/
+[FutureOfJava] http://blog.codefx.org/java/dev/future-java-might-look-like/
+[GoetzSpecialization] "State of the Specialization" http://cr.openjdk.java.net/~briangoetz/valhalla/specialization.html
+[ValhallaBuild] https://adoptopenjdk.gitbooks.io/adoptopenjdk-getting-started-kit/content/en/openjdk-projects/valhalla.html
+
+
+
+////
+infer final / switch defaults
+constructor possibly with no new
+overridable default methods
+potentially literals with assignment inference
+methods can be in value type but also external
+can participate in overloading
+no need for compile type constants ??? -> annotations, inlining ?
+Operators: == and != perhaps + for string concatenation
+potential operators for numerics or cursors? perhaps via interface
+////

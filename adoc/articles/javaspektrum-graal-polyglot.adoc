@@ -1,0 +1,1144 @@
+////
+Is Context threadsafe?
+How do I import variables into graalpython? Missing docs?
+(it's documented for FastR)
+
+Potentielle Aufmacher: https://www.flickr.com/photos/42988571@N08/albums/72157641666335543
+https://commons.wikimedia.org/wiki/File:Samovar_LarvikMuseum.jpg
+////
+= Café Melange - Polyglot Operations in Java mit GraalVM
+:img: ../../img
+
+Wie auch beim Kotlin-Artikel, musste ich auch anderswo feststellen, dass ich meiner Zeit etwas voraus bin.
+Mein erster Artikel zu Truffle und Graal erschien in der JavaSpektrum 06/14, also vor 4 Jahren.
+
+In dieser Zeit hat sich viel getan und wir alle können jetzt von den Ergebnissen des Projekts profitieren.
+
+Graal und Truffle sind eine Entwicklung von OracleLabs, wo under der Leitung von Thomas Wuerthinger ein ansehnliches Team am Compiler, Sprachwerkzeugen, Unterstützung für dynamische Sprachen und Ahead-of-Time Kompilierung (AOT) arbeiten.
+
+Seit Java 11 ist der Graal-Compiler ein offizieller Bestandteil des JDK und kann einfach mittels Kommandozeilenoptionen aktiviert werden.
+Die GraalVM ist in einer freien Community- und einer kommerziellen Enterprise-Edition zum Download verfügbar, sie soll die effiziente Unterstützung vieler Sprachen auf vielen Plattformen (OpenJDK, Nativ, Node, MySQL, Oracle) erlauben.
+Alle Sprachen und Entwicklertools sind in der Community-Edition nutzbar.
+Die Enterprise Edition hat zusätzliche Features und ca. 20% höhere Leistung, es gibt eine kostenlose Trial-Version.
+Aktuell ist gerade die Version 1.0-RC9, im nächsten Jahr soll die finale 1.0 Version erscheinen.
+
+.GraalVM Sprachen und Umgebungen - Quelle GraalVM Docs
+image::https://www.graalvm.org/docs/img/graalvm_architecture.png[]
+
+Wie bereits früher ausgeführt ist die Hotspot-JVM eine Laufzeitumgebung, die in C/C++ implementiert ist.
+Neben anderer Infrastruktur, wie Speicher- und Netzwerkmanagement und Garbage-Collector enthält sie im Kern einen Interpreter und einen Just-in-Time (JIT) Compiler (zur Zeit C2), die Java Bytecode in Prozessorinstruktionen umsetzen.
+
+Der JIT wird, genutzt um häufig ausgeführten Code (HotSpots) zu optimieren. 
+Zum Thema Laufzeitoptimierung gab es von Cliff Click einen sehr interessanten Podcast [Click].
+
+C2 ist ein sehr komplexes Stück Software dessen Weiterentwicklung und Wartung nicht trivial ist. 
+Das ist auch einer der Gründe warum so selten neue Bytecode-Instruktionen in der JVM Einzug halten und Projekte wie Panama (Vektorisierung) nur langsam vorankommen.
+Daher ist der Plan den C2 abzulösen, ein Schritt auf dem Weg ist die Möglichkeit den Compiler der JVM austauschbar (mittels JVM Compiler Interface - JMVCI) zu machen.
+
+Graal ist ein neuer Compiler, der selbst komplett in Java geschrieben ist und ein sauberes Design hat.
+Dabei nutzt er viele moderne Compileransätze zur Optimierung, z.B. Allokationvermeidung wenn festgestellt wird, dass Objekte den aktuellen Scope nicht verlassen. 
+Dann werden nur die Felder des Objekts als primitive Werte auf den Stack oder in Register gelegt.
+Desweiteren ist Graal ein optimierender Compiler, d.h. aller Code der vom Programm nicht erreichbar ist, wird aggressiv entfernt (dead-code-elimination).
+Im steady-State macht Graal Annahmen über Datentypen, die, solange sie zutreffen, es ermöglichen sehr effiziente Prozessorbefehle einzusetzen.
+Das Graal Team sieht es als "Bug" an, wenn man keine Leistungsverbesserung mit dem neuen Compiler sieht.
+
+== Sprachvielfalt auf der JVM
+
+Das Hauptthema dieses Artikels, ist die Fähigkeit von Graal, viele dynamische Sprachen effizient in der JVM auszuführen und auch dedizierte Runtimes für diese Sprachen bereitzustellen, die schneller, flexibler und sicherer sind als die originalen Interpreter/Compiler der jeweiligen Sprache.
+
+=== Installation
+
+Der Graal Compiler kann in OpenJDK 11 mittels `-XX:+UnlockExperimentalVMOptions -XX:+EnableJVMCI -XX:+UseJVMCICompiler` aktiviert werden.
+Ich habe bequemerweise [SDKMAN] genutzt, um die GraalVM zu installieren.
+Die Sprachen, die zur Zeit vom Graal-Team offiziell unterstützt und dokumentiert werden sind: _JavaScript, Ruby, R, Python (neu) und LLVM (u.a. aus C/C++/Swift/Rust) Bitcode_.
+
+Beim Download der Graal-VM ist JavaScript und LLVM Unterstützung schon enthalten, auch die notwendigen Bibliotheken sind schon im Klassenpfad vorhanden.
+
+Die Bibliotheken und Laufzeitumgebungen für Ruby, Python, R können über das Kommandozeilentool `gu` (Graal Updater) installiert werden.
+
+----
+sdk use java 1.0.0-rc9-graal
+gu install ruby python R 
+
+$JAVA_HOME/jre/bin/java -version
+openjdk version "1.8.0_192"
+OpenJDK Runtime Environment (build 1.8.0_192-20181024123616.buildslave.jdk8u-src-tar--b12)
+GraalVM 1.0.0-rc9 (build 25.192-b12-jvmci-0.49, mixed mode)
+
+$JAVA_HOME/jre/bin/graalpython --version
+Graal Python 3.7.0 (GraalVM CE Native 1.0.0-rc9)
+
+$JAVA_HOME/jre/bin/Rscript --version
+R scripting front-end version 3.4.0 (2017-04-21)
+
+$JAVA_HOME/jre/bin/ruby --version
+truffleruby 1.0.0-rc9, like ruby 2.4.4, GraalVM CE Native [x86_64-darwin]
+
+$JAVA_HOME/jre/bin/js --version
+Graal JavaScript 1.0 (GraalVM CE Native 1.0.0-rc9)
+
+$JAVA_HOME/jre/bin/node --version
+v10.9.0
+----
+
+=== Truffle und Graal
+
+Der eigentliche Star in diesem Thema ist das Sprachwerkzeug Truffle, das es erlaubt, die Interpretationsinstruktionen für eine komplette (dynamische) Sprache in Java zu implementieren.
+Dabei werden Sprachelemente (Knoten im Syntaxbaum) durch annotierte Java-Methoden umgesetzt, zum Beispiel eine Zuweisung, Objekterzeugung oder Multiplikation.
+
+.Graal-Compiler, Truffle, Sulong pro Sprachfamilie - Quelle GraalVM Slides Oleg Shelajev
+image::https://res.infoq.com/presentations/polyglot-jvm-graal/en/slides/sl13.jpg[]
+
+Damit kann die gesamte Sprache mittels Truffle interpretiert werden, nicht nur komplette Sprachen, auch beliebige DSLs wie z.B. Build-Tools oder Abfragesprachen sind möglich.
+
+Das klingt erstmal eher akademisch und ziemlich langsam, aber da es in Java implementiert ist, stehen uns alle Tools wie IDE-Unterstützung, Unit-Tests, Debugging, Refactoring, Garbage-Collection und vieles mehr zur Verfügung.
+Auch sind viele Kernbestandteile zwischen Sprachen ähnlich (z.b. Ausdrücke, Typesysteme, Variablenhandhabung, Funktions- und Objekterzeugung), so dass bei einem sauberen aber mächtigem Typsystem grosse Teile des Truffle-Codes nachgenutzt werden können.
+Ausserdem hat ein gemeinsam genutztes Typsytem zur Folge, dass der Austausch zwischen den verschiedenen Sprachen mittels derselben Objekttypen und Instanzen erfolgt und deutlich einfacher wird.
+
+Um jetzt diese saubere aber langsame Sprachimplementierung in eine effiziente Laufzeitumgebung zu verwandeln, kommt Graal in Spiel.
+
+Dabei gibt es noch einen weiteren Trick in der Kiste - Spezialisierungen.
+Dieser Ansatz wird von allen modernen Laufzeitumgebungen genutzt, ich habe ihn in meinem Nashorn Artikel [Nashorn] im Detail erklärt.
+Man nimmt an, dass Code in Programmen nicht wirklich dynamisch ist, sondern Operationen an bestimmten Stellen nach einer Intialisierungsphase mit stabilen Typen (z.b. immer String und Integer) aufgerufen werden.
+Wenn jetzt in der Sprachdefinition für diese Typkombination eine spezialisierte Implementierung vorliegt, die auf effizientere Operatoren des Prozessors abgebildet werden kann, dann kann ein optimierender Compiler diese einsetzen.
+Zumindest solange die Typ-Annahme hält.
+Wenn das nicht mehr der Fall ist, fällt man zurück auf eine Interpretation oder eine "generische" Operation und kann nach einigen Durchläufen eine neue Annahme nutzen.
+
+Mit den aggressiven Optimierungen von Graal, werden Objekte zu primitiven Werten, Streams zu For-Loops und unnützer Code entfernt.
+So dass zum Schluss nur noch die minimale Essenz des Programms übrig bleibt, die effzienter ausgeführt werden kann.
+
+Damit kann die massive Leistungssteigerung (je nach Sprache und Kontext von bis zu 10x [FastR]) gegenüber den originalen Interpretern erklärt werden.
+
+Wie auf der Abbildung 2 zu sehen, compiliert Graal JVM Bytecode, damit werden alle JVM Sprachen abgedeckt.
+Dynamische Sprachen wie JavaScript, Ruby, Python und R sind in Truffle implementiert und LLVM Bitcode (und damit Swift, Rust, C++ usw) wird über das Sulong Projekt integriert.
+
+Beste JavaScript Unterstützung ist einer der aktuelln Schwerpunkte in der Entwicklung von Graal.
+Node-Anwendungen laufen damit schon gut, ECMAscript 6, 7 und 2018 werden voll unterstützt.
+Die Implementierung ist auch als eine JSR-223 Script-Engine namens "graal.js" verfügbar.
+Einer der Gründe dafür ist, dass Nashorn als JavaScript Implementierung auf der JVM ersetzt werden soll, da die Wartung dieser Implementierung zu aufwändig ist.
+In Truffle muss (neben der Parseranpassung) für ein neues Sprachfeature nur annotierte Java-Methoden hinzugefügt werden, was die Sprachanpassungen deutlich leichter macht.
+
+Auch native Bibliotheken können genutzt werden, da Graal ja auf dem Maschinencode-Level interagiert.
+Die Leistung der Graal basierten Javascript Runtime kann mit V8 fast mithalten.
+
+=== Polyglot in Aktion
+
+Für die Nutzung anderer Sprachen auf der JVM steht eine API bereit, die in ähnlicher Weise auch in den anderen Sprachen genutzt werden kann.
+Dabei ist vorteilhaft, dass in der Truffleimplementierung ein gemeinsames Typsystem genutzt wird, was den Austausch von Datenstruktur-Instanzen ohne Konvertierung ermöglicht.
+
+Mit den `Context`, `Source`, `Polyglot` und `Value` [APIs] können die meisten Anforderungen schon erfüllt werden.
+Im `Context` kann man sowohl Fragmente, als auch Dateien ausführen, dieser stellt dann auch ggf. definierte Funktionen und Objekte zum Zugriff bereit.
+
+`Value` erlaubt es Parameter und Ergebnisse polyglotter Aufrufe korrekt zu behandeln.
+Man kann die Werte als primitive Typen, Arrays, Listen, Maps, Objekte, und Funktionen lesen und schreiben, oder z.b. auf Elemente zugreifen.
+
+Ich nutze in diesem Beispiel ein Groovy-Skript.
+Dank `@Grab` Annotation ziehen es sich seine Abhängigkeiten selbst (notwendig in OpenJDK11).
+
+.Beispiel für Polygotte APIs - Answer.groovy 
+[source,groovy]
+----
+@Grab("org.graalvm.sdk:graal-sdk:1.0.0-rc9")
+@Grab("org.graalvm.truffle:truffle-api:1.0.0-rc9")
+@Grab("org.graalvm.js:js:1.0.0-rc9")
+
+import org.graalvm.polyglot.*
+
+ctx = Context.newBuilder().allowAllAccess(true).build()
+value = ctx.eval("js", "10+Math.pow(2,3)*4")
+println(value.asInt())
+
+value = ctx.eval("js", "[10, Math.pow(2,3)*4]")
+println(value.getArrayElement(0).asInt() * value.getArrayElement(1).asInt())
+
+mul = ctx.eval("js","function(v) {return v*v;}").as(Function.class)
+println(mul.apply(9))
+----
+
+////
+Context context = Context.create("js");
+ Value jsBindings = context.getBindings("js")
+
+ jsBindings.putMember("foo", 42);
+ assert context.eval("js", "foo").asInt() == 42;
+
+ context.eval("js", "var bar = 42");
+ assert jsBindings.getMember("bar").asInt() == 42;
+
+ assert jsBindings.getMember("Math")
+                  .getMember("abs")
+                  .execute(-42)
+                  .asInt() == 42;
+ context.close();
+////
+
+.Ausführung mit OpenJDK 11
+----
+java -version
+openjdk version "11.0.1" 2018-10-16
+OpenJDK Runtime Environment 18.9 (build 11.0.1+13)
+OpenJDK 64-Bit Server VM 18.9 (build 11.0.1+13, mixed mode)
+
+JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+EnableJVMCI -XX:+UseJVMCICompiler" groovy Answer.groovy 
+42
+320
+81
+----
+
+In der GraalVM mit installierten dynamischen Sprachen kann ich auch folgenden Test ausführen, ohne die Abhängigkeiten in den Klassenpfad setzen zu müssen.
+
+[source,java]
+----
+import org.graalvm.polyglot.*;
+
+try (Context ctx = Context.newBuilder().allowAllAccess(true).build()) {
+  ctx.eval("js", "print('Hello JavaScript!');");
+  ctx.eval("R", "print('Hello R!');");
+  ctx.eval("ruby", "puts 'Hello Ruby!'");
+  ctx.eval("python", "print('Hello Python!')");
+}
+----
+
+Sofern in den Runtimes mittels Paketmanagern die notwendigen Bibliotheken für z.B. wissenschaftliche Berechnungen oder Diagrammdarstellung installiert wurden, können sie auch im polyglotten Aufruf genutzt werden.
+
+=== Poly-Polyglot
+
+Auch in den unterstützten dynamischen Sprachen kann diese Graal-API genutzt werden, um Zugriff auf alle anderen Sprachen zu erhalten.
+Dazu muss in der jeweiligen Runtime das `--polyglot` Flag aktiviert werden.
+Die Integration von Java kann direkt erfolgen, wenn man `---jvm` nutzt.
+
+In der `polyglot` API stehen `eval` zum Ausführen, `export` und `import` zum Bereitstellen bzw. zur Nutzung von Variablen zur Verfügung.
+
+[source,javascript]
+----
+// Ausführung: js --jvm --polyglot test.js
+const BigInteger = Java.type("java.math.BigInteger")
+
+let a = new BigInteger(10).add(new BigInteger(8).multiply(new BigInteger(4)))
+console.log(a)
+----
+
+Hier sehen wir den Aufruf von "R" Code in Graal-Python
+
+.graalpython --polyglot --jvm polyglot.py
+----
+import polyglot
+rcode = "paste('Graal',1.0, 'RC', c(1:9), sep=' ')"
+versions = polyglot.eval(string=rcode, language="R")
+print("Available Versions of Graal", versions)
+----
+
+Und umgekehrt den Aufruf einer Python-Funktion in FastR.
+
+.polyglot.r
+[source,R]
+----
+pycode <- 
+"def fac(n): 
+    if n==1: return 1
+    else: return n*fac(n-1)
+
+fac
+"
+fac <- eval.polyglot("python",pycode)
+print(fac(5))
+----
+
+----
+$JAVA_HOME/bin/Rscript --polyglot polyglot.r
+[1] 120
+----
+
+Ein nettes Beispiel aus der Graal Dokumentation, ist eine mehrsprachige Shell, die erstaunlich gut funktioniert.
+
+.Shell.java
+[source,java]
+----
+import java.io.*;
+import java.util.*;
+import org.graalvm.polyglot.*;
+import static java.lang.System.out;
+
+public class Shell {
+  
+  public static void main(String[] args) throws Exception {
+    BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
+    Context context = Context.newBuilder().allowAllAccess(true).build();
+
+    Set<String> languages = context.getEngine().getLanguages().keySet();
+    String language = languages.iterator().next();
+    
+    out.println("Shell for " + languages + ":");
+    while (true) {
+      try {
+        out.print(language + "> ");
+        String line = input.readLine();
+        if (line == null) break;
+        else if (languages.contains(line)) language = line;
+        else {
+          Source source = Source.newBuilder(language, line, "<shell>")
+                          .interactive(true).buildLiteral();
+          context.eval(source);
+        }
+      } catch (PolyglotException pe) {
+          if(pe.isExit()) break;
+          out.println(pe.getMessage());
+      }
+    }
+  }
+}
+----
+
+=== Fehlersuche
+
+Um Fehler oder Probleme in polyglotte Anwendungen zu finden, bringt GraalVM zum einen eine angepasste jVisualVM mit, die mit den verschiedenen Kontexten umgehen kann und zum Beispiel die Heaps der verschiedenen Sprachen anzeigts.
+
+Ein kompletter polyglotter Debugger, der die Google Chrome Debugger UI benutzt, ist nutzbar, wenn man `--inspect` angibt.
+Dann wird eine lokale URL ausgegeben, die man in Chrome öffnen kann.
+
+Neben dem Debuggen jedes polyglotten Fragments neben dem Hauptprogramm zeigt diese Integration auch polyglotte Stacktraces.
+
+image::{img}/graal-chrome-debugger.jpg[]
+
+Mittels `--cpusampler --cpusampler.Mode=statements` erhält man CPU Samples für das eigene Programm.
+
+----
+ ------------------------------------------------------------------------------------------------
+ Sampling Histogram. Recorded 39 samples with period 1ms
+   Self Time: Time spent on the top of the stack.
+   Total Time: Time the location spent on the stack. 
+   Opt %: Percent of time spent in compiled and therfore non-interpreted code.
+ ------------------------------------------------------------------------------------------------
+  Thread: Thread[main,5,main]
+  Name       |      Total Time     |  Opt % ||       Self Time     |  Opt % | Location             
+ ------------------------------------------------------------------------------------------------
+  :program~6 |         21ms  53.8% |   0.0% ||         21ms  53.8% |   0.0% | test.js~6:117-189 
+  :program~4 |         10ms  25.6% |   0.0% ||         10ms  25.6% |   0.0% | test.js~4:65-110 
+  :program~7 |          8ms  20.5% |   0.0% ||          8ms  20.5% |   0.0% | test.js~7:191-204 
+  :program   |         39ms 100.0% |   0.0% ||          0ms   0.0% |   0.0% | test.js~1-7:0-204 
+ ------------------------------------------------------------------------------------------------
+----
+
+Wer unter die Haube schauen möchte, kann sich den Operationsbaum von Graal in einer Netzwerkdarstellung im [Ideal] Visualisierungswerkzeug anzeigen lassen.
+Dazu muss man das Tool installieren und starten und kann dann seiner Anwendung die Flags `-Dgraal.Dump=` und optional `-Dgraal.MethodFilter=MyProgram.*` mitgeben.
+
+=== LLVM Unterstützung
+
+Die Entscheidung, auch LLVM Bitcode zu unterstützen, erlaubt es viele weitere Sprachen, die mittel der LLVM-Werkzeuge verarbeitet werden können, zu nutzen.
+
+Hier ist ein Beispiel das C-Code und eine notwendige Bibliothek (libcurl) einbindet und ausführt.
+
+.use-curl.c
+[source,c]
+----
+#include <stdio.h>
+#include <curl/curl.h>
+
+long request() {  
+    CURL *curl = curl_easy_init();
+    long response_code = -1;
+
+    if(curl) {
+      CURLcode res;
+      curl_easy_setopt(curl, CURLOPT_URL, "http://example.com");
+      res = curl_easy_perform(curl);
+      if(res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+      }
+      curl_easy_cleanup(curl);
+    }
+    return response_code;
+}
+----
+
+.CurlTest.groovy
+[source,groovy]
+----
+import org.graalvm.polyglot.*
+
+polyglot = Context.newBuilder()
+    .allowAllAccess(true)
+    .option("llvm.libraries", "/usr/lib/libcurl.dylib")
+    .build()
+source = Source
+    .newBuilder("llvm", new File("use-curl.bc"))
+    .build()
+
+result = polyglot.eval(source)
+
+responseValue = result.getMember("request").execute()
+responseCode = responseValue.asLong()
+
+print(responseCode)
+----
+
+----
+clang -c -O1 -emit-llvm use-curl.c
+groovy CurlTest.groovy
+----
+
+Ein interessantes Feature ist "Sandboxing" [Sandbox].
+Damit kann der Bitcode mit den Sicherheitsgarantien der JVM ausgeführt werden, so gibt es Schutz vor Null-Pointer-, ungültigen Feld- und Speicherzugriffen und vieles mehr.
+Das ist aber ein Feature der Enterprise Edition von GraalVM!
+
+== Polyglotte Datenbankprozeduren
+
+Wie am Anfang gezeigt, kann Graal in Datenbanken wie Oracle und MySQL für polyglotte Implementierungen von nutzerdefinierten Funktionen und Prozeduren eingebettet werden.
+Viel leichter ist es natürlich in Datenbanken die selbst in Java implementiert sind, was gerade bei NoSQL Datenbanken oft der Fall ist.
+
+Mein Beispiel ist Neo4j, das seit drei Jahren (Version 3.0) benutzerdefinierte Prozeduren unterstützt.
+Normalerweise müssen die in einer JVM Sprache geschrieben werden, aber dank der Graal-APIs können wir jetzt jede der unterstützten Sprachen nutzen.
+
+Hier ist der Kern der Implementierung zu sehen:
+
+[source,java]
+----
+@Context GraphDatabase graphDb;
+Map<String, Source> functions = new ConcurrentHashMap<>();
+
+@UserFunction("functions.define")
+public void function(String name, String lang, String code) {
+    Source source = Source.newBuilder(lang, code).build();
+    functions.put(name,source);
+}
+
+@UserFunction("functions.run")
+public Object run(String name, Map<String,Object> args) {
+    try (Context context = Context.newBuilder().build()) {
+        context.export("label",Label::label);
+        context.export("type",RelationshipType::withName);
+        context.export("db",graphDb);
+        context.export("args",args);
+        Source source = functions.get(name);
+    	return context.eval(source, params);		
+    }
+}
+----
+
+Wenn man jetzt Neo4j mittels GraalVM oder OpenJDK 11 mit den genannten Optionen ausführt, können diese Prozeduren genutzt werden, um z.B. dynamisch Funktionen in JavaScript, R, Ruby oder Python zu definieren und zu nutzen.
+
+----
+call functions.define("avgFriendAge","js",
+   "const ages = db.findNode(label('Person'),'id',args.get('id')).getRelationships(type('FRIEND'))
+    .map(rel => rel.endNode().getProperty('age'))
+    ages.reduce((agg,age) => agg + age)/ages.length");
+
+call functions.run("avgFriendAge", {id:"007"});
+----
+
+== Ahead-of-Time Compilation (AOT)
+
+AOT selbst ist ein größeres Thema, daher will ich es nur kurz ausführen.
+Den Maschinencode den ein JIT-Compiler aus Bytecode zur Laufzeit erstellt, kann man schon im Buildprozess erzeugen und als ausführbare Binärdateien speichern.
+Das ist der Zweck des `native-image` Tool der GraalVM. 
+Von diesem wird eine Java-Main Klasse, ihre genutzten Abhängigkeiten, Bibliotheken, JDK Funktionen und die relevanten Teile einer in Java implementierten JVM (SubstrateVM) in minimierten, optimierten Maschinencode überführt und als Binary gespeichert.
+
+image::{img}/graal-aot.png[]
+
+Dieser Buildprozess ist ziemlich aufwändig und kann für komplexere Anwendungen schon ein paar Minuten dauern.
+Hier ist ein Beispiel das rekursiv die Größe eines Verzeichnisses ermittelt, und so etwas wie das Kommandozeilentool `du` darstellen könnte.
+
+.Files.java 
+----
+public class Files {
+  
+  public static void main(String[] args) {
+  	File root = new File(args[0]);
+    System.out.printf("Total size: %d %n",fileSizes(root));
+  }
+  private static long fileSizes(File file) {
+  	if (file.isDirectory()) {
+      return Stream.of(file.listFiles()).mapToLong(Files::fileSizes).sum();
+  	} 
+    return file.length();
+  }
+}
+----
+
+.Binary erstellen
+----
+javac Files.java
+
+native-image Files
+
+Build on Server(pid: 22229, port: 54112)
+[files:22229]    classlist:     174.19 ms
+[files:22229]        (cap):     901.95 ms
+[files:22229]        setup:   1,179.42 ms
+[files:22229]   (typeflow):   2,885.87 ms
+[files:22229]    (objects):   1,224.52 ms
+[files:22229]   (features):      40.28 ms
+[files:22229]     analysis:   4,224.40 ms
+[files:22229]     universe:     120.25 ms
+[files:22229]      (parse):     312.36 ms
+[files:22229]     (inline):     531.09 ms
+[files:22229]    (compile):   2,065.76 ms
+[files:22229]      compile:   3,111.69 ms
+[files:22229]        image:     611.66 ms
+[files:22229]        write:     321.93 ms
+[files:22229]      [total]:   9,907.16 ms
+----
+
+.Test JIT vs. AOT
+----
+# GraalVM
+time java Files .
+Total size: 13110831 
+real	0m0.170s
+
+# Zulu
+time java Files .
+Total size: 13110831 
+real	0m0.230s
+
+time ./files .
+Total size: 13110831 
+real	0m0.010s
+
+time du -sh .
+ 13M	.
+real	0m0.004s
+----
+
+Dabei werden folgende Hauptziele erreicht - _sehr schnelle Startzeit_, meist im einstelligen Millisekundenbereich, und deutlich _weniger Speichernutzung_ durch die Entfernung nicht erreichbaren Codes und Verzicht auf Klassen-Metainformationen.
+
+Hauptanwendungszwecke sind:
+
+- Kommandozeilentools
+- Microservices
+- Funktionen
+- Binärbibliotheken
+
+Ein sehr cooler Einsatzzweck sind ist die Optimierung von in Java implementierten, komplexen Entwicklerwerkzeugen wie Compiler (Scala, Clojure, Kotlin), Build-Tools (Maven, Gradle) oder Checker (Findbugs, Checkstyle) die oft und schnell aufgerufen werden sollen.
+Da Graal die objektorienterten bzw. funktionalen Ansätze in einigen dieser Sprachen besonders gut optimiert, bekommt man auch noch eine verbesserte Leistung.
+Für den Scala Compiler wurde in Benchmarks [ScalaC] eine Leistungssteigerung bis zu 30% nachgewiesen.
+
+Für Microservice-Frameworks wie Spring-Boot, Micronaut, vert.x, Fn-Project wird die Erzeugung solcher Binaries aktiv unterstützt bzw. entwickelt.
+Dort ist gerade bei der Erstellung von Docker-Images die Platzersparnis durch die Wegoptimierung von JVM/JDK erheblich.
+
+Die Nutzung polyglotten Features von Graal in der Host-Sprache ist auch in diesem Modus verfügbar.
+Das wird genutzt, um effiziente, schnell startende Laufzeitumgebungen für diese dynamischen Sprachen mitzuliefern.
+
+Das `native-image` Tool führt bei der Generierung auch schon die Initialisierung von Klassen und deren statischer Felder und Blöcke durch, und speichert die Informationen im "image heap".
+Damit wird dies nicht zum Start des Programms notwendig.
+
+Das muss man bedenken, wenn der eigene Code zum Zeitpunkt der statischen Klassen-Initialisierung schon aktive wird und zum Beispiel Threads startet, Sockets öffnet, Speicher alloziert, Konfiguration liest usw.
+Wenn man diese Optimierung nicht nutzen kann oder will, ist das möglich mit `--delay-class-initialiazation-to-runtime=class,list`.
+
+Es gibt einige Einschränkungen [AOT-Limits] der Substrate-VM und des statischen Binärcodes, aber auch Workarounds bzw. Konfigurationsoptionen dafür, z.B. für Reflection (`-H:ReflectionConfigurationFiles=json-files`), Nutzung von Unsafe, JNI, Laden von Klassen, usw.
+Wenn man damit leben kann, dass diese Einschränkungen erst zur Laufzeit zum Fehler führen, kann `-H:+ReportUnsupportedElementsAtRuntime` genutzt werden.
+Um Resourcen in das Binärfile zu integrieren, kann man sie mittels: `-H:IncludeResources=regexp` angeben, zum Beispiel: `-H:IncludeResources=application.yml|META-INF/services/.+`
+
+Man darf nicht vergessen dass das erzeugte Binary weniger optimal ist, als im JIT, da die ganzen Laufzeit-Profilinformationen über die eigentliche Nutzung des Codes fehlen.
+
+Aber erhält man optimierten Code, der viel weniger Speicher belegt - da u.a. die Klassenmetainformationen nicht gespeichert werden müssen und durch die Codeeliminierung nur das minimale Gerüst, das für unser Programm wirklich notwendig ist, bereitgestellt wird.
+
+
+== Fazit
+
+Graal hat eine beachtliche Entwicklung gemacht, es ist definitiv zum empfehlen, zumindest den Graal-JIT in Java 11 zu testen.
+Die polyglotten Features sind wirklich beeindruckend, besonders in ihrer Kompatibilität zwischen den Sprachen, und die Verfügbarkeit in nativen Binaries.
+Ich denke dass wir im nächsten Jahr auch mit dem 1.0 Release eine breite Anwendung der Technologie sehen werden, für dynamische Sprachen auf der JVM und im Data-Science Umfeld (vielleicht Graal-Python/FastR in Spark?).
+Auch die Unterstützung von LLVM Bitcode ist ein cleverer Schachzug, da damit eine Reihe weiterer Sprachen unterstützt werden kann, die sogar in einer sichereren Sandbox ausgeführt werden können.
+Insgesamt bin ich von der Arbeit des Graal Teams echt beeindruckt, weiter so!
+
+== Referenzen
+
+* https://fedidat.com/510-intro-to-graal/
+
+// * https://www.youtube.com/watch?v=50JxcnvJjMQ
+* [WuerthingerShelajevDeepDive] https://www.youtube.com/watch?v=a-XEZobXspo
+* [10-Things] https://medium.com/graalvm/graalvm-ten-things-12d9111f307d
+// https://github.com/chrisseaton/graalvm-ten-things
+// Practical Partial Evaluation for High-Performance Dynamic Language Runtimes
+* [Truffle-Paper] https://chrisseaton.com/rubytruffle/pldi17-truffle/pldi17-truffle.pdf
+* [GitHub] https://github.com/oracle/graal
+* [AOT-Limits] https://github.com/oracle/graal/blob/master/substratevm/LIMITATIONS.md
+* [Download] https://www.graalvm.org/downloads/
+// * [ScalaC] https://www.codacy.com/blog/scala-faster-and-slimmer-with-graalvm/
+* [Ideal] https://github.com/oracle/graal/blob/master/compiler/docs/Debugging.md#dumping
+* [ScalaC] https://medium.com/graalvm/compiling-scala-faster-with-graalvm-86c5c0857fa3
+* [Sandbox] https://medium.com/graalvm/safe-and-sandboxed-execution-of-native-code-f6096b35c360
+// * [Play] https://blog.playframework.com/play-on-graal/
+* [Beispiele] http://www.graalvm.org/docs/examples/
+* [Context-API] https://www.graalvm.org/sdk/javadoc/org/graalvm/polyglot/Context.html
+// * [Netty-Native] https://medium.com/graalvm/instant-netty-startup-using-graalvm-native-image-generation-ed6f14ff7692
+* [InfoQ] https://www.infoq.com/articles/Graal-Java-JIT-Compiler
+* [Click] http://cliffc.org/blog/2018/02/10/heroic-optimizations/
+* [Spracheinbettung] https://www.graalvm.org/docs/graalvm-as-a-platform/embed/
+* [Dokumentation] http://www.graalvm.org/docs/reference-manual/languages/r (python,ruby,js,llvm)
+* [Graal Updater] http://www.graalvm.org/docs/reference-manual/graal-updater/
+* [FastR] https://medium.com/graalvm/faster-r-with-fastr-4b8db0e0dceb
+// graalvm.org
+// graal-users@oss.oracle.com
+
+
+////
+gu install ruby python R
+Downloading: Component catalog
+Processing component archive: Component ruby
+Processing component archive: Component python
+Processing component archive: Component R
+Downloading: Component ruby
+Downloading: Component python
+Downloading: Component R
+Installing new component: TruffleRuby (org.graalvm.ruby, version 1.0.0-rc7)
+Installing new component: Graal.Python (org.graalvm.python, version 1.0.0-rc7)
+Installing new component: FastR (org.graalvm.R, version 1.0.0-rc7)
+
+IMPORTANT NOTE:
+---------------
+The Ruby openssl C extension needs to be recompiled on your system to work with the installed libssl.
+First, make sure TruffleRuby's dependencies are installed, which are described at:
+  https://github.com/oracle/truffleruby/blob/master/README.md#dependencies
+Then run the following command:
+        /Users/mh/.sdkman/candidates/java/1.0.0-rc7-graal/jre/languages/ruby/lib/truffle/post_install_hook.sh
+
+NOTES:
+---------------
+Some R packages need a system-dependent configuration before they can be installed. A generic configuration that works out of the box in most cases is provided by default. If you wish to fine-tune the configuration to your system or should you encounter any issues during R package installation, try running the following script that adjusts the configuration to your system: 
+    /Users/mh/.sdkman/candidates/java/1.0.0-rc7-graal/jre/languages/R/bin/configure_fastr
+
+The R component comes without native image by default. If you wish to build the native image, which provides faster startup, but slightly slower peak performance, then run the following:
+   /Users/mh/.sdkman/candidates/java/1.0.0-rc7-graal/jre/languages/R/bin/install_r_native_image
+
+The native image is then used by default. Pass '--jvm' flag to the R or Rscript launcher to use JVM instead of the native image. Note that the native image is not stable yet and is intended for evaluation purposes and experiments. Some features may not work when the native image is installed, most notably the --polyglot switch. The native image can be uninstalled using the installation script with 'uninstall' argument.
+
+See http://www.graalvm.org/docs/reference-manual/languages/r for more.
+
+
+IMPORTANT NOTE:
+---------------
+Set of Graal VM components that provide language implementations have changed. The Polyglot native image and polyglot native C library may be out of sync: 
+- new languages may not be accessible
+- removed languages may cause the native binary to fail on missing resources or libraries.
+To rebuild and refresh the native binaries, use the following command:
+        /Users/mh/.sdkman/candidates/java/1.0.0-rc7-graal/jre/bin/gu rebuild-images
+////
+
+
+////
+aot
+native image
+still has memory management, security etc.
+useable with native applications (linking)
+substrate vm
+additional user-level execution of R, java, python, js, etc.
+-> allows custom runtimes
+native-image tool
+will transform bytecode using the graal compiler into machine code and write it to disk
+show native-image
+
+native-image does reachability analysis from your main method
+-> all jdk, and library methods and jvm methods that are necessary are included in the native image
+-> static analysis
+-> 
+your code
+image heap -> static initialized classes, already put on the heap, doesn't have to load/init-classes anymore / static initialzers/variables
+-> no instance specific initialization can be done in static initialization, e.g. reading config/accessing external resources etc.
+-> what else not to do: load native libraries, start threads, open-sockets, allocate jvm memory
+-> move those to initializers / lifecycle to be called from main entry point
+-> static fields are also initialized (e.g. time is build-time not startup-time),
+-> configurable delay --delay-class-initialiazation-to-runtime=class,list
+-> could be that the default is changed in the future
+-> "snapshot" at build time, try to do as much as possible (safe ops) at build time
+
+-> low resource consumption: no class metadata, loading classes etc.
+-> AOT vs JIT  == startup vs. runtime optimization/with profiling info
+microservices / FaaS
+
+
+what else is not possible -> table on GH
+https://github.com/oracle/graal/blob/master/substratevm/LIMITATIONS.md
+
+classloading -> not at image runtime, but at image generation time
+reflection: -H:ReflectionConfigurationFiles=
+-> config file which files need to be included
+
+show example of reflection failure and what the file looks like
+-> json file: { name: "fqn", methods: [ { name: "<init>", parameterTypes: []}]}
+resources:
+-> -H:IncludeResources=regexp -H:IncludeResources=application.yml|META-INF/services/.+
+
+Unsafe-> some usages are handled
+-> substitution classes -> annotations com.oracle.svm.core.annotate.TargetClass / Substitute
+
+Graal native image API to distinguish code that runs at build time vs. runtime ImageInfo.inImageCode,inImageRuntimeCode(),inImageBuildtimeCode()
+30x better startup, 2x memory
+
+-H:+ReportUnsupportedElementsAtRuntime -> instead of failing at compile time
+(for code that's usually not called)
+
+-> quick startup time allows better auto-scaling
+-> fewer processed needed as "capacity buffers" in your system
+
+examples: Netty, Scala, Clojure (lein)
+Spring: work in progress with Pivotal, currently not out of the box -> spring-fu sebastien
+Micronaut
+Fn-Project
+
+jlink is a reduced distribution mechanism
+but doesn't do AOT
+AOT in Hotspot (only prepares some methods for the JIT)
+
+limitation only for native-iamge
+not for graal compiler
+
+// JNI -> also config
+// No finalizers
+// ReferenceQUeues partially
+binary
+
+----
+cat Test.java 
+public class Test {
+	
+	public static void main(String[] args) {
+        int sum  = 0;
+        int[] values = new int[] {1,2,3,4};
+		for (int i : values) {
+			sum += i;
+		}
+		System.out.println(sum);
+	}
+}
+
+native-image Test
+Build on Server(pid: 17544, port: 63631)*
+[test:17544]    classlist:   1,170.60 ms
+[test:17544]        (cap):   1,474.30 ms
+[test:17544]        setup:   2,194.33 ms
+[test:17544]   (typeflow):   3,953.55 ms
+[test:17544]    (objects):   1,580.95 ms
+[test:17544]   (features):      60.55 ms
+[test:17544]     analysis:   5,695.56 ms
+[test:17544]     universe:     221.02 ms
+[test:17544]      (parse):     436.62 ms
+[test:17544]     (inline):     855.98 ms
+[test:17544]    (compile):   2,215.75 ms
+[test:17544]      compile:   3,784.46 ms
+[test:17544]        image:     756.26 ms
+[test:17544]        write:     643.89 ms
+[test:17544]      [total]:  14,709.62 ms
+----
+
+////
+
+
+////
+graalvm native code:
+https://medium.com/graalvm/safe-and-sandboxed-execution-of-native-code-f6096b35c360
+graalvm llvm bitcode interpreter / toolking
+c/c++/swift/..and more...
+run it in a fully managed environement / sandbox / save
+not like JNI
+run non-trivial native programs with safety guarantees
+sandboxing is an enterprise only feature
+
+generally all languages, and developer tools are OSS/community edition
+
+
+lli llvm bitcode interpreter 
+clang -c --emit-llm file.c
+lli file 
+lli --llvm.sandboxed file
+
+makes it also safer to run native code on the jvm
+
+"high performance embeddable polyglot implementation of a virtual machine"
+interop !!
+
+
+currently ARM backened for subsrate vm missing
+-> tbd also for IOT application
+
+compile java code (aot) as a shared library and load it into a c-program
+
+?webassembly interpreter for graalvm??
+-> can already run it
+-> asmjs
+is it a good target?
+
+llvm bitcode as a backend for 
+
+-> WASM/js -> as backend 
+////
+
+////
+
+mention Nashorn artikel
+  
+explain JVM compiler 
+
+zur zeit RC9 -> GA ??
+Lizenz: CE (free): 
+EE: verbesserte Performance
+picture from oracle with languages in and runtimes out
+(highlight database usage, with neo4j as another example)
+
+intro graal compiler + vm (truffle)
+EE free eval
+s
+java, scala etc.
+graal compiler on openjdk
+graal compiler written from scratch in java
+JIT replace placement
+
+"we do consider it a bug if we're not faster"
+
+graal goal is to replace current compilers with graal in openjdk 
+to allow easier maintenance and development
+faster development
+up to the openjdk project community Sélma (:           
+                                           
+Spring Boot / Tomcat
+
+infrastructure, low level code (netty) might not be as optimized
+as it's targetting the C2 compiler
+
+layers of less "optimized" code: infrastructure -> frameworks -> user code
+
+Supports all Java apps on OpenJDK 
+Oracle Database: Python and JS, not Java yet
+goal is to be at least compliant with the TCK also for native images
+not yet certified
+
+// tail call optimizations for certain truffle languages, not planned for hotspot
+// could be done in native images (substrate)
+
+dependencies graal.js on regular jdk 11
+
+org.graalvm.sdk:graal-sdk
+org.graalvm.truffle:truffle-api
+org.graalvm.js:js
+org.graalvm.js:js-scriptengine
+org.graalvm.tools:profiler
+org.graalvm.tools:chromeinspector
+
+https://github.com/graalvm/graalvm-demos
+https://github.com/graalvm/graal-js-jdk11-maven-demo
+
+ScriptEngine eng = new ScriptEngineManager().getEngineByName("graal.js"); // "nashorn"
+eng.eval(SOURCE);
+Invocable inv = (Invocable) eng;
+inv.invokeFunction("primesMain");
+
+----
+Context context = Context.create();
+Value result = context.eval("js", "42");
+assert result.asInt() == 42;
+context.close();
+----
+avoid allocation rates
+best peak performance
+
+python newest language
+work on making numpy / scipy work
+
+regular tools work through the truffle interpreter
+--inspect 
+-> chrome JS debugger
+including breakpoints
+allows stepping through the "polyglot code", e.g. R code in strings
+
+available in all contexts
+"polyglot stacktrace"
+mysql stored procedures
+debug with chrome tools
+
+
+graalvm visualvm -> polyglot Aware
+JS-Heap, R-Heap
+-> any language that is written against graalvm is supported
+easy to write language
+
+--cpusampler --cpusampler.Mode=statements
+
+--------------------------------------------------------------------------------------------------
+Sampling Histogram. Recorded 39 samples with period 1ms
+  Self Time: Time spent on the top of the stack.
+  Total Time: Time the location spent on the stack. 
+  Opt %: Percent of time spent in compiled and therfore non-interpreted code.
+--------------------------------------------------------------------------------------------------
+ Thread: Thread[main,5,main]
+ Name       |      Total Time     |  Opt % ||       Self Time     |  Opt % | Location             
+--------------------------------------------------------------------------------------------------
+ :program~6 |         21ms  53.8% |   0.0% ||         21ms  53.8% |   0.0% | test.js~6:117-189 
+ :program~4 |         10ms  25.6% |   0.0% ||         10ms  25.6% |   0.0% | test.js~4:65-110 
+ :program~7 |          8ms  20.5% |   0.0% ||          8ms  20.5% |   0.0% | test.js~7:191-204 
+ :program   |         39ms 100.0% |   0.0% ||          0ms   0.0% |   0.0% | test.js~1-7:0-204 
+--------------------------------------------------------------------------------------------------
+
+
+image::{img}/graal-chrome-debugger.jpg[]
+
+// ifelse(1>2, "no", paste(1:42, c="|"))
+
+paste(1:42, c="|")
+ [1] "1 |"  "2 |"  "3 |"  "4 |"  "5 |"  "6 |"  "7 |"  "8 |"  "9 |"  "10 |"
+[11] "11 |" "12 |" "13 |" "14 |" "15 |" "16 |" "17 |" "18 |" "19 |" "20 |"
+[21] "21 |" "22 |" "23 |" "24 |" "25 |" "26 |" "27 |" "28 |" "29 |" "30 |"
+[31] "31 |" "32 |" "33 |" "34 |" "35 |" "36 |" "37 |" "38 |" "39 |" "40 |"
+[41] "41 |" "42 |"
+
+svg();
+require(lattice);
+x <- 1:100
+y <- sin(x/10)
+z <- cos(x^1.3/runif(1)*5+10)
+print(cloud(x~y*z),main="cloud plot")
+grDevices:::svg.off()
+-> 3d plot as svg
+
+all languages use the same underlying protocol/interop to access objects
+no performance overhead for serialization/deserialization
+
+JS compatibility, all ECMAScript 6,7, 2018
+
+only need to add interpreter (truffle) for new features of a language
+
+performance very close to modern JS engines
+
+graal.js on openjdk11 with enabled graal compiler
+ruby and R are really fast
+
+
+----
+sdk use java 
+gu install ruby python R 
+
+$JAVA_HOME/jre/bin/java -version
+openjdk version "1.8.0_172"
+OpenJDK Runtime Environment (build 1.8.0_172-20180626105433.graaluser.jdk8u-src-tar-g-b11)
+GraalVM 1.0.0-rc7 (build 25.71-b01-internal-jvmci-0.48, mixed mode)
+
+$JAVA_HOME/jre/bin/graalpython --version
+Graal Python 3.7.0 (GraalVM CE Native 1.0.0-rc7)
+
+$JAVA_HOME/jre/bin/Rscript --version
+R scripting front-end version 3.4.0 (2017-04-21)
+
+$JAVA_HOME/jre/bin/ruby --version
+truffleruby 1.0.0-rc7, like ruby 2.4.4, GraalVM CE Native [x86_64-darwin]
+
+$JAVA_HOME/jre/bin/js --version
+Graal JavaScript 1.0 (GraalVM CE Native 1.0.0-rc7)
+----
+
+--jvm -> Java interop
+--polyglot -> interop with other languages
+
+----
+// js --jvm --polyglot test.js
+const BigInteger = Java.type("java.math.BigInteger")
+
+let a = new BigInteger(10).add(new BigInteger(8).multiply(new BigInteger(4)))
+console.log(a)
+----
+
+graalvm polyglot automatically on the class path on graalvm
+only need the dependencies on hotspot (also show compiler flags)
+
+evaluating string or file
+yields a Value <- representation of a polyglot value within Graal
+-> API
+meta-object, array-elements, ...., canExecute(), length(), getMember/putMember, getMemberKeys
+ctx.eval(source).as(Function.class).apply()
+
+run R functions from Java with all the libraries (need to install them into the Graal-R environment)
+
+
+graalvm ebmedded in oracle
+"we see it as embeddable in data science applications"
+you can run any supported language as part of queries
+installed npm package into oracle and runs it as "user defined function" from SQL
+also for hte other langauges
+
+plan to integrate graalvm with electron so you can also use other languages than JS to build electron apps
+ 
+
+
+
+[source,groovy]
+----
+// gu install ruby python R 
+// groovy PolyTest1.groovy 
+@Grab("org.graalvm.sdk:graal-sdk:1.0.0-rc9")
+
+import org.graalvm.polyglot.*
+
+context = Context.newBuilder().allowAllAccess(true).build()
+context.eval("js", "print('Hello JavaScript!');")
+context.eval("R", "print('Hello R!');");
+context.eval("ruby", "puts 'Hello Ruby!'");
+context.eval("python", "print('Hello Python!')");
+----
+
+----
+groovy PolyTest1.groovy 
+Hello JavaScript!
+[1] "Hello R!"
+Hello Ruby!
+Hello Python!
+----
+
+already test your own applications
+
+other languages: python, rl, JS, ruby -> truffle (language integration framework)
+c/c++ -> sulong/llvm
+
+no overhead/boundary between all the languages on the JVM
+no process separation/serialization needed between them
+all use the same JIT/runtime
+
+partial evaluation of interpreters to turn them automatically into compilers
+competitive with native runtimes, besser in Ruby udn R performance
+
+streams performance (simple map + map + reduce -> 30x faster)
+
+visualize graal compiler output with -Dgraal.Dump= -Dgraal.MethodFilter=MyBenchmark.*
+idealgraphvisualizer 
+red lines control statement flow
+blue lines data flow
+
+https://github.com/oracle/graal/blob/master/compiler/docs/Debugging.md#dumping
+HIR graphs (i.e., instances of Graph) to the Ideal Graph Visualizer (IGV), and
+LIR register allocation and generated code to the C1Visualizer
+
+http://ssw.jku.at/General/Staff/TW/graph_maxine.xml
+http://ssw.jku.at/General/Staff/TW/igv.html
+http://ssw.jku.at/General/Staff/TW/igv.html
+https://github.com/oracle/graal/blob/master/compiler/src/org.graalvm.compiler.graph/src/org/graalvm/compiler/graph/Graph.java
+
+
+graal operates on a graph, program dependency graph
+e.g. streams -> graal gets rid of all allocations, no more "new, invoke" etc. but just a for loop
+
+great for streams but also e.g. scala code, i.e. code that has a lot of allocations and method calls.
+the more abstractions you use in your program, graal makes them free to use.
+
+java -jar bencmark.jar -prof gc
+(3.7GB/s) for inner loop in Complex number example
+
+java 11 (older version of graal)
+enable graal with: -Xunlockexperimenta ... usejvmcicompiler
+much lower allocation rates (down to 90MB/s)
+escape analysis / remove all object allocations in inner loop
+you can "program nice, object oriented java without worrying about sacrificing performance" - Thomas Wuerthinger, Oracle Labs
+- performance the same, as if programming wiht the primitives contained in custom classes
+- if you create an object to look up something in an hashmap then the compiler also removes alloctions
+
+do we still need valhalla then?
+what about boxing?
+-> with graal's escape analysis it's sometimes better to allocate short lived objects that to cache long lived objects
+-> don't avoid allocations / objects
+-> caching removes information for compiler about scope
+
+-> graalvm download has the latest version
+
+
+hs_err_pid logfile
+-> dump of all the stackframes
+V -> native code
+j interpreted  java method
+J compiled java method
+(e.g. from segfault / trigger by accessing protected memory with unsafe)
+dump machine code/compiler graph of one of the methods
+-> MethodFilter (also -Xcomp to force compilation of everything)
+-> add that dump to your bug reports
+
+-> run scalac/kotlinc with graal makes it 30% faster
+
+graalvm project independent of openjdk
+openjdk uses parts of graalvm/compiler and native image parts
+currently only v8 for graalvm
+
+valhalla benchmark (multiply)
+graal 2x, graal EE + 10%
+
+-Dgraal.PrintGraphFile=true
+-XX:UseJVMCICompiler
+-XX:+PrintCompilation
+-XX:+TraceDeoptimization (for issues/bugs with deoptimization)
+
+add compile graph picture for a simple program
+only contains controL/data-flow and dependencies
+for reodering etc.
+
+graal doesn't optimize traditional "c-code" written in java
+but rather object oriented programs (allocation, inlining)
+vectorization in Graal EE
+
+measure peak performance, not start/warmup
+except AOT
+
+show how to use graal with C using llvm (graal-test)
+
+
+
+----
+Context context = Context.create("js");
+ Value jsBindings = context.getBindings("js")
+
+ jsBindings.putMember("foo", 42);
+ assert context.eval("js", "foo").asInt() == 42;
+
+ context.eval("js", "var bar = 42");
+ assert jsBindings.getMember("bar").asInt() == 42;
+
+ assert jsBindings.getMember("Math")
+                  .getMember("abs")
+                  .execute(-42)
+                  .asInt() == 42;
+ context.close();
+
+----
+
+
+GU update utility
+-> TruffleRuby, FastR, GraalPython
+-> 
+
+JS:
+
+const BigInteger = Java.type("java.math.BigInteger")
+
+
+approach
+
+getting started
+
+polyglot !?! 
+
+
+With GraalVM there is no copying or marshalling necessary as it is with other polyglot systems
+
+http://www.graalvm.org/docs/reference-manual/polyglot/
+This lets you achieve high performance when language boundaries are crossed. Most of the time there is no additional cost for crossing a language boundary at all.
+Graal brings along pre-built runtimes for the other languages.
+
+
+
+
+languages
+vs. nashorn/jruby? -> migration
+
+graalvm native images
+startup time
+faas/microservice/cloud
+
+performance benefits:
+
+startup
+substrate vm
+aot
+JS
+
+example:
+neo4j-polyglot procedures / Magnolia
+
+
+fn-project next article?
+
+////
+

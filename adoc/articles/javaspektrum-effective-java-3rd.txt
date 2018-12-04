@@ -1,0 +1,31 @@
+= Effective Java, die dritte
+
+Slides Joshua Bloch
+Buch
+
+== Lambdas
+
+Template Method -> Strategy
+
+== Functional Interfaces
+
+When in doubt use the built-in ones.
+
+Only seldomly you have to write your own.
+* Naming / Published API
+* Contract
+* Docs
+* default methods
+
+== Streams
+
+== Enum + Function
+
+== Lesser Known Things
+
+*Statistics
+
+
+== Still Relevant
+
+* Naming

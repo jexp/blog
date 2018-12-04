@@ -1,0 +1,14 @@
+== Object Mapping für nichtrelationale Datenbanken mit Spring Data 
+
+== ORMs: R für Relational
+
+== Datenmodelle von Nosql Datenbanken
+
+== Der Spring Ansatz: Die Spring Data Projekte
+
+== Praktisches Beispiel: Spring Boot mit MongoDB und Neo4j
+
+== Spring Data Unter der Haube
+
+== Reactive in die Zukunft
+

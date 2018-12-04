@@ -1,0 +1,512 @@
+= Mit Kotlin schnell und sicher zum Ziel  (Teil 1)
+
+image::https://avatars3.githubusercontent.com/u/17617519?v=3&s=200[float=right]
+
+Wie man so schön sagt, bei Kindern und Entwicklerthemen vergeht die Zeit wie im Fluge. 
+Meine letzte Kolumne zum Thema Kotlin ist vom Februar 2012, als diese Sprache für die JVM von Jetbrains noch nicht mal ihren Babyschuhen entwachsen war.
+
+Jetzt, schon fast 5 Jahre später lohnt es sich auf jeden Fall Kotlin (mittlerweise in Version 1.0.5, bzw. 1.1.0-M2) ernsthaft in Betracht zu ziehen, wenn man neue Projekte auf der JVM beginnt oder existierende modernisieren will.
+Seit dem Release der Version 1.0 im Frühjahr 2016, wird Kotlin von Jetbrains als stabil betrachtet und bleibt rückwärtskompatibel.
+
+In diesem zweiteiligen Artikel möchte ich zuerst die Grundlagen der Sprache, sowie einige Basiskonzepte und Eigenschaften beleuchten und dann im Teil 2 auf weiterführende Themen wie Nebenläufigkeit, funktionale Programmierung, diverse Bibliotheken, die neuen Features der Version 1.1 und einige Internas des Kotlin Compilers eingehen.
+
+Kotlin ist unter Apache 2 Lizenz verfügbar und hat eine aktive Nutzergemeinschaft die Fragen schnell beantwortet.
+
+Kotlin ist ursprünglich als ein Werkzeug bei Jetbrains entstanden, um Java sukzessive bei der Entwicklung, Wartung und Modernisierung der Infrastruktur und des Frameworks der Jetbrains IDEs zu ersetzen.
+
+Das Ziel für Kotlin war eine statisch getypte, pragmatische, klare, minimale Sprache mit funktionalen Elementen.
+Eine exzellente Java-Integration und Binärkompatibilität war bei dem geplanten Einsatzgebiet natürlich ein Muss.
+Dadurch können alle Bibliotheken und Frameworks auf der JVM ohne Zusatzaufwand genutzt werden, und Kotlin generierter Bytecode ist von diesen genauso nutzbar.
+
+Viel Ansehen hat Kotlin in der Entwicklung für Android bekommen, nicht zuletzt wegen der exzellenten Unterstützung in Android-Studio (auch ein Jetbrains-Tool).
+Besonders hervorgetan haben sich die schnelle Übersetzungszeit und die sicherere Entwicklung, die besonders für Entwickler die mit Android Programmen ihre ersten Schritte machen, sehr hilfreich ist.
+
+Neben der JVM hat Kotlin auch JavaScript als Zielplattform, die Spraches kann also auch für die Webentwicklung genutzt werden. 
+
+Da der Kotlin Compiler Java 6 unterstützt, kann es für sehr gut für Android genutzt werden, damit stehen einem auch auf Java 6 funktionale Konstrukte wie Lambdas zur Verfügung.
+
+Das Ganze kann man in der Kotlin-Sandbox (try.kotlinlang.org) live ausprobieren, wobei diese Umgebung schon eher einer kleinen IDE ähnelt als nur einer REPL Konsole.
+
+== Die Sprache
+
+image::https://opencredo.com/wp-content/uploads/2016/02/kronshtadt.jpg[float=right,width=400]
+
+Eine Insel bei St. Petersburg, dem Hauptsitz von Jetbrains steht Pate für Kotlins Namen.
+
+Kotlin ist eine statisch getypte Sprache mit kompakter Syntax und funktionalen Elementen, die unnötige Komplexität von Java vermeiden will und Inkonsistenzen ausräumt.
+Ein wichtiger Aspekt ist, Null- und Typ-Checks weitgehend überflüssig zu machen indem der Compiler Metainformatione über Referenzen mitführt.
+
+*Variablen* in Kotlin werden standardmässig unveränderlich mit `val name : Typ` definiert.
+Kotlin hat eine ausgereifte Typeinferenz, die dafür sorgt, dass man nur selten Typangaben vornehmen muss.
+
+Wie `match` in Scala, ist `when` das Pattern-Matching Schlüsselwort in Kotlin.
+
+If- und when-Konstrukte sind Ausdrücke, sie haben, wie in Scala, immer ein Ergebnis.
+
+----
+val currency = 
+  when (country) {
+    "UK" -> "£"
+    "US" -> "$"
+    "EU" -> "€"
+    else -> "-"
+}
+----
+
+*Funktionen* sind ein fester Sprachbestandteil, sie können inner- und ausserhalb von Objekten, Klassen und Funktionen definiert werden, sie können als Parameter und Ergebnisse von Funktionen dienen (höherwertige Funktions).
+
+Anonyme Funktionen, also Lambdas können anstelle von benannten Funktionen genutzt werden, wie in Groovy wird standardmäßig der `it` Bezeichner unterstützt:
+
+`+(1..10).filter { it > 5 }.map { n -> n * n }+`.
+
+Da Java6 als Zielplattform anvisiert wird, wurden Lambdas bisher nicht über Java8-Lambda's oder invoke-dynamic abgebildet, sonder über Inlining oder Implementierung zur Compile-Zeit  realisiert, was zu einer hohen Anzahl generierter Klassen und Methoden führt.
+
+Dieses Zitat aus einem Blog Beitrag von Mike Hearn [Hearn], fasst den Ansatz von Kotlin zur Erweiterbarkeit der Sprache gut zusammen:
+////
+erinnert mich an einen Vortrag von Anders Hejlsberg über die sorgfältige Entwicklung von Sprach-Features in C#, um dann ohne Zusatztricks LINQ (Language Integrated Query) einzuführen:
+////
+
+____
+Kotlin hat keine Makros oder andere Möglichkeiten die Sprache direkt zu ändern.
+Aber die sauber definierten Spracheigenschaften erlauben es Bibliotheken zu entwickeln, die viel eher wie Spracherweiterungen agieren als nur als eine Sammlung von Zusatzfunktionalität.
+____
+// Kotlin does not have macros or other ways to redefine the language, but a collection of carefully designed features allow for libraries that act like language extensions far more than they act like collections of objects. 
+
+////
+Hier ist ein Beispiel einer Erweiterungsfunktion aus der Standardbibliothek, namens `use`, die auf Closeable Instanzen definiert ist, und *try-with-resource* als 
+Erweiterungsmethode implementiert.
+
+.Implementierung von `use`, *vereinfacht*
+----
+public inline fun <T : Closeable?, R> T.use(block: (T) -> R): R {
+    try {
+        return block(this)
+    } finally {
+        close()
+    }
+}
+
+val text = new FileReader("readme.txt").use{ it.readText() }
+----
+////
+
+Viele der Funktionen, die Kotlin zu Listen oder Objekten aus Java hinzufügt sind als Erweiterungsfunktionen implementiert.
+
+Im Blog von Cedric Beust [Beust] werden sie etwas genauer unter die Lupe genommen.
+
+Exceptions sind in Kotlin unchecked und `try` ist ein Ausdruck: 
+
+`val x = try {  "42x".toInt() } catch (e : Exception) { -1 }`
+
+== (Typ-)Sicherheit 
+
+Die Entwicklung von Anwendungen sicherer und einfacher zu machen ist ein wichtiges Ziel von Kotlin.
+
+So wird zum Beispiel die Metainformation, dass eine Referenz nicht null ist, vom Compiler mitgeführt.
+Ab dem Zeitpunkt, zu dem diese Information vorliegt, z.B. nach einem Null-Check, einer Zuweisung oder dem null-freien Rückgabewert eines Aufrufs, 
+muss man keine Überprüfungen mehr vornehmen, selbst wenn die Referenz über mehrere Zwischenschritte durch die Pfade des Programmes fliesst.
+
+Wenn dieser Check fehlt, weist der Compiler mit einem Fehler darauf hin, dass ein ungeprüfter, potentiell nicht besetzter Wert benutzt wird.
+
+Daher kennt Kotlin auch zwei Varianten einer Typdeklaration, zum einen die regulären Variablendeklarationen mit dem Typ, wie `val a : String`.
+Beim Versuch, diesen Wert nicht zu initialisieren oder Null zuzuweisen, gibt es einen Compiler-Fehler.
+
+Bei der zweiten Variante, wenn an den Typ ein Fragezeichen angehängt, wird, z.B. `String?` kann die Referenz Null enthalten, aber dann wird die Dereferenzierung bzw. Benutzung überwacht.
+
+----
+var a: String = "abc"
+
+a = null // Compiler-Fehler
+
+val b: String? = loadFile()
+
+val l = b.length // Compiler-Fehler
+
+val l = b!!.length // Garantieren dass b nicht null ist
+val l = b?.length // Ergebnis null, wenn b null
+val v = b ?: "unknown" // Coalesce Operator
+val l = b?.length ?: -1 // Null und Coalesce Fallback
+
+if (b != null) { // Ab hier keine Checks mehr notwendig
+    b.length 
+}
+b?.let { it.length } // let wird nur aufgerufen wenn "b" nicht null ist
+----
+
+Dadurch spart man sich den Aufwand, den man sich sonst mit `Optional<T>` in Java8 oder `Option[T]` in Scala hat, da das Konzept optionaler Werte in das Typsystem der Sprache integriert ist.
+    
+Natürlich ist der Ansatz nur so gut, wie die Informationen die der Compiler besitzt, für den eigenen Code klappt das ziemlich gut.
+Für externe Bibliotheken, wie das JDK, hat sich Jetbrains den Aufwand gemacht, viele Signaturen von APIs des JDK mit `@Nullable` zu annotieren.
+
+Im Zweifelsfall muss natürlich angenommen werden, dass eine Referenz aus einer externen Quelle Null sein kann, daher wäre zumindest ein Null-Check vor Verwendung notwendig.
+
+Die Inferenz von Typen funktioniert überall, sogar ausgelöst durch vorangegangene Typ-Checks. 
+Man muss nur noch selten, z.B. bei Funktionsparametern Typen angeben.
+
+Wenn einmal eine Instanz mit `value is Type` erfolgreich geprüft wurde, führt der Compiler auch diese Information mit und nimmt "smart casts" vor.
+
+----
+fun description(value : Object) {
+    if (value is Person) value.name else "not a person"
+}
+fun description(value : Object) {
+    when (value) {
+        is Person -> value.name
+        else -> "not a customer"
+    }
+}
+----
+
+Wenn man es unbedingt möchte, kann man auch Typ-Konvertierungen nutzen, die statt eines Fehlers null zurückgeben: `val x : Int? = value as? Int`.
+Ich denke aber nicht, dass das eine gute Idee ist.
+
+Primitive Typen gibt es nicht, im generierten Bytecode werden numerische Typen aber als solche abgebildet. 
+Konvertierung zwischen diesen muss aber manuell, z.b. mit `toInt()` vorgenommen werden.
+
+////
+=== Java Integration
+
+Das Zusammenspiel mit Java verläuft zumeist reibungslos, es gibt aber ein paar Stellen an denen man aufpassen muss.
+
+Für die Nutzung von statischen Funktionen und Feldern von Java müssen diese mit `@JVMStatic` bzw. `@JVMField` annotiert werden.
+Ansonsten muss eine umständliche Syntax zu Hilfe genommen werden.
+
+Da Kotlin Java Instanzen erweitern kann und auch die Collections und Arrays von Java benutzt funktioniert in dieser Richtung die Integration gut.
+
+Klassen und Funktionen in Kotlin sind standardmäßig `final`, bei Bedarf sollte man sie mit `open` für Vererbung / Überschreiben öffnen.
+////
+
+== Entwicklung
+
+=== Schneller Einstieg
+
+Zum schnellen Einstieg empfiehlt sich die interaktive Kotlin Mini-IDE auf try.kotlinlang.org, die mit vielen Beispielen für die diversen Sprachfeatures aufwartet.
+
+image::http://i.imgur.com/x5LyuAn.jpg[width="100%"]
+
+Desweiteren gibt es diverse Bücher der bekannten Verlage und eine ganze Menge aufgezeichneter Konferenzvorträge.
+Mein Freund und Jetbrains Evangelist Hadi Hariri hat vor Kurzem bei O'Reilly, einen kompletten Kotlin Online-Kurs aufgenommen, der hoffentlich bald verfügbar ist.
+
+Durch die Binärkompatibilität mit Java, kann man in einem existierenden Projekt eine Klasse nach der anderen umstellen, ohne den Rest des Projektes zu beeinflussen.
+
+Der Kotlin-Compiler ist trotz der fortgeschrittenen Features sehr schnell, und erzeugt Bytecode, der gut von Hotspot optimiert werden kann.
+Z.B. werden kurze Funktionen aus Listenoperationen häufiger vom Compiler geinlined.
+
+
+=== Unterstützung in IDEs
+
+In den Jetbrains IDEs wie Android Studio und IDEA ist die Unterstützung für die Kotlin Entwicklung sehr ausgereift. 
+Das Kotlin-Plugin umfasst mehr Funktionen als die für Scala oder Groovy.
+
+Neben Projekterzeugung, Build und Ausführung gibt es natürlich auch Sytax-Highlighting, aber vor allem Intentions (hilfreiche Warnungen und Verbesserungsvorschläge) und Refactorings.
+Ein besonders nützliches Feature ist die Umwandlung von Java-Quelltext nach Kotlin, wenn er in eine Kotlin-Datei eingefügt wird.
+Oder direkt die Konvertierung einer Java-Datei in das Kotlin Gegenstück.
+
+Für Eclipse Luna und Netbeans gibt es Kotlin Plugins in Beta, man kann aber auch seine Projekte in einem Editor entwicklen mit den Build-Tools (s.u.) auf der Kommandozeile bauen und ausführen.
+
+=== Tests mit Kotlin
+
+Natürlich kann man für Unit-Tests JUnit, AssertJ oder andere Frameworks verwenden.
+Nat Pryce hat Hamcrest als HamKrest nach Kotlin portiert.
+KotlinTest ist ein Test Framework das an ScalaTest angelehnt ist.
+
+Und mit Spek hat man ein schönes spezifikationsbasiertes Framework, wie RSpec oder JBehave.
+
+Hier ist ein kleines Beispiel:
+----
+class SimpleTest : Spek({
+  describe("ein Rechner") {
+    val calculator = SampleCalculator()
+
+    it("berechnet das Ergebnis der Subtraktion des zweiten Parameters vom ersten") {
+        val subtract = calculator.subtract(4, 2)
+        assertEquals(2, subtract)
+    }
+  }
+})
+----
+
+=== Build
+
+Obwohl man den Kotlin-Compiler selbst direkt aufrufen kann, wird man das nur selten tun.
+
+----
+kotlinc hello.kt -include-runtime -d hello.jar
+
+java -jar hello.jar
+# oder
+kotlin -classpath hello.jar HelloKt
+
+# start a REPL
+kotlinc-jvm
+----
+
+////
+Man kann Kotlin mittels `kotlinc -script my_script.kts` auch als Script-Sprache benutzen.
+Der JVM Start und Compilier-Vorgang kostet zwar Zeit, aber innerhalb des Scriptes kann man auf alle Kotlin und Java-Bibliotheken zugreifen.
+////
+
+// TODO is there a Kotlin-Compiler-Server ?
+
+Kotlin Projekte können problemlos mit *Maven, Gradle oder Ant* gebaut werden, es gibt auch ein Plugin für *sbt*.
+Ein eigenes, Gradle-ähnliches Buildsystem namens "Kobalt" wurde von Cedric Beust entwickelt.
+
+Mit dem gradle-script-kotlin Projekt können sogar Gradle Build-Files und Plugins leicht in Kotlin entwickelt werden.
+
+Ein sehr grosser Vorteil von Kotlin gegenüber Scala als funktionale Alternative, ist die kurze Zeit für den Build, die ähnlich wie bei Java-Projekten ausfällt.
+
+Ein netter Aspekt von Kotlin ist, dass es nur eine minimale Laufzeit Bibliothek (700kb) benötigt, sie enthält vor allem Erweiterungsfunktionen für das JDK.
+
+=== Dokumentation
+
+Kotlins Äquivalent zu JavaDoc heisst KDoc, unterstützt nicht nur JavaDoc mässige Auszeichnungen `@constructor` sondern auch eingebettete Markdown-Syntax, z.B. für automatisch aufgelöste Referenzen auf andere Klassen und Methoden +`[der Name der Person][example.Person.name]`+.
+
+Das *Dokka* Tool erstellt aus gemischten Java- und Kotlin-Quellen schicke, anpassbare Dokumentations-Sites in diversen Formaten.
+
+Eine ausführliche Referenzdokumentation, Tutorials (Koans) und Videos zu Kotlin selbst findet man online unter kotlinlang.org/docs.
+
+== Nützliche Features
+
+=== Stringinterpolation
+
+Ausgabe von Informationen ist unser täglich Brot, in Java wird heutzutage dafür meist `String.format` benutzt, oder `MessageFormat`.
+
+Wie in vielen anderen Sprachen auch, unterstützt Kotlin Stringinterpolation mittles `"$name"` oder `"${value * 10}"`.
+
+=== Funktionen
+
+In anderen Sprachen werden diese als `public static` Methoden oder als Methoden eines `object`s gehalten.
+
+In Kotlin kann man überall Funktionen definieren, auf dem Paket-Level oder innerhalb einer Funktion.
+
+----
+package example
+
+fun squares(numbers : Iterable<Int>) = numbers.map{ it * it }
+----
+
+Funktionsargumente können benannt werden, um eine bessere Dokumentation und Lesbarkeit von Funktionsaufrufen zu gewährleisten.
+Kotlin unterstützt auch optionale Argumente mit Standardwerten und Varargs mit dem Spread Operator `*args`.
+
+Man kann Funktionen als `inline` deklarieren, dann folgt der Compiler diesem Hinweis.
+
+=== Erweiterungsfunktionen
+
+Man kann existierende Klassen, z.B. aus dem JDK, Bibliotheken oder dem eigenen Projekt mit neuer Funktionalität erweitern.
+
+Wir könnten z.B. String um eine `md5()` Methode erweitern.
+
+----
+public fun String.md5() : String { 
+    return MessageDigest.getInstance("MD5")
+           .digest(this.toByteArray())
+           .map{ Integer.toHexString(it.toInt() and 0xFF) }
+           .joinToString("") 
+}
+"Hello World".md5() // b1a8db164e075415b7a99be72e3fe5
+----
+
+Diese Erweiterungsmethoden werden dann auch von der IDE automatisch mit auf Instanzen der Klasse in der Auto-Completion mit angeboten.
+
+// So ähnlich wie extension methods in C# oder implicits in Scala.
+
+=== Data Klassen und Properties
+
+Einfache DTO-Klassen kann man ganz einfach mit `class Person(val name : String, val age : Int)` deklarieren.
+Dabei sind alle Felder unveränderlich.
+
+Bei der Erstellunge einer Instanz kann das `new` Schlüsselwort weggelassen werden.
+
+Wenn man der Klasse ein `data` voranstellt, generiert der Compiler, ähnlich wie bei case-Klassen in Scala die notwendigen `equals`, `hashCode` und `toString`-Methoden.
+Es wird auch eine `copy` Methode hinzugefügt, die es einfach macht mittels benannter Parameter, modifizierte Kopien der Instanz zu erzeugen:
+
+----
+data class Person(val name : String, val age : int)
+
+val alice = Person("Alice",32)
+
+alice == Person("Alice",32) // true
+// Zwilling von Alice
+val bob = alice.copy(name = "Bob") 
+
+val (name,age) = alice
+----
+
+Zugriff auf Getter und Setter von Java Beans erfolgt in Kotlin kompakt mit Zuweisungen bzw. Leseoperation auf den Namen der Property.
+
+Aus `val x = person.name` wird in Java `String x = person.getName()` und umgekehrt.
+
+In Data Klassen werden Getter und Setter automatisch generiert.
+////
+Felder können "lazy" initialisiert werden, indem man ihnen einen Block mitgibt.
+
+----
+class Foo { 
+    val field by lazy { println("init"); "value" } 
+}
+>>> val x = Foo()
+>>> x
+Line4$Foo@55b93b34
+>>> x.field
+init
+value
+>>> x.field
+value
+----
+////
+
+=== Tuples und Dekomposition
+
+// TODO HH limits to destructuring ?
+An vielen Stellen, wie z.B. Zuweisungen, Schleifen oder `when` Konstrukten können Felder von Objekten per Dekomposition an Variablen zugewiesen werden.
+
+// Die notwendigen Methoden zur Auflösung (`component1...componentN()`) werden z.B. in `data`-Klassen automatisch mit generiert, man kann sie für eigene Klassen aber auch selbst bereitstellen.
+
+----
+val aapl = Pair("AAPL",111) 
+val (stock,value) = aapl
+
+data class Person(val name: String, val age: Int)
+val alice = Person("Alice", 6)
+val (name, age) = alice // decomposition
+
+val (a,b) = arrayListOf(1,2,3) // first 2 elements
+----
+
+Mit `Pair` kann man schnell getypte Tuples von Werten erzeugen, entweder mit `Pair(a,b)` oder `a to b`.
+
+Das ist auch praktisch in einer For-Schleife, in der diese Tuple dekonstruiert werden können
+
+----
+val people = listOf(Pair("Michael","Germany"),"Hadi" to "Spain")
+for ((name,country) in people) {
+    println("$name lives in $country")
+}
+----
+
+=== Pattern Matching mit `when`
+
+Wie in Scala und anderen funktionalen Sprachen ist das eingebaute Pattern Matching ein mächtiges Werkzeug zur klareren Strukturierung von Enscheidungsregeln.
+
+Auf der linken Seite des Pfeiles +`->`+ kann ein beliebiger Ausdruck stehen, falls dieser eine Typüberprüfung (auch mit Generics) enthält, sind die Instanzen auf der rechten Seite automatisch im korrekten Typ bereit.
+
+----
+when (data) {
+    is Pair<String,Int> -> println("${data.first()} is ${data.second()} years old")
+    is Person(name,age) -> println("name is $age years old")
+}
+----
+
+=== Collections und Listenoperationen
+
+Kotlin bringt kein eigenes Collection-Framework mit, sondern benutzt und erweitert `java.util.collections`.
+
+Literale Collections gibt es zwar nicht, dafür aber, wie in Java 9 Funktionen, mit denen Collections erzeugt werden können, wie z.b: `listOf()`, `setOf()` oder `mapOf(*Pair)`.
+
+Es wird zwischen veränderlichen (`MutableList`) und unveränderlichen (`List`) Varianten unterschieden.
+Eine Nur-Lese-Sicht auf eine Collection kann durch Nutzung eines unveränderlichen Interfaces erreicht werden, z.B. `val view : Map = mutableMap`.
+
+Die typischen funktionalen Listen-Operationen sind als Extension-Funktionen implementiert, daher kann man sich diese auch anschauen, bzw. leicht eigene umsetzen.
+Wie z.B. hier für `List` zu sehen [List], ist diese List mit ca. 100 verschiedenen Operationen wirklich umfassend. 
+// Man fühlt sich an die API von Observable von RxJava erinnert.
+
+* filter, map, mapIndexed reduce, sum, joinToString, takeWhile, distinct, sum 
+* associate zum Erzeugen von Maps
+* Ranges wie `1..10`,`1 until 10 step 2` oder `10 downTo 1` sind auch hilfreich
+////
+Um Operationen verzögert auszführen kann man eine "lazy" Sequenz benutzen, die man z.B. mit `sequenceOf()` oder `asSequence()` erzeugen kann.
+Deren Elemente werden erst zugegriffen, wenn sie benötigt werden und sie wird auch nicht zu einer Liste materialisiert wenn nicht gefordert.
+
+Strings zählen in diesem Sinne auch als Collections von Zeichen.
+
+Hier ein paar Beispiele:
+
+----
+val x = (10 downTo 1).map{ it*it }.filter{ it % 2 == 0}
+// [100, 64, 36, 16, 4]
+
+x.reduce{ a,x -> a + x }
+// 220
+
+val x = (1..10).asSequence().map{ it*it }.filter{ n -> n % 2 == 0 }
+// lazy: kotlin.sequences.FilteringSequence@26aee0a6
+x.toList()
+// [4, 16, 36, 64]
+
+listOf("Alice","Bob","Charlotte").associate{ Pair(it,it.length) }
+// {Alice=5, Bob=3, Charlotte=9}
+
+"Hello World".map{ it + 1 }.joinToString("")
+// Ifmmp!Xpsme
+----
+
+Sehr hilfreich wäre es, wenn Null- und Instanzcheck-Metainformation auch bei Listenoperationen mitgeführt würden.
+
+Wenn man eine Liste von Nutzern mit "is" nach den "Person" Instanzen filtert, dann sollte sich der Typ der Liste auf `List<Person>` ändern.
+
+----
+// doesn't work
+loadUsers().filter{ it is Person }.map{ it.age }
+
+// needs additional check
+loadUsers().filter{ it is Person }.map{ if (it is Person) it.age else 0 }
+----
+
+Es wäre schön, wenn man auf `Pair` Instanzen auch die genannten Listenoperationen ausführen könnte, so muss man erst `toList()` darauf aufrufen.
+////
+
+== Anwendungsfälle
+
+Kotlin wird natürlich bei Jetbrains genutzt, wenn auch noch nicht ganz in dem Umfang wie ursprünglich geplant.
+Teile der Jetbrains Platform liegen jetzt schon in Kotlin vor.
+
+Der Issue-Tracker "YouTrack" wurde in Kotlin neu geschrieben, er war vorher mittels MPS implementiert.
+Das online Code-Repository und Codereview Tool "Upsource" wurde in Kotlin entwickelt.
+Und grosse Teile der nagelneuen C#-IDE Raider besteht auch aus Kotlin Modulen.
+
+Auf der Kotlin Hauptseite sind einige Anwendungen gelistet, die die Sprache in größerem Umfang einsetzen. Hier ein paar Beispiele:
+
+Die Präsentationssoftware Prezi nutzt Kotlin im Backend, für umfangreiche Datenverarbeitung und die Entwicklung spezieller Services und APIs.
+In der Anwendung zur sicheren Kommunikation "Telegram" wird Kotlin als Schema-Compiler für die "TL"-Sprache genutzt.
+
+Erwartungsgemäß gibt es diverse Android Anwendungen die ganz oder zum Teil mit Kotlin umgesetzt wurden (z.B. aus dem Medizinischen Bereich und Spiele).
+
+Ich selbst habe Kotlin für die Implementierung der GraphQL Erweiterung von Neo4j benutzt.
+Ich hatte es aus Bequemlichkeit in Java begonnen, dann aber spontan entschieden auf Kotlin zu wechseln. 
+Die initiale Umstellung der Klassen hat nicht einmal eine Stunde gedauert.
+Danach konnte ich aber in einer Refactoring-Sitzung eine Menge Code entfernen und vereinfachen, und es hat Spass gemacht.
+Das Projekt macht von den Möglichkeiten der Sprache, besonders bei der Transformation von GraphQL Datenstrukturen zu Cypher viel Gebrauch.
+
+== Fazit
+
+Kotlin in einem Projekt einzuführen hat minimales Risiko.
+Die Sprache ist leicht zu erlernen und spart eine Menge Code und unnötige Komplexität.
+
+Durch die Binärkompatibilität mit Java, die leicht verständliche Sprache und die gute IDE Unterstützung, kann man in einem Bereich damit anfangen und sofort die Vorteile genießen, während man Erfahrungen mit der Sprache sammelt.
+
+Im Oktober 2016 wurde der zweite Milestone von Kotlin 1.1 veröffentlicht, mit interessanten neue Features wie der Unterstützung von Java 8, Typ-Aliasen und Co-Routinen.
+Mehr zu Kotlin 1.1 gibt es in Teil 2 des Artikels.
+
+
+== Referenzen
+
+* [Kotlin] https://kotlinlang.org/ [Kotlin Site]
+* [KotlinDoc] https://kotlinlang.org/docs/ Dokumentation (Referenz, Tutorial, Videos)
+* [Kotlin Blog] https://blog.jetbrains.com/kotlin/
+* [Kotlin Night London Recordings, Oct 2016] https://blog.jetbrains.com/kotlin/2016/11/kotlin-night-in-london-recordings/
+* [AwesomeKotlin] https://kotlin.link/
+* [Dokka] https://github.com/Kotlin/dokka
+* [Spek] https://jetbrains.github.io/spek/
+* [List] https://kotlinlang.org/api/latest/jvm/stdlib/kotlin.collections/-list/
+
+* [Beust] http://beust.com/weblog/2015/10/30/exploring-the-kotlin-standard-library/
+* [Pryce] http://natpryce.com/articles/000815.html Nat Prye über Kotlin
+* [Anko] https://github.com/Kotlin/anko Bibliothek und DSL für Android UI Entwicklun
+* [Hearn] https://medium.freecodecamp.com/why-kotlin-is-my-next-programming-language-c25c001e26e3#.dxam7awck
+* [Hearn FP] https://medium.com/@octskyward/kotlin-fp-3bf63a17d64a#.2ymqbkj1h "Kotlin loves FP"
+* [GoodBadUgly] https://medium.com/keepsafe-engineering/kotlin-the-good-the-bad-and-the-ugly-bf5f09b87e6f#.sdiipf8s8 
+* [KobaltBuildTool] http://beust.com/kobalt/home/index.html
+* [gradle-script-kotlin] https://github.com/gradle/gradle-script-kotlin
+* [neo4j-graphql] http://github.com/neo4j-contrib/neo4j-graphql
+
+

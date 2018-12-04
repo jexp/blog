@@ -1,0 +1,200 @@
+////
+- Was ist Unsafe? (wie kommt man Zugriff darauf)
+- Warum braucht man das?
+- Wie benutzt man Unsafe?
+- Wo wird es üblicherweise verwendet? (Beispiele - JDK internals, DirectMemory / Off Heap etc.)
+- Diskussion Vor / Nachteile von Mechanismen wie Unsafe welche die safety garantees von Java aushebeln...
+- Abschluss: Verweis auf Diskussion das gerade darüber nachgedacht wird sun.misc.Unsafe zu entfernen bzw. nicht mehr direkt zugänglich zu machen... (siehe: What to do about sun.misc.Unsafe)
+
+
+TODO API Evolutions-Diskussion, wie kam es zu Unsafe, wie kommt man wieder weg davon.
+Was lernen wir daraus.
+
+Auch: Plattformunabhängigkeit kommt mit einem Preis
+
+////
+
+== Die Zukunft von Unsafe
+
+Die Klasse `sun.misc.Unsafe` ist eine der Kuriositäten des Java Development Kits, die sich seit Jahren großer Beliebtheit erfreut, obwohl sie nie für die öffentliche Nutzung gedacht war.
+Jetzt soll sie mit Java 9 nicht mehr zugreifbar sein. Über die Auswirkungen dieser Entscheidung und über mögliche Alternativen, haben sich einige der besten Köpfe des Java-Ökosystems Gedanken gemacht.
+
+=== Wozu das Ganze?
+
+Während der Entwicklung der Implementierung der JVM gab es immer wieder Systemfunktionen, die die Ingenieure von Sun plattformunhabhägig von Java aus zugreifbar machen wollten, ohne jeden Nutzer zu einer JNI Integration zu zwingen. 
+
+Einige sind einfach als "native" Funktionen in der normalen API integriert. Z.B. `System.identityHashCode(Object)`.
+
+Andere, die viel näher am Betriebssystemkern liegen, wie z.B Speichermanagement, oder CAS (compare-and-swap) Operationen sollten nur inner halb des JDK nutzbar sein (also von Klassen die im Boot-Classpath liegen), und nicht von jederman.
+
+Solche internen APIs wurden für die interne Nutzung in Klassen in Paketen mit den Präfixen `com.sun.*` oder `sun.*` bereitgestellt.
+Alle dieser APIs sind nicht offiziell supported und können von Oracle (Sun) jederzeit geändert werden, es gibt keine _Kompatibilitätsgarantie_.
+Man sollte sie auch nicht benutzen.
+
+Die interessanteste dieser Klassen ist `sun.misc.Unsafe`, die wie der Name schon verrät, mit Vorsicht zu benutzen ist.
+Über die Jahre ist sie zu einer Art Halde für alle möglichen Zugriffsfunktionen geworden, von Methoden zum Allozieren von Speicher bis zu Kontrollfunktionen für Locks und anderer Konstrukte fürs Multithreading.
+
+Die nachfolgende Übersicht zeigt einige Funktionen und Bereiche, die `Unsafe` abdeckt [Unsafe Funktionalität]:
+
+* Speichermanagement 
+** Speicherallokation, direkter Lese-, Schreibzugriff, Addressermittlung, Kopie von Speichersegmenten
+* Sichtbarkeitssteuerung 
+** volatile Speicheroperationen 
+* Synchronisation
+** compare-and-swap, Monitor-Operationen, 
+* Threadmanagement
+** park, unpark
+* Objektmanipulation
+** direkte Instanziierung, Offsets von Feldern
+* Klassenmanipulation
+** direkte Erzeugung von Klassen, 
+* Felder
+** Offsets und Größe von Elementen
+// * Netzwerk- und Dateisystemkanäle
+
+Der offizielle Zugriff auf `Unsafe` wird über eine Überprüfung, ob der Aufrufer Teil des Boot-Classpaths ist, geschützt. 
+Es war jedoch schnell klar, dass man mittels Reflection problemlos auf das Feld `Unsafe.theUnsafe`, das Instanz hält, zugreifen kann.
+
+Und somit sind die wertvollen Funktionen für Autoren von Bibliotheken, die effizienteste Implementierungen für Speicher-, Netzwerkmanagement oder Parallelprogrammierung nutzbar. 
+Und genutzt werden sie! 
+Ich denke, Unsafe ist eines der "unerlaubtesten" Konstrukte überhaupt, das am meisten ausserhalb seines grünen Bereiches genutzt wird.
+
+Für viele der nützlichen Funktionen gibt es *keine sinnvollen Alternativen*, d.h. sonst müsste man eigene native C-Implementierungen der Funktionalität für alle Plattformen schreiben und diese mittels JNI einbinden.
+
+Davon abgesehen, dass dieser Ansatz nicht trivial ist, muss man auch viel Aufwand für die Wartung betreiben, obwohl diese Funktionen nicht die Kernaufgaben der eigenen Bibliothek oder Anwendung darstellen.
+
+Hier sind _einige_ der bekanntesten Java Projekte, die Unsafe benutzen:
+
+[options="header"]
+|===
+| Netzwerk, Processing | Testing  | Datenbanken | Frameworks / Sprachen
+| Netty     | Mockito | Cassandra | Spring Framework
+| Hazelcast | EasyMock| Neo4j     | Grails
+| Kafka     | JMock | MapDB | JRuby
+| Storm     | PowerMock | Hibernate | Scala
+| Hadoop    |  Scala Specs || GWT
+| Akka      | Spock ||  
+| Spark     |       || 
+| Disruptor |       || 
+|===
+
+Daraus wird schnell ersichtlich, dass fast jede Java-Anwendung `Unsafe` zumindest implizit über ihre Bibliotheken benutzt.
+
+Mit den Modularisierungsmechanismen in Java 9 (Jigsaw) soll `Unsafe` nur noch vom Bootclassloader zugreifbar sein.
+Das wäre nicht das Ende der Welt, da man auf diesen ClassLoader auch zugreifen kann (z.b. `String.class.getClassLoder()`).
+Aber es startete aber eine Diskussion über genau diese APIs, die zwar so nützlich, aber so unglücklich exponiert sind.
+Was nun?
+
+Die einen sagen _Selbst dran schuld, Unsafe war nie für die öffentliche Nutzung gedacht_, andere _Unsafe muss bleiben_.
+Realistischere Ansichten schlagen eine stufenweise Migration auf durchdachte, sinnvolle und offizielle APIs vor, die über den JCP / JEP (JDK Enhancement Proposal) entwickelt werden sollen.
+Leider geht das nicht von heute auf morgen.
+
+=== Unsafe-Umfrage
+
+Vor ca einem Jahr hat Oracle eine Umfrage [UnsafeUmfrage] gemacht, um festzustellen in welchem Umfang und wofür Unsafe benutzt wird (über 300 Teilnehmer).
+
+Paul Sandoz hielt eine interessante Präsentation [UnsafeUmfragePräsentation] über deren Ergebnisse, die viele der hier genannten Punkte verdeutlicht.
+
+* Vielfältige Nutzung von Unsafe in Bibliotheken
+* Viele der genannten Funktionen sind wichtig und nützlich
+* Die Anwendungsfälle sollten über offizielle APIs (entwickelt via JEP) abgebildet werden
+* Schrittweise Ablösung von Unsafe Funktionalität
+
+Hauptanwendungsfälle der Teilnehmer sind: 
+
+* erweiterte Operationen für nebenläufige Entwicklung, 
+* De/Serialisierung, sowie
+* Off-Heap Management, welches sich noch einmal in 
+** Reduktion von Garbage Collection, 
+** effizientere Speicherstrukturen, 
+** Handhabung großer Datenmengen und 
+** Inter-JVM Kommunikation unterteilen lässt.
+
+Für diese Anwendungsfälle zeigt er (in der folgenden Tabelle dargestellt), welche Alternativen sich jeweils in der Entwicklung befinden oder schon abgeschlossen sind.
+
+|===
+| Use-Case | Alternative API / JEP
+| Enhanced atomic access | JEP 193 Enhanced Volatiles
+| De/Serialization | JEP 187 Serialization 2.0
+| Reduce GC | Value types / JEP 189 Shenandoah: Low Pause GC
+| Efficient memory layout |  Value types, Arrays 2.0 & Layouts
+| Very Large Collections | Value types, Arrays 2.0 & Layouts
+| Communicate across JVM boundary | Project Panama & JEP 191 FFI
+|===
+
+Der Ansatz besteht darin, die Alternative zu entwickeln, die zumindest so *gut, schnell und mächtig* wie Unsafe-Funktionalität sein sollte.
+Migration der Nutzung innerhalb der JDK Klassen auf diese neue API, dann Entfernung der Funktionalität aus Unsafe.
+
+Damit ist ein sinnvoller Weg aufgezeigt, vom heutigen ungesteuerten Wildwuchs und -nutzung von Unsafe zu einer sichereren, saubereren Lösung zu kommen.
+
+Das war schon 2014, viele der genannten APIs und JEPs sind aber noch mitten in der Entwicklung.
+
+Und jetzt passiert das Undenkbare, mit dem vor der Tür stehenden Java 9 Release soll Unsafe unzugänglich gemacht werden, ohne dass die gerade dargestellte schrittweise Migration vorgenommen wurde.
+
+=== Eine Zukunft ohne Unsafe?
+
+Nach einem ersten Aufschrei "Das können die doch nicht machen!" [Disaster], haben sich einige der bekanntesten Entwickler der Java-Gemeinde zusammengefunden und in einem Dokument zusammenegetragen welche Aspekte von `Unsafe` in welcher Form als offizielle APIs in Einzug in das JDK halten sollten.
+
+Dazu gehört auch, erst einmal den unstrukturierten Haufen von Funktionen in klare APIs aufzuteilen und sinnvoll zu dokumentieren, so dass alle Rahmenbedingungen und kritischen 
+
+Es wäre auch nicht anzunehmen, dass das Java Kernteam bei Oracle Unsafe ohne Ersatz verschwinden lässt.
+Zum einen wird ein Kommandozeilenflag diskutiert, dass auch in Java9 den Zugriff auf Unsafe gestattet. 
+Zusammen mit den Vorschlägen der Community wird eine sinnvolle Alternative entwickelt werden.
+
+=== Kernaussagen
+
+. Prinzipiell ist es richtig Unsafe zu ersetzen, aber nicht ersatzlos zu entfernen
+. Für die notwendigen, "sicheren" Funktionen müssen Alternativen geschaffen werden
+. Viele Bibliotheken und Frameworks werden unter Java 9 nicht nutzbar sein, ohne einen Ersatz
+. Replikation von Unsafe mittels JNI wäre sehr aufwändig sowohl in Entwicklung als auch Wartung, für äquivalente Leistung müsste ein Großteil der umgebenden Funktionalität in C repliziert werden. Desweiteren wäre diese deutlich _unsicherer_ als die existente Realsierung innerhalb des JDK.
+. Ein großes Problem stellt die fehlende Spezifikation der Unsafe-Funktionalität dar, sie ist nur durch ihre Implmmentierung und Laufzeitverhalten "spezifiziert"
+
+Die Autoren listen auf, dass fast alle der von Paul Sandoz genannten APIs und JEPs *nicht* in Java 9 verfügbar sein werden.
+Einige sind sogar ganz von der Bildfläche verschwunden.
+
+Es muss einen Plan (Roadmap) als JEP für diese Aktivitäten geben, die Spezifikation der relevanten Unsafe Funktionalität sollte über einen JSR erfolgen.
+
+Die Community muss sich mittels des JEP  Prozesses an der Findung von Alternativen beteiligen, die Zeit bis zur Finalisierung von Java 9 (Nov 2015) ist dazu aber zu knapp.
+
+Im Dokument wird auch detailliert aufgestellt, welche Funktionen von Unsafe wie populär sind und welche davon, gegebenenfalls Alternativen in Java 9 haben werden.
+
+TODO Tabelle / Bild davon
+
+
+=== Fazit
+
+Zur Zeit ist noch alles offen. Zum einen steht der November-Termin für Java 9, zum anderen gibt es keine wirklichen Alternativen für die Unsafe Funktionalität.
+
+Ich denke, es wird entweder auf eine halboffizielle Variante herauslaufen, die über ein JVM Kommandozeilenflag den Zugriff auf Unsafe erlaubt, oder über den Zugriff auf den Boot-Classloader passieren. 
+Während der Lebenszeit von Java 9 ist dann dringend angeraten, die genannten Vorschläge umzusetzen und eine sinnvolle und nutzbare Alternative zu Unsafe zu schaffen.
+
+Wie zu erwarten, stößt dieses Ereignis auch Diskussionen rund um das Thema "Publikation von und Nutzung von APIs" an, 
+die zumindest meines Erachtens einen wichtigen Aspekt aussen vor lassen.
+
+Warum kommt es zu solchen Situationen? Oft is eine fehlende Kommunikation bzw. Feedback zwischen Autoren einer API und deren Nutzern die Ursache.
+Wenn eine API nützlich ist, und irgendwie zugreifbar ist, wird sie auch genutzt.
+Wenn ich weiss, dass eine private API trotzdem genutzt wird, gibt mir das die Information das die Funktionalität relevant ist und dass Äquivalenzen in den öffentlichen APIs fehlen.
+Daher sollte ich *aktiv* ins Gespräch mit den Nutzern kommen und gemeinsam Alternativen entwickeln und nicht nur meine Augen verschliessen, bis es zu spät ist und dann meine Nutzer im Regen stehen lassen.
+
+Vielen Dank an Thomas Darimont für die Idee für diese Kolumne und and die Autoren des "Unsafe-Dokuments".
+
+=== Referenzen
+
+* sun.misc.Unsafe: http://hg.openjdk.java.net/jdk8u/jdk8u/jdk/file/tip/src/share/classes/sun/misc/Unsafe.java
+* Unsafe Funktionalität: http://mishadoff.github.io/blog/java-magic-part-4-sun-dot-misc-dot-unsafe/
+* Disclaimer "sun" Pakete: http://www.oracle.com/technetwork/java/faq-sun-packages-142232.html
+
+* UnsafeUmfrage: http://www.infoq.com/news/2014/02/Unsafe-Survey
+* UnsafeUmfragePräsentation "State of Unsafe": http://cr.openjdk.java.net/~psandoz/dv14-uk-paul-sandoz-unsafe-the-situation.pdf
+
+* Unsafe-Dokument: https://docs.google.com/document/d/1GDm_cAxYInmoHMor-AkStzWvwE9pw6tnz_CebJQxuUE/edit#heading=h.yd883k3cq5e4
+* Prashant Deva: "A disaster in the making": http://blog.dripstat.com/removal-of-sun-misc-unsafe-a-disaster-in-the-making/
+* JNI: https://en.wikipedia.org/wiki/Java_Native_Interface
+
+////
+
+* Ankündigung Verschwinden von Unsafe in Java 9: 
+* Lukas Eder: Erkenntisse http://blog.jooq.org/2015/07/20/what-the-sun-misc-unsafe-misery-teaches-us/
+* Donald Smith (Oracle) über Unsafe: http://mail.openjdk.java.net/pipermail/openjfx-dev/2015-April/017028.html
+
+////

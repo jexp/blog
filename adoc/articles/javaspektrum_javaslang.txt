@@ -1,0 +1,697 @@
+= Javaslang 2.0 - das "Funktionale Java"
+
+Von Scala und teilweise Groovy schon bekannt und auf der JVM attraktiv gemacht, haben mit Java 8 nützliche funktionale Sprachelemente Einzug in die Sprache gehalten.
+Lambda Closures, Streams, Funktionale Interfaces, Methodenliterale und Optionals sind die Hauptvertreter der neuen Ansätze im JDK.
+
+Trotzdem steckt die Unterstützung vollständiger funktionaler Programmierung in Java immer noch in den Kinderschuhen.
+So fehlen effiziente unveränderliche Datenstrukturen und nützliche funktionale Kontrollstrukturen und andere Sprachmuster.
+
+Die leichtgewichtige Bibliothek *Javaslang* hat es sich zum Ziel gesetzt, ein "besseres, funktionales Java" zu unterstützen, 
+und rüstet deshalb diese Bestandteile unter Nutzung der vorhandenen Funktionalitäten für Java 8 nach.
+
+Javaslang ist stark von Scala inspiriert, wie an der Nutzung ähnlicher Bezeichner, Interfaces und Konstrukte zu sehen, aber in "plain Java" implementiert. 
+
+Die Bibliothek selbst ist unabhängig von Drittbibliotheken, kann also in jedem Projekt ohne weitere Abhängigkeitskonflikte eingesetzt werden.
+
+Mittlerweile liegt das Apache lizensierte Javaslang von Daniel Dietrich in der Version 2.0 vor, Grund genug die Bibliothek einmal der breiteren Öffentlichkeit vorzustellen.
+Lobenswert ist auf jeden Fall die Dokumentation, sowohl der User Guide also auch das JavaDoc ist sehr hilfreich und die Sauberkeit der Implementierung und Tests.
+
+== Interaktion mit Java
+
+Da Javaslang an vielen Stellen seinen eigenen Weg geht, wird es notwendig Konvertierung von und nach Java anzubieten.
+Solange es sich nur um skalare Werte handelt ist das einfach, für andere, komplexere Objekte bietet es Konvertierungsfunktionen wie `toJavaArray|List|Set|Map|Optional|Stream()` oder geeignete Konstruktoren an.
+
+== Konzepte
+
+Javaslang macht Konstrukte verfügbar, die das Fundament funktionaler Sprachen bilden: Tuples, Container als unveränderliche Datenstrukturen, monadische Typen, Pattern Matching, Currying, Memoization und mehr.
+
+Ein wichtiger Grundansatz funktionaler Programmierung ist die Kapselung und Kontrolle von Seiteneffekten von Funktionen.
+Das heisst, alle Effekte die nicht mit der direkten Transformation von Parametern zu Rückgabewerten zu tun haben.
+
+Damit sind nicht nur die Veränderung von Zuständen, Ausgabe und Eingabe von Informationen gemeint, sondern auch Effekte wie Exceptions die einen abnormale Unterbrechung des Programmflusses darstellen.
+
+In funktionalen Sprachen wird explizit mit solchen Aspekten umgegangen, genau wie mit `NULL`.
+Statt Verhaltens dass den Programmablauf verändert, werden diese Fakten in Datenstrukturen festgehalten.
+
+== Funktionen
+
+Funktionale Programmierung liegt viel näher am mathematischen Konzept einer Funktion `f(x) = y` also einer Abbildung von Eingabe auf Ausgabe.
+
+Wenn Funktionen keine Seiteneffekte haben und nur auf ihren Eingabeparametern beruhen (und nicht auf zusätzlichen Informationen oder Zufallswerten) und damit eine direkte Abbildung oder explizite Transformation darstellen, werden sie als "pure Funktionen" bezeichnet.
+
+Sofern man darauf achtet, kleine, überschaubare und generalisierte Funktionen zu entwickeln, die zu komplexeren Aufgaben und Algorithmen komponiert werden können, ist man bei den kindlichen Freuden eines Lego Projekts angekommen.
+Jeder relevante Aspekt ist in einer eigenen, benannten und wiederverwendbaren Funktion gekapselt die in sich verständlich und zugleich leicht zu testen ist.
+
+Für die Konstruktion komplexerer funktionaler Systeme, ist es natürlich notwendig, höherwertige Funktionen zu unterstützen, 
+d.h. Funktionen, die Funktionen erzeugen und auch entgegennehmen, was ja glücklicherweise mit Lambdas heutzutage viel einfacher zu realisieren ist.
+
+Pure Funktionen können auch bei Bedarf direkt durch ihren Ergebniswert ersetzt werden.
+Diese Optimierung ist ein Inlining zur Laufzeit und wird als _Memoization_ bezeichnet.
+
+== Unveränderliche Datenstrukturen
+
+Es ist für Menschen und Compiler viel leichter nachzuweisen, dass Funktionen keine Seiteneffekte haben, wenn diese nur mit unveränderlichen (immutable) Objekten arbeiten.
+Natürlich kann man auch veränderliche Objekte diszipliniert benutzen, aber das ist ungleich schwerer, als einfach keine Möglichkeit zu haben, den Zustand einer Instanz direkt zu ändern.
+
+Aus Performancegründen kann es jedoch notendig sein, veränderliche Objekte innerhalb einer Funktion zu verwenden.
+Meist ist dies aber nur für bibliotheksinterne Mechanismen notwendig.
+Dann dürfen diese veränderlichen Objekte aber nie die Funktion verlassen, sondern müssen vorher in unveränderliche Objekte umgeformt werden.
+
+Unveränderliche Objekte haben noch die nette Eigenschaft keine Synchronization bei der Nutzung durch mehrere Threads zu benötigen, was uns bei der Entwicklung parallelverarbeitender Systeme unterstützt.
+In _Scala_ werden diese Konzepte mit dem `val` Schlüsselwort für Attribute und Case-Klassen unterstützt.
+Objekte können in Java leicht unveränderlich gemacht werden, indem all ihre Felder als final deklariert sind, und die Werte, die sie speichern ebenfalls unveränderlich sind.
+Für Container-Klassen ist das schon schwieriger, da die Java-Klassenbibliotheken in `java.util` darauf keinen Wert legen, und nur vereinzelte Vertreter wie `java.util.concurrent.CopyOnWriteArrayList` so ein Verhalten zeigen.
+
+== (Monadische) Datentypen
+
+Effekte, wie das Nichtvorhandensein von Werten (entsprechend `null`), der Fehlschlag von Operationen, Seiteneffekte oder zukünftig ausgeführte Operationen, werden funktional in Datenstrukturen gekapselt die "Monade" genannt werden.
+Ich möchte hier nicht wie so viele Autoren mich in Erklärungen verstricken, sondern eher die Anwendbarkeit zeigen.
+
+In Javaslang sind solche Datentypen von `Value` abgeleitet, worin Funktionalitäten rund um die Kapselung eines Wertes schon implementiert sind.
+
+Das sind Funktionen zur Inspektion und Verarbeitung des Wertes wie `isDefined`, `getOrElse` oder `map`, Konversion in andere Javaslang oder Java Container, Vergleiche und Prädikate auf dem Wert, sowie explizite Ausgabe des Wertes. 
+Value selbst ist auch ein `java.lang.Iterable` auf seinem Wert.
+
+Konkrete Suklassen von Value decken dann spezifische Anwendungsfälle ab.
+
+=== Option (Some, None)
+
+Wie `Optional<T>` von Java 8 auch, sind in Javaslang, `Option<T>` immer dann am Werk, wenn man andernorts `NULL` Werte nutzen würde, wie z.B Zugriff auf Element von leeren Listen, auf nichtexistente Einträge in Maps oder andere nicht erfüllte Bedingungen oder "optionale" Parameter.
+Dann wird stattdessen die `None` Subklasse von Option genutzt.
+
+Statt aufwändigen Überprüfungen auf Null, können diese None-Optionen mit Operationen wie `map`, `filter`, `flatMap`, oder auch Pattern Matching weiterverarbeitet werden, liefern dann entweder wieder Optionen, leere Listen oder halt keine Ausführungen.
+
+.Beispiel für Option<T>
+[source,java]
+----
+Option<V> Map.getOption(K key) {
+    return containsKey(key) ? Some(get(key)) : None;
+}
+----
+
+Natürlich können Option und Optional ineinander konvertiert werden.
+
+=== Try
+
+Da Exceptions nicht zum normalen Programmfluss gehören, sondern, wie ein `GOTO`, einen abnormalen Abbruch darstellen, verletzen sie einen Grundgedanken der funktionalen Programmierung.
+
+In Javaslang können daher Aufrufe, die potentiell in Exceptions resultieren würden, in einer dedizierten Klasse namens `Try` gekapselt werden, deren Subklassen `Success` und `Failure` das jeweilige Ergebnis festhalten.
+Damit kann die Weiterverarbeitung ohne `try-catch` Block, mit einer angenehmeren API erfolgen.
+
+.Beispiel für Try
+[source,java]
+----
+// liefert Success(ergebnis) oder Failure(exception) bei Division durch 0
+Try<Integer> divide(Integer dividend, Integer divisor) {
+    return Try.of(() -> dividend / divisor);
+}
+
+Try.of(() -> divide(1,0)).getOrElse(-1) == -1
+Try.of(() -> divide(10,5)).getOrElse(-1) == 2
+----
+
+.API für Verkettung von Aufrufen nach Try
+[source,java]
+----
+Try.of(Operation) 
+ .andThenTry(Alternative)
+ .onFailure(Logging)
+ .onSuccess(Weiterverarbeitung);
+----
+
+=== Lazy
+
+Der Datentyp `Lazy` erzeugt seinen Wert erst, wenn zum ersten Mal darauf zugegriffen wird, danach wird er gespeichert und steht ab da zur Verfügung.
+Das ist immer dann relevant wenn, optional benötigte Werte durch eine zeit- oder ressourcenaufwändige Operation ermittelt werden müssen.
+
+[source,java]
+----
+Lazy<Double> lazy = Lazy.of(Math::random); 
+lazy.isEvaluated(); // = false
+lazy.get(); // = 0.123 (Zufallszahl)
+lazy.isEvaluated(); // = true
+lazy.get(); // = 0.123 (gespeichert)
+----
+
+////
+=== Either<LEFT,RIGHT>
+
+////
+
+== Tuples
+
+Tuples sind wie in der Mathematik einer der Basisbausteine funktionaler Sprachen.
+Diese kompakten, streng getypten Strukturen (ähnlich zu structs) von n Elementen existieren meist für viele Kardinalitäten von 2 bis n und sind dank generischer Typparameter für die Elemente leicht nutzbar.
+Javaslang bietet Tupel mit Kardinalitäten bis zu 8 Elementen.
+
+Dass Tupel zu vollwertigen Bestandteilen einer funktionalen Implementierung gehören, wird an ihren Eigenschaften deutlich, sie sind unveränderlich, vergleichbar, serialisierbar und können mit vielen Funktionen wie `map` und `transform` umgewandelt werden.
+Wie in Scala nutzt Javaslang `tuple._X` als Zugriffsmechanismus für die Elemente des Tupels.
+
+Tupels werden zum Beispiel genutzt, um Schlüssel-Wert-Paare oder komplexere Strukturen zu repräsentieren, oder um eine Funktion mit mehreren Rückgabewerten zu realisieren.
+
+.Beispiel für Tupel
+[source,java]
+----
+int year = 2016;
+
+Tuple2<String,Integer> selma = Tuple.of("Selma",2008);
+Tuple2<String,Integer> rana = Tuple.of("Rana",2005);
+
+selma._1 == "Selma"
+selma._2 == 2008
+
+// komponentenweises Mapping
+Tuple2<String,Integer> selmaAge = 
+             selma.map( name -> name, born -> year-born);
+
+Tuple2<String,Integer> ranaAge = 
+             rana.map( (name,born) -> Tuple.of(name,year-born) );
+
+String info = rana.transform( (name,born) -> name + " ist "+born+" geboren.");
+
+List<Tuple2<String,Integer>> kids = List.of(Tuple.of("Selina",1998),rana,selma);
+
+List<Tuple2<String,Integer>> ages = kids.map(t -> of(t._1,year - t._2));
+----
+
+== Funktionen
+
+In Java 8 ist es leichter, Implentationslogik in kleinen, wiederverwendbaren, funktionalen Einheiten zu kapseln, ohne diese an Objektinstanzen zu binden.
+Besonders die Nutzung von Lambdas überall dort, wo passende Interfaces und Klassen mit einer einzigen abstrakten Methode (SAM - single abstract method) verwendet werden, ermöglicht existierende APIs ohne Änderung modern und funktional zu integrieren.
+
+Mit Functional Interfaces wie `Supplier`, `Consumer`, `Predicate`, `Function`, `BiFunction` usw. hat Java 8 schon den ersten Schritt gemacht, 
+Funktionen mit höherer Parameterzahl sucht man aber im JDK noch vergeblich.
+Auch höherlevelige Operationen auf diesen Funktionen, zur Komposition, Reduktion und Transformation fehlen noch.
+
+Diese rüstet Javaslang nach, dabei sind Funktionen als Interfaces verschiedener Kardinalitäten mit vielen `default` Methoden implementiert.
+Z.B. `arity`,`apply`,`curried`,`reversed`,`memoized`, die aus dem schickerweise `λ` genannten Grundinterface kommen.
+
+In der Typsignatur folgt der Rückgabewert, den Parametertypen, z.b. `Function2<P1,P2,R>`. 
+Die Java-Nomenklatur wird, wo es möglich istm integriert - `Function2` erweitert `BiFunction`, Function1` ist eine `Function` und `Function0` ein `Supplier`.
+
+.Implementation einiger Methoden in Function2
+[source,java]
+----
+public interface Function2<T1, T2, R> extends λ<R>, BiFunction<T1, T2, R> {
+
+  // Anwendung von 2 Parametern, dies ist die einzige abstrakte Methode,
+  // liefert den Rückgabewert der Funktion
+  R apply(T1 var1, T2 var2);
+	
+  // Anwendung eines Arguments, erzeugt eine Function1
+  default Function1<T2, R> apply(T1 t1) {
+      return (t2) -> {
+          return this.apply(t1, t2);
+      };
+  }
+
+  // sicherer Aufruf von Funktionen mittels lift
+  static default <T1, T2, R> Function2<T1, T2, Option<R>> 
+	                           lift(Function2<T1, T2, R> partialFunction) {
+      return (t1, t2) -> {
+          return Try.of(() -> {
+              return partialFunction.apply(t1, t2);
+          }).getOption();
+      };
+  }
+}
+----
+
+// TODO check Javaslang Javadocs and User Guide (32 pages)
+
+//// 
+Function -> Predicate
+[source,java]
+----
+private static <T> Predicate<T> asPredicate(Function1<T, Boolean> function) {
+       return v -> function.apply(v);
+   }
+----
+-> TODO geth das nicht auch automatisch mit SAMs ? Function1<T, Boolean> -> Predicate<T>
+
+TODO anderes Beispiel mit einer Specification / Filter methode mit 2 Params ? die man in ein Predicate umwandelt für Filter
+
+TODO Zeige, von konkreten Filterung z.b. über Name zu Filter über Predikat/Boolean Function
+
+
+.reduce( (a,b) -> a || b) -> reduce Iterator<Option<Boolean>> -> Boolean
+////
+
+=== Currying
+
+Currying nach _Haskell Brooks Curry_ ist eine verbreitete Technik um Funktionen mit mehreren Parametern zeitig an vorhandene Parameter zu binden und damit ihre Parameteranzahl zu reduzieren.
+Ein beliebtes Beispiel ist eine `subtract(a,b)` Funktion, in der mit `b` an 1 gebunden, zu einem `decrement()` wird.
+Dazu muss zuerst die Reihenfolge ihrer Parameter umgekehrt werden, da Currying in Javaslang, immer von links nach rechts passiert.
+
+Currying ist besonders hilfreich bei der Komposition von Funktionen, für höherwertige Funktionen, und um Funktionssignaturen an Anforderungen einer Ziel-API anzupassen ohne schon existierende Parameterwerte zu verlieren.
+
+.Beispiel für Currying
+[source,java]
+----
+Function2<Integer,Integer,Integer> subtractFunction = (a,b) -> a - b;
+Function1<Integer,Integer> decrement = subtractFunction.reversed().curried().apply(1);
+decrement.apply(10); // ==  9
+----
+
+== Memoization
+
+Memoization wird genutzt um Ergebnisse häufig genutzer (teurer) Funktionsaufrufe zu cachen und da die Funktionen ja seiteneffektfrei sein müssen, direkt durch ihre Ergebnisse zu ersetzen.
+Dabei wird das erste Ergebnis noch berechnet, aber alle folgenden Aufrufe aus dem Cache bedient.
+
+// TODO kann ein LRU genutzt werden? was ist mit thread-safety?
+
+.Beispiel für Memoization
+[source,java]
+----
+public static long factorial(long n) { return n == 1 ? 1 : n * factorial(n-1);}
+Function1<Long,Long> factorialM =
+     Function1.of(Math::factorial).memoized();
+
+long t1 = System.nanoTime();
+long first = factorialM.apply(1000L);
+long t2 = System.nanoTime();
+long second = factorialM.apply(1000L);
+long t3 = System.nanoTime();
+System.out.printf("T1 %d T2 %d%n",(t2-t1),(t3-t2)); // T1 1069000 T2 9000
+----
+
+== Sequenz-Operationen
+
+Um die Kompaktheit funktionaler Sprachen zu demonstrieren, dienen meist kleine Beispiele, die auf einem Strom oder Listen von Daten mehrere Operationen hintereinander ausführen.
+Statt expliziter externer Iteration wie mit `Iterator`en oder `for`-Schleifen, wird interne Iteration genutzt.
+
+Dabei werden auf Operationen wie `map`, `reduce`, `filter` auf dem Datenstrom aufgerufen, und ggf. eigene (anonyme) Funktionen als Parameter übergeben. 
+Das ist der Code, der sonst den Schleifenkörper ausmachen würde.
+Damit hat die Datenstruktur und die Sprache eine viel größere Kontrolle über die Ausführung von Operationen.
+Sie können entweder sofort oder später (lazy) evaluiert werden, oder viel später zusammengefasst mit weiteren Operationen.
+Ein weiterer Vorteil ist die verzögerte Ausführung, die es ermöglicht, Operationen auf unendlichen Datenstrukturen vorzunehmen, 
+die erst beim schlussendlichen Konsumieren der Ergebnisse ausgeführt werden, und zwar nur so weit wie nötig.
+
+In Javaslang basieren alle Container-Datentypen ählich wie in Scala auf der Basisklasse `Traversable` das von `Value` und damit `java.lang.Iterable` und von `Foldable` mit Faltungsoperationen wie `foldLeft()` oder `reduce()` erbt.
+Wie üblich ist Traversable ein sehr breites Interface mit Operationen aller Coleur von `average()` über `empty()` und `map()` bis zu `zip()`.
+Subklassen von Traversable sind z.B. `Iterator`, `Seq`, `Set`, `List`, `Map`, `Tree` und viele mehr.
+
+image::http://i2.wp.com/blog.javaslang.com/content/images/2015/11/collections-set-map.png?w=660[]
+
+.Beispiele für Sequenz-Operationen
+[source,java]
+----
+Iterator iterator = List.of(1, 2, 3, 4).iterator()
+.filter(i -> i % 2 == 0)
+.map(Object::toString);
+
+List.of(1, 2, 3).sum();
+----
+
+== Persistent Data Structures Container
+
+Die gerade genannten Interfaces stellen die API für die Javaslang Containerklassen dar.
+Anders als in den Java-Collections sind die Javaslang Container aber unveränderlich (immutable).
+Sie können nach ihrer Erzeugung nicht mehr verändert werden. 
+Jedenfalls nicht die konkrete Instanz.
+Jede Änderungsoperation hat eine "neue" Kopie zur Folge, die die Veränderungen geeignet in sich trägt.
+
+Wie bekannt bietet auch Java mit den `Collections.unmodifiableXxx()` Methoden an, um unveränderliche Container zu erzeugen.
+Dies sind aber nur Wrapper, die für alle Modifikationsmethoden der API Laufzeitfehler (RuntimeExceptions) erzeugen.
+
+Korrekte unveränderliche Container bieten auch funktionierende Modifikationsmethoden an, nur erzeugen diese eine schlanke, minimale Kopie der Originalinformationen in der der neue Zustand durch Überlagerung erzeugt wird.
+Dieses Konzept schreibt noch keine Implementierung vor, es gibt verschiedene Ansätze es umzusetzen.
+
+Ich habe in der Vergangenheit die Persistent Datastructures von _Clojure_ beschrieben [Hunger-JS-04-12], die auf `HashTrie`s, effektiven Baumstrukturen, die nur die veränderten Teilbäume mit einem neuen Wurzelknoten verlinken und alle anderen Teilbäume der Originalstruktur beibehalten.
+
+_Javaslang_ liefert eine Containerbibliothek mit, die als sicherer, aber effizienter Ersatz für die Java-Collections für die funktionale Programmierung dienen soll.
+Mit ihnen gemeinsam hat sie über `Traversable` nur die `Iterable` und `Iterator` Interfaces.
+Die anderen Collection-Interfaces waren leider nicht nachnutzbar, da Methoden, die den Container veränderten, nicht die veränderte Instanz zurückgeben.
+
+=== Herausforderungen funktionaler Datenstrukturen 
+
+Effiziente funktionale Datenstrukturen haben ihre eigenen Herausforderungen.
+
+Zum einen die Fragmentierung durch Überlagerung vieler vorhergehender Zustände, die dann ggf. effizienter in einer verdichteten Struktur abgespeichert werden können (Compaction).
+Zum anderen sind Operationen auf diesen Datenstrukturen anders als ihre veränderlichen Kollegen oft von höherer Komplexität, so kann eine Größenermittlung durchaus zwischen `O(log(n))` und `O(n)` liegen, oder Einfüge- und Löschoperationen unerwartet hohe Komplexitäten aufweisen.
+Besonders deutlich wird es bei häufigen Veränderungsoperationen.
+Dort kann es dann sinnvoll sein, in einem kontrollieren Kontext, z.b. innerhalb einer Funktion veränderliche Datentypen zu nutzen, die aber diesen lokalen Scope nie verlassen, und diese erst beim Verlassen der Funktion wieder in unveränderliche Äquivalente umzuformen.
+
+Eine weitere Stolperfalle sind die eleganten Operationen auf Datenstrukturen, wie map, reduce (fold-left), filter usw. 
+Diese können entweder in jedem Schritt auf den Daten ausgeführt werden und die Änderungen materialisieren. 
+Sie können aber auch eine Sequenz von Informationen durch alle Operationen hindurchleiten, so dass nur die Ergebnisse materialisiert werden.
+Oder geschickterweise kann die Komposition der Operationen selbst materialisiert werden in eine einzige Operation, die die Ausgangsdaten zu den Zielstrukturen und -inhalten transformiert.
+
+Je nach Anwendungsfall sind andere Ansätze effizient, daher sollte man sich dessen bewusst sein.
+Durch die verschiedenen Komplexitäten von Operationen auf unterschiedlichen funktionalen Container-Implementierungen, kann ein und derselbe elegante Ausdruck, je nach verwendeten Quelldatenstrukturen extrem unterschiedliche Komplexitäten und Laufzeiten zur Folge haben.
+Gerade in Scala kann das schnell zum Verhängnis werden.
+
+Javaslang versucht Operationen soweit wie möglich verzögert auf den Datenstrukturen abzubilden, temporäre Iteratoren und Streams als Quellen der transformierten Informationen mit Anwendung der übergebenen Funktionen bereitzustellen.
+Für die Komposition mehrerer Funktionen zu einer einzigen, kompakteren Operation ist man selbst verantwortlich.
+
+=== Listen und Sequenzen
+
+Die bekannteste Datenstruktur in funktionalen Sprachen ist die verlinkte Liste, in der jedes Element einen Zeiger auf seinen Nachfolger oder `Nil`, das End-Element enthält.
+Die leere Liste ist einfach `Nil`. Die Listen können über Factory-Methoden und `prepend` und `append` Methoden konstruiert werden.
+
+[source,java]
+----
+List<Integer> list1 = List.of(1,2,3);
+list1.tail() == List(2,3);
+list1.tail().prepend(0) == List(0,2,3);
+----
+
+Bei den beiden Operationen wird der (2,3,Nil) Teil der Liste wiederverwendet und zwischen allen Instanzen geteilt.
+Bei einer verketteten Liste sind `tail` und `prepend` Operationen von konstanter Komplexittät `O(1)` und die meisten anderen linear `O(n)`. 
+In Javaslang wird diese Art von Listen mit dem Interface `LinearSeq` abgebildet.
+
+Für direkten, schnellen Zugriff gibt es `Array` und `Vector`. 
+Das `Array` wird durch Java-Felder implementiert, mit schnellem Zugriff, aber linearem Modifikationsaufwand (da Kopie notwendig).
+`Vector` bietet gute Eigenschaften sowohl für Zugriff als auch Veränderungsoperationen.
+
+////
+=== Queues
+
+Warteschlangen können durch 2 Listen implementiert werden, eine für das Einlagern und eine für das Ausliefern von Elementen.
+Wenn letztere Liste leer, ist wird die erstere invertiert und für die Auslieferung genutzt.
+// Für verlinkte Listen ist die Invertierung ist eine rekursive, lineare Operation.
+
+Wichtig ist hier, dass man beim Auslesen der Daten nicht nur das Element, sondern auch die Queue-Instanz mit dem neuen Zustand bekommt und diese ab sofort benutzen muss.
+Damit können aber auch beliebig viele Konsumenten gleichzeitig und unabhängig voneinander die Warteschlange nutzen.
+
+Wenn die Warteschlange leer ist, würde man gern statt einer Exception, funktional eine `Option<T>` erhalten, was von `dequeueOption` unterstützt wird, m.E. aber der Standard sein sollte.
+
+.Operationen auf Warteschlangen
+[source,java]
+----
+Queue<T> {
+ Tuple2<T, Queue<T>> dequeue();
+}.
+
+Queue.of(1, 2, 3).dequeue() == (1, Queue(2, 3));
+
+Queue.of(1).dequeueOption() == Some((1, Queue()))
+Queue.empty().dequeueOption() == None
+----
+...
+////
+
+
+== Sortierte Sets und Bäume
+
+Sortierte Sets werden durch balancierte (Red-Black) Binärbäume abgebildet.
+Wie üblich haben rekursive Operationen auf solchen Bäumen eine Komplexität abhängig von der Baumtiefe, also `O(log2(n))`.
+Bei der Modifikation wird wie bei den im früheren Artikel beschriebenen Persistent Data Structures ein neues Wurzelelement mit dem minimal notwendige Teilbaum für die Modifkation erzeugt und mit den vorher existierenden Bäumen verknüpft.
+
+.Operationen auf sortierten Sets
+[source,java]
+----
+xs = TreeSet.of(6, 1, 3, 2, 4, 7, 8);
+
+SortedSet<Integer> ys = xs.add(5);
+----
+
+Resultieren in einer Struktur wie in folgender Abbildung gezeigt.
+Deutlich kann man die 2 Wurzelelemente und die neuen und verlinkten Teilbäume erkennen.
+
+image::http://i0.wp.com/blog.javaslang.com/content/images/2015/11/binarytree2.png?w=660[]
+
+== Maps
+
+Maps werden als Sequenzen von zweielementigen Tuplen representiert.
+Sortierte Maps werden durch die gerade beschriebenen Binärbäume von Tupeln mit Sortierung nach Schlüsseln repräsentiert.
+
+Und wie in den Persistent Data Structures erwähnt werden HashMaps und HashSets als Trie [Hash Array Mapped Trie - HAMT] implementiert.
+
+== Streams
+
+In Java 8 sind Streams unabhängig von der Collections API, so dass sie erst über Umwege wie `StreamSupport.stream(spliterator, false)` oder die Collector-API zusammengebracht werden müssen.
+
+In Javaslang ist das deutlich besser integriert, und dank der Unterstützung von Iterable, kann man die Container und Javaslang Streams auch in foreach-Schleifen benutzen.
+Intern wird ein (potentiell unendlicher) Strom von Daten durch eine verzögert verlinkte Struktur aus aktuellem Kopfelement und einem Supplier von weiteren Elementen repräsentiert aus der bei jedem Fortschritt ein weiteres Element gezogen wird.
+
+.Konstruktion eines javaslang.Stream 
+[source,java]
+----
+static <T> Stream<T> create(java.util.Iterator<? extends T> iterator) {
+    if (iterator.hasNext()) {
+	    T head = iterator.next();
+	    return Stream.cons(head, () -> create(iterator));
+    }
+    return Empty.instance();
+}
+----
+
+.erste 10 Elemente eines unendlichen Stroms von geraden Zahlen
+[source,java]
+----
+// 2, 4, 6, ...
+Stream.from(1).filter(i -> i % 2 == 0).take(10);
+----
+
+////
+== Property Testing
+
+Arbitrary<Integer> ints = Arbitrary.integer();
+
+// square(int) >= 0: OK, passed 1000 tests.
+Property.def("square(int) >= 0")
+        .forAll(ints)
+        .suchThat(i -> i * i >= 0)
+        .check()
+        .assertIsSatisfied();
+////
+
+== Pattern Matching
+
+Pattern Matching ist eine mächtige, funktionale Variante von `switch`, die viel mehr Möglichkeiten zur Entscheidung über Werte bietet, aber gleichzeitig die Extraktion von gekapselten Informationen aus unveränderlichen Strukturen erlaubt (Dekonstruktion).
+Ein Pattern Match ist auch wieder ein Ausdruck, d.h. es gibt in jedem Fall ein Ergebnis.
+
+Javaslang versucht so nah wie möglich an der Mächtigkeit des Pattern Matching in Scala heranzukommen. 
+Dazu gibt es eine eigene API in `javaslang.API`. 
+Folgende Features werden unterstützt.
+
+* Benannte Parameter mittels Lambdas
+* Mehrere Bedingungen in einem Zweig
+* Zusätzlichen Überprüfungen mit Prädikaten in `javaslang.Predicates.*`
+* Eingeschränkte Dekonstruktion mittels Muster aus `javaslang.Patterns.*`,
+* Dekonstruktion für eigene Objekte mit separater Integration durch Annotationen aus dem `javaslang-match` Modul
+* Fall-through
+* Optional eine `Option` als Ergebnis von Match, so dass unüberprüfte Zweige in einem `None` enden.
+
+Prinzipiell wird ein Zweig mittels `Case( $(wert|prädikat|), wert | funktion)` ausgedrückt.
+Durch eine `run` Operation können auch Seiteneffekte ausgeführt werden.
+
+Dekonstruktion von Objekten erfolgt durch `unapply`, die inverse Operation zu `apply` zur Konstruktion und Funktionsaufruf.
+
+.Einfaches Beispiel
+[source,java]
+----
+String s = Match(i).of(
+    Case($(1), "one"), // gegen Wert
+    Case($(is(2)), "two"), // gegen Prädikat
+    // gegen direktes Prädikat und mehrere Bedingungen
+    Case(isIn(3,4)), "three-four"), 
+    // getypte Parameter mit Zugriff auf Wert
+    Case(instanceOf(Integer.class)), i -> "Integer "+i ), 
+    // Dekonstruktion via Pattern
+    Case(Success(Tuple2($("a"), $(1))), tuple2 -> tuple2._1 ), 
+    Case($(), "?") // fall-through
+);
+----
+
+////
+[source,java]
+----
+Match.whenType(MethodDeclaration.class)
+                        .then((t)-> Option.of(t.getName())).otherwise(() -> Option.none())
+----
+
+Find better Example, e.g. JSON parsing ?
+[source,java]
+----
+public static boolean hasMethodNamed(TypeDeclaration typeDeclaration, String methodName) {
+    return List.ofAll(typeDeclaration.getMembers())
+            .map(Match.whenType(MethodDeclaration.class)
+                    .then((t)-> Option.of(t.getName())).otherwise(() -> Option.none()))
+            .map((n)->n.isDefined() && n.get().equals(methodName))
+            .reduce((a, b)->a || b);
+}
+
+public static List<TypeDeclaration> getTypesWithThisMethod(CompilationUnit cu, String methodName) {
+    return List.ofAll(cu.getTypes()).filter((t) -> hasMethodNamed(t, methodName));
+}
+----
+////
+
+== Weiterführendes 
+
+Interessanterweise nutzt Javaslang [Project Euler] um seine Implementierung auf Herz und Nieren zu testen. 
+
+Es gibt schon diverse Erweiterungen für Javaslang, die als Module vorliegen, z.B.
+
+* javaslang-jackson,
+* javaslang-test - ein Quickcheck ähnlicher Tester,
+* javaslang-circuitbreaker zum Entkoppeln von externen Diensten, uvm.
+
+=== Javaslang CircuitBreaker
+
+Dies ist eine leichtgewichtige Bibliothek zum Entwickeln robuster Service-Architekturen, ähnlich zu Netflix' Hystrix. 
+Sie nutzt funktionale Ansätze basierend auf Javaslang, um mittels Funktionen höherer Ordnung Aufrufe zu kapselnder Systeme zu dekorieren, um diese im Fehlerfall "kurzschliessen" zu können.
+Das Pattern "Circuit-Breaker" (Sicherung) überwacht Aufrufe und wenn diese oft genug fehlgeschlagen (konfigurierbare Fehler oder Zeitüberschreitung) sind (Schwellwert), dann werden zukünftige Aufrufe der Funktion sofort mit einem Fehler abgebrochen.
+Es gibt die Möglichkeit, nach einiger Zeit Aufrufe wieder testweise zuzulassen, um festzustellen, ob das Fremdsystem wieder verfügbar ist.
+Fehlgeschlagene Aufrufe können auch mit einem "Retry" Decorator versehen werden, der sie dann einstellbar viele Versuche unternimmt.
+// Weitere Möglichkeiten wären der Aufruf mehrerer konkurrierender Systeme und die Nutzung des ersten Ergebnisses oder des Ergebnisses einer Stimmenmehrheit.
+
+Interessant an diesem funktionalen Ansatz ist, mehrere Funktionalitäten umeinander zu komponieren z.B. einen _Circuit-Breaker_ um einen Funktionswrapper mit _Timeout_ herumzulegen.
+Eine Instanz und APIs von `CircuitBreaker` wird genutzt, um den Zustand des gekapselten Aufrufes zu verwalten.
+
+=== Javactic 
+
+Eine umfassendere Behandlung von Fehlern, inklusive Aggregation und Weiterverarbeitung bietet die Javactic Bibliothek, die basierend auf den Konzepten der ähnlich benannten Scala Variante Scalactic ein Konzept namens `Or` einführt, das ähnlich wie `Try` die Kapselung und Behandlung von Fehlern erlaubt.
+
+////
+javaslang-match - Adds compile time support for Javaslang's structural pattern matching feature.
+javaslang-test  - A property check framework for random testing of program properties.
+javaslang-pure  - Bikeshed for aficionados of purely functional programming, highly experimental.
+javaslang-circuitbreaker - A lightweight, easy-to-use fault tolerance library.
+javaslang-jackson - Jackson datatype module, the standard JSON library for Java.
+javaslang-render - A rendering library, currently housing tree renderers (ascii and graphviz).
+////
+
+=== Anwendungsbeispiel: Game of Life
+
+Wie schon vorher in anderen Sprachen, habe ich das funktionale Game of Life auch in Javaslang umgesetzt.
+Es reichten schon 38 Zeilen Code für die Kern-Implementierung, und 80 Zeilen inklusive Eingabe, Ausgabe und Testlauf.
+Das einzig anstrengende waren die ausschweifenden generischen Java Typdeklarationen.
+
+[source,java]
+----
+import javaslang.*;
+import javaslang.collection.*;
+import static javaslang.collection.Iterator.range;
+
+@SuppressWarnings("JavacQuirks")
+class GameOfLife {
+    static final  Set<Tuple2<Integer, Integer>> EMPTY = HashSet.empty();
+    static final  Set<Tuple2<Integer, Integer>> env = HashSet.of(
+                        _(-1,-1), _(0,-1), _(1,-1),_(-1,0),_(1,0),_(-1,1),_(0,1),_(1,1));
+    private final Set<Tuple2<Integer, Integer>> alive;
+
+    public GameOfLife(Set<Tuple2<Integer, Integer>> alive) {
+        this.alive = alive;
+    }
+
+    static Tuple2<Integer,Integer> _(int x, int y) {
+        return Tuple.of(x,y);
+    }
+
+    Set<Tuple2<Integer,Integer>> neighbours(Tuple2<Integer,Integer> pos) {
+        return env.map(cell -> _(pos._1 + cell._1, pos._2 + cell._2));
+    }
+
+    Set<Tuple2<Integer,Integer>> aliveNeighbours(Tuple2<Integer,Integer> cell) {
+        return neighbours(cell).filter(alive::contains);
+    }
+
+    Set<Tuple2<Integer,Integer>> deadNeighbours(Tuple2<Integer,Integer> cell) {
+        return neighbours(cell).removeAll(aliveNeighbours(cell));
+    }
+
+    Set<Tuple2<Integer,Integer>> haveNeighbourCount(Set<Tuple2<Integer,Integer>> coll, 
+	                                                List<Integer> counts) {
+        return coll.filter(cell -> counts.contains(aliveNeighbours(cell).size()) );
+    }
+
+    GameOfLife next() {
+        Set<Tuple2<Integer,Integer>> stayingAlive = haveNeighbourCount(alive, List.of(2,3));
+        Set<Tuple2<Integer,Integer>> wakingFromDead = alive.foldLeft(EMPTY,
+                (res,cell) ->
+                res.addAll(haveNeighbourCount(deadNeighbours(cell),List.of(3))));
+
+        return new GameOfLife(stayingAlive.addAll(wakingFromDead));
+    }
+}
+----
+
+== Ressourcen
+
+Bilder: (c) Daniel Dietrich aus dem Javaslang User Guide
+
+// Feature-rich & self-contained functional programming in Java™ 8 and above. Javaslang is a functional library for Java 8+ that provides persistent data types and functional control structures. Because Javaslang does not depend on any libraries (other than the JVM) you can easily add it as standalone .jar to your classpath.
+
+* [Javaslang Website] http://www.javaslang.io/
+////
+* [Dokumentation] http://www.javaslang.io/javaslang-docs/
+* [GitHub] https://github.com/javaslang/javaslang
+* [Blog] http://blog.javaslang.io/
+////
+* [Gedanken zu FP in Java von Daniel Dietrich] https://gist.github.com/danieldietrich/4f4489f1cacd31709900
+* [Kurzübersicht über Javaslang] http://blog.jooq.org/2015/05/13/functional-programming-in-java-8-with-javaslang/
+* [Einführung in Javaslang] http://www.javaadvent.com/2015/12/functional-data-structures-in-java-8-with-javaslang.html
+* [Tomas Setti : Operationen auf Java AST ] http://tomassetti.me/functional-programming-for-java-getting-started-with-javaslang/
+* [Hash Array Mapped Trie (HAMT)] http://lampwww.epfl.ch/papers/idealhashtrees.pdf
+* [Project Euler] https://projecteuler.net/archives
+
+* [Javaslang-CircuitBreaker - Entkopplung von Diensten] https://github.com/javaslang/javaslang-circuitbreaker
+* [Javactic - Fehlerverarbeitung] http://javactic.github.io/javactic/
+
+
+// Javactic is a Java port of Scalactic's Or and Every mechanism. Javactic is based on the Javaslang functional library for Java 8+. This documentation is mostly ported from here. 
+// * https://blog.cngroup.dk/2016/02/21/javaslang/
+
+* Rich Hickey Präsentation - Value of Values: https://www.youtube.com/watch?v=-6BsiVyC1kM
+
+//// 
+.heise
+Javaslang gibt Java-Entwicklern zahlreiche der Features an die Hand, die Kennern der funktionalen Programmierung bereits geläufig sein dürften: Currying, das die partielle Anwendung einer Funktion erlaubt (wobei die Funktionsargumente nacheinander übergeben und zwischenzeitlich in einer neuen Funktion gehalten werden) gehört ebenso dazu wie etwa ein Musterabgleich (Pattern Matching), der den javaslang-Machern zufolge weit über Javas Switch hinausgeht.
+
+Auch Tupeln (eine leichtgewichtige Alternative zu Objekten und nutzbar zur Rückgabe mehrerer Werte) und die Memoisation (eine Technik, die Rückgabewerte von Funktionen zwischenspeichert anstatt sie neu zu berechnen) sind mit von der Partie. Des Weiteren hat sich das javaslang-Team der Erstellung einer neuen Collection Library gekümmert, die eine der wichtigsten Anforderungen der funktionalen Programmierung – die Unveränderlichkeit – erfüllen soll.
+////
+
+////
+The Try monad represents the result state of a computation which may be a Success or a Failure.
+
+R result = Try.of(() -> mightFail())
+   .recover(x -> ...)
+   .getOrElse(defaultValue);
+
+Java's Optional is not Serializable. We use Javaslang's Option for remote operations. Check out our JSON module!
+class Person implements Serializable {
+    final Option<String> title;
+    final String name;
+    ...
+}
+
+A new powerful collection library saves us from source.stream().really("?").collect(sink()) pipelines
+List<String> names = persons
+    .filter(p -> p.age > 12)
+    .map(Person::getName);
+
+The functional For is an expression that yields a value. The result is a lazy evaluated collection of elements.
+
+Iterator<String> iterator =
+    For(persons.filter(Person::hasAddress), p ->
+        For(p.addresses).yield(a ->
+             p.name + "," + a.street
+        )
+    );
+
+Javaslang and Java are fully interoperable.
+
+Besonderer Wert wurde auch auf die Interoperabilität mit Java gelegt.
+
+java.util.List<Integer> result =
+    iterator.map(String::length).toJavaList();
+
+Structural pattern matching is an easy way to decompose values. The result is ... a value!
+
+Number num = Match(personOption).of(
+    Case(Some(Person($())), person -> 1.0d),
+    Case(None(), 0)
+);
+////
+
+=== Funktionale Programmierung in Java
+
+// * https://docs.oracle.com/javase/8/docs/api/java/util/Optional.html
+* [Buch: Functional Programming in Java Venkat Subramaniam] https://pragprog.com/book/vsjava8/functional-programming-in-java
+* [Functional Programming with Java 8 Lambda Expressions – Monads] https://www.javacodegeeks.com/2014/03/functional-programming-with-java-8-lambda-expressions-monads.html
+* [How Functional is Java 8?] http://www.infoq.com/articles/How-Functional-is-Java-8
+// * http://www.angelikalanger.com/Articles/EffectiveJava/70.Java8.FunctionalProg/70.Java8.FunctionalProg.html
+* [Monade als Datentyp] https://de.wikipedia.org/wiki/Monade_%28Informatik%29
