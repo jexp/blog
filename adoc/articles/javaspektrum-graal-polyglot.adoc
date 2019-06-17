@@ -8,6 +8,7 @@ https://commons.wikimedia.org/wiki/File:Samovar_LarvikMuseum.jpg
 ////
 = Café Melange - Polyglot Operations in Java mit GraalVM
 :img: ../../img
+:img: https://github.com/jexp/blog/raw/gh-pages/img
 
 Wie auch beim Kotlin-Artikel, musste ich auch anderswo feststellen, dass ich meiner Zeit etwas voraus bin.
 Mein erster Artikel zu Truffle und Graal erschien in der JavaSpektrum 06/14, also vor 4 Jahren.
@@ -58,7 +59,7 @@ Die Bibliotheken und Laufzeitumgebungen für Ruby, Python, R können über das K
 
 .Installation GraalVM mit sdkman und Zusatzsprachen mit gu
 ----
-sdk use java 1.0.0-rc9-graal
+sdk use java 1.0.0-rc-11-grl
 gu install ruby python R 
 
 $JAVA_HOME/jre/bin/java -version
@@ -139,9 +140,9 @@ Dank `@Grab` Annotation ziehen es sich seine Abhängigkeiten selbst (notwendig i
 .Beispiel für Polygotte APIs - Answer.groovy 
 [source,groovy]
 ----
-@Grab("org.graalvm.sdk:graal-sdk:1.0.0-rc9")
-@Grab("org.graalvm.truffle:truffle-api:1.0.0-rc9")
-@Grab("org.graalvm.js:js:1.0.0-rc9")
+@Grab("org.graalvm.sdk:graal-sdk:1.0.0-rc11")
+@Grab("org.graalvm.truffle:truffle-api:1.0.0-rc11")
+@Grab("org.graalvm.js:js:1.0.0-rc11")
 
 import org.graalvm.polyglot.*
 
@@ -302,259 +303,6 @@ public class Shell {
   }
 }
 ----
-
-=== Fehlersuche
-
-Um Fehler oder Probleme in polyglotte Anwendungen zu finden, bringt GraalVM zum einen eine angepasste jVisualVM mit, die mit den verschiedenen Kontexten umgehen kann und zum Beispiel die Heaps der verschiedenen Sprachen anzeigts.
-
-Ein kompletter polyglotter Debugger, der die Google Chrome Debugger UI benutzt, ist nutzbar, wenn man `--inspect` angibt.
-Dann wird eine lokale URL ausgegeben, die man in Chrome öffnen kann.
-
-Neben dem Debuggen jedes polyglotten Fragments neben dem Hauptprogramm zeigt diese Integration auch polyglotte Stacktraces.
-
-image::{img}/graal-chrome-debugger.jpg[]
-
-Mittels `--cpusampler --cpusampler.Mode=statements` erhält man CPU Samples für das eigene Programm.
-
-.Ausgabe CPU Samples
-----
- --------------------------------------------------------------------------------------------
- Sampling Histogram. Recorded 39 samples with period 1ms
-   Self Time: Time spent on the top of the stack.
-   Total Time: Time the location spent on the stack. 
-   Opt %: Percent of time spent in compiled and therfore non-interpreted code.
- --------------------------------------------------------------------------------------------
-  Thread: Thread[main,5,main]
-  Name       |      Total Time     |  Opt % ||   Self Time     |  Opt % | Location             
- --------------------------------------------------------------------------------------------
-  :program~6 |         21ms  53.8% |   0.0% ||     21ms  53.8% |   0.0% | test.js~6:117-189 
-  :program~4 |         10ms  25.6% |   0.0% ||     10ms  25.6% |   0.0% | test.js~4:65-110 
-  :program~7 |          8ms  20.5% |   0.0% ||      8ms  20.5% |   0.0% | test.js~7:191-204 
-  :program   |         39ms 100.0% |   0.0% ||      0ms   0.0% |   0.0% | test.js~1-7:0-204 
- --------------------------------------------------------------------------------------------
-----
-
-Wer unter die Haube schauen möchte, kann sich den Operationsbaum von Graal in einer Netzwerkdarstellung im [Ideal] Visualisierungswerkzeug anzeigen lassen.
-Dazu muss man das Tool installieren und starten und kann dann seiner Anwendung die Flags `-Dgraal.Dump=` und optional `-Dgraal.MethodFilter=MyProgram.*` mitgeben.
-
-=== LLVM Unterstützung
-
-Die Entscheidung, auch LLVM Bitcode zu unterstützen, erlaubt es viele weitere Sprachen, die mittel der LLVM-Werkzeuge verarbeitet werden können, zu nutzen.
-
-Hier ist ein Beispiel das C-Code und eine notwendige Bibliothek (libcurl) einbindet und ausführt.
-
-.use-curl.c
-[source,c]
-----
-#include <stdio.h>
-#include <curl/curl.h>
-
-long request() {  
-    CURL *curl = curl_easy_init();
-    long response_code = -1;
-
-    if(curl) {
-      CURLcode res;
-      curl_easy_setopt(curl, CURLOPT_URL, "http://example.com");
-      res = curl_easy_perform(curl);
-      if(res == CURLE_OK) {
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-      }
-      curl_easy_cleanup(curl);
-    }
-    return response_code;
-}
-----
-
-.CurlTest.groovy
-[source,groovy]
-----
-import org.graalvm.polyglot.*
-
-polyglot = Context.newBuilder()
-    .allowAllAccess(true)
-    .option("llvm.libraries", "/usr/lib/libcurl.dylib")
-    .build()
-source = Source
-    .newBuilder("llvm", new File("use-curl.bc"))
-    .build()
-
-result = polyglot.eval(source)
-
-responseValue = result.getMember("request").execute()
-responseCode = responseValue.asLong()
-
-print(responseCode)
-----
-
-.Mit clang LLVM Bitcode erzeugen und "CurlTest" Programm mittles Groovy ausführen
-----
-clang -c -O1 -emit-llvm use-curl.c
-groovy CurlTest.groovy
-----
-
-Ein interessantes Feature ist "Sandboxing" [Sandbox].
-Damit kann der Bitcode mit den Sicherheitsgarantien der JVM ausgeführt werden, so gibt es Schutz vor Null-Pointer-, ungültigen Feld- und Speicherzugriffen und vieles mehr.
-Das ist aber ein Feature der Enterprise Edition von GraalVM!
-
-== Polyglotte Datenbankprozeduren
-
-Wie am Anfang gezeigt, kann Graal in Datenbanken wie Oracle und MySQL für polyglotte Implementierungen von nutzerdefinierten Funktionen und Prozeduren eingebettet werden.
-Viel leichter ist es natürlich in Datenbanken die selbst in Java implementiert sind, was gerade bei NoSQL Datenbanken oft der Fall ist.
-
-Mein Beispiel ist Neo4j, das seit drei Jahren (Version 3.0) benutzerdefinierte Prozeduren unterstützt.
-Normalerweise müssen die in einer JVM Sprache geschrieben werden, aber dank der Graal-APIs können wir jetzt jede der unterstützten Sprachen nutzen.
-
-Hier ist der Kern der Implementierung zu sehen:
-
-.PolyglotFunctions.java
-[source,java]
-----
-@Context GraphDatabase graphDb;
-Map<String, Source> functions = new ConcurrentHashMap<>();
-
-@UserFunction("functions.define")
-public void function(String name, String lang, String code) {
-    Source source = Source.newBuilder(lang, code).build();
-    functions.put(name,source);
-}
-
-@UserFunction("functions.run")
-public Object run(String name, Map<String,Object> args) {
-    try (Context context = Context.newBuilder().build()) {
-        context.export("label",Label::label);
-        context.export("type",RelationshipType::withName);
-        context.export("db",graphDb);
-        context.export("args",args);
-        Source source = functions.get(name);
-    	return context.eval(source, params);		
-    }
-}
-----
-
-Wenn man jetzt Neo4j mittels GraalVM oder OpenJDK 11 mit den genannten Optionen ausführt, können diese Prozeduren genutzt werden, um z.B. dynamisch Funktionen in JavaScript, R, Ruby oder Python zu definieren und zu nutzen.
-
-.Polyglotte Funktion von Neo4j's Cypher anlegen und aufrufen
-[source,cypher]
-----
-CALL functions.define("avgFriendAge","js",
-   "const ages = db.findNode(label('Person'),'id',args.get('id'))
-      .getRelationships(type('FRIEND'))
-      .map(rel => rel.endNode().getProperty('age'))
-    ages.reduce((agg,age) => agg + age)/ages.length");
-
-CALL functions.run("avgFriendAge", {id:"007"});
-----
-
-== Ahead-of-Time Compilation (AOT)
-
-AOT selbst ist ein größeres Thema, daher will ich es nur kurz ausführen.
-Den Maschinencode den ein JIT-Compiler aus Bytecode zur Laufzeit erstellt, kann man schon im Buildprozess erzeugen und als ausführbare Binärdateien speichern.
-Das ist der Zweck des `native-image` Tool der GraalVM. 
-Von diesem wird eine Java-Main Klasse, ihre genutzten Abhängigkeiten, Bibliotheken, JDK Funktionen und die relevanten Teile einer in Java implementierten JVM (SubstrateVM) in minimierten, optimierten Maschinencode überführt und als Binary gespeichert.
-
-image::{img}/graal-aot.png[]
-
-Dieser Buildprozess ist ziemlich aufwändig und kann für komplexere Anwendungen schon ein paar Minuten dauern.
-Hier ist ein Beispiel das rekursiv die Größe eines Verzeichnisses ermittelt, und so etwas wie das Kommandozeilentool `du` darstellen könnte.
-
-.Files.java 
-----
-public class Files {
-  
-  public static void main(String[] args) {
-  	File root = new File(args[0]);
-    System.out.printf("Total size: %d %n",fileSizes(root));
-  }
-  private static long fileSizes(File file) {
-  	if (file.isDirectory()) {
-      return Stream.of(file.listFiles()).mapToLong(Files::fileSizes).sum();
-  	} 
-    return file.length();
-  }
-}
-----
-
-.Binary erstellen mit native-image
-----
-javac Files.java
-
-native-image Files
-
-Build on Server(pid: 22229, port: 54112)
-[files:22229]    classlist:     174.19 ms
-[files:22229]        (cap):     901.95 ms
-[files:22229]        setup:   1,179.42 ms
-[files:22229]   (typeflow):   2,885.87 ms
-[files:22229]    (objects):   1,224.52 ms
-[files:22229]   (features):      40.28 ms
-[files:22229]     analysis:   4,224.40 ms
-[files:22229]     universe:     120.25 ms
-[files:22229]      (parse):     312.36 ms
-[files:22229]     (inline):     531.09 ms
-[files:22229]    (compile):   2,065.76 ms
-[files:22229]      compile:   3,111.69 ms
-[files:22229]        image:     611.66 ms
-[files:22229]        write:     321.93 ms
-[files:22229]      [total]:   9,907.16 ms
-----
-
-.Test JIT vs. AOT
-----
-# GraalVM
-time java Files .
-Total size: 13110831 
-real	0m0.170s
-
-# Zulu
-time java Files .
-Total size: 13110831 
-real	0m0.230s
-
-# AOT image
-time ./files .
-Total size: 13110831 
-real	0m0.010s
-
-# Natives Unix Tool
-time du -sh .
- 13M	.
-real	0m0.004s
-----
-
-Dabei werden folgende Hauptziele erreicht - _sehr schnelle Startzeit_, meist im einstelligen Millisekundenbereich, und deutlich _weniger Speichernutzung_ durch die Entfernung nicht erreichbaren Codes und Verzicht auf Klassen-Metainformationen.
-
-Hauptanwendungszwecke sind:
-
-- Kommandozeilentools
-- Microservices
-- Funktionen
-- Binärbibliotheken
-
-Ein sehr cooler Einsatzzweck sind ist die Optimierung von in Java implementierten, komplexen Entwicklerwerkzeugen wie Compiler (Scala, Clojure, Kotlin), Build-Tools (Maven, Gradle) oder Checker (Findbugs, Checkstyle) die oft und schnell aufgerufen werden sollen.
-Da Graal die objektorienterten bzw. funktionalen Ansätze in einigen dieser Sprachen besonders gut optimiert, bekommt man auch noch eine verbesserte Leistung.
-Für den Scala Compiler wurde in Benchmarks [ScalaC] eine Leistungssteigerung bis zu 30% nachgewiesen.
-
-Für Microservice-Frameworks wie Spring-Boot, Micronaut, vert.x, Fn-Project wird die Erzeugung solcher Binaries aktiv unterstützt bzw. entwickelt.
-Dort ist gerade bei der Erstellung von Docker-Images die Platzersparnis durch die Wegoptimierung von JVM/JDK erheblich.
-
-Die Nutzung polyglotten Features von Graal in der Host-Sprache ist auch in diesem Modus verfügbar.
-Das wird genutzt, um effiziente, schnell startende Laufzeitumgebungen für diese dynamischen Sprachen mitzuliefern.
-
-Das `native-image` Tool führt bei der Generierung auch schon die Initialisierung von Klassen und deren statischer Felder und Blöcke durch, und speichert die Informationen im "image heap".
-Damit wird dies nicht zum Start des Programms notwendig.
-
-Das muss man bedenken, wenn der eigene Code zum Zeitpunkt der statischen Klassen-Initialisierung schon aktive wird und zum Beispiel Threads startet, Sockets öffnet, Speicher alloziert, Konfiguration liest usw.
-Wenn man diese Optimierung nicht nutzen kann oder will, ist das möglich mit `--delay-class-initialiazation-to-runtime=class,list`.
-
-Es gibt einige Einschränkungen [AOT-Limits] der Substrate-VM und des statischen Binärcodes, aber auch Workarounds bzw. Konfigurationsoptionen dafür, z.B. für Reflection (`-H:ReflectionConfigurationFiles=json-files`), Nutzung von Unsafe, JNI, Laden von Klassen, usw.
-Wenn man damit leben kann, dass diese Einschränkungen erst zur Laufzeit zum Fehler führen, kann `-H:+ReportUnsupportedElementsAtRuntime` genutzt werden.
-Um Resourcen in das Binärfile zu integrieren, kann man sie mittels: `-H:IncludeResources=regexp` angeben, zum Beispiel: `-H:IncludeResources=application.yml|META-INF/services/.+`
-
-Man darf nicht vergessen dass das erzeugte Binary weniger optimal ist, als im JIT, da die ganzen Laufzeit-Profilinformationen über die eigentliche Nutzung des Codes fehlen.
-
-Aber erhält man optimierten Code, der viel weniger Speicher belegt - da u.a. die Klassenmetainformationen nicht gespeichert werden müssen und durch die Codeeliminierung nur das minimale Gerüst, das für unser Programm wirklich notwendig ist, bereitgestellt wird.
-
 
 == Fazit
 
@@ -1158,8 +906,396 @@ JS
 example:
 neo4j-polyglot procedures / Magnolia
 
-
 fn-project next article?
+
+call script.function('foo','js', '.....') -> 
+return foo() <- executes js
+
+
 
 ////
 
+
+= Espresso Stampfer - Vorkompilierte Programme mit GraalVM AOT
+
+In diesem zweiten Artikel zu Graal, soll es vor allem um 2 Themen gehen. 
+
+Zuerst möchte ich die polyglotten Programmierung auf der GraalVM abrunden und neben Fehlersuche und LLVM Integration, ein praktisches Beispiel aus meinem Umfeld darstellen.
+Wir wollen die JVM-basierte GraphDatenbank Neo4j um benutzerdefinierte Funktionen und Prozeduren anreichern, die nicht nur in den klassischen JVM Sprachen wie Java, Scala oder Kotlin geschrieben sind, 
+sondern in einer der unterstützten Sprachen der GraalVM, also JavaScript, Ruby, Python und R.
+
+In der zweiten Hälfte möchte ich zeigen, wie man mit den Werkzeugen der GraalVM, die eigene Anwendung schon zum Buildzeitpunkt zu Maschinencode optimieren kann.
+Dass dabei eine komplette JVM, Klassenbibliotheken und der eigene Bytecode zu einer schnell startenden, nativen Anwendung zusammengeschrumpft werden, ist schon ziemlich beachtlich.
+Der Hauptvorteil dieses Ansatzes liegt in der erheblich kürzeren Startzeit und dem geringeren Speicherverbrauch der Anwendung.
+
+== Aktuelles
+
+Seit dem letzten Artikel ist die Zeit im Graal Projekt nicht stehengeblieben, mittlerweile ist Graal bei der Version 1.0-RC11 angekommen.
+Dabei hat sich auch der Name der Graal-JVM in SDKMAN geändert auf: `1.0.0-rc-11-grl`
+
+Einige Verbesserungen [Release Notes] in den letzten Versionen umfassen:
+
+* Deutlich verbesserte Python Unterstützung, inklusive eines eigenen Installers namens `ginstall`
+* Neue Option `--allow-incomplete-classpath` für native Images, um Bibliotheken, wie Spring-Boot, die Laufzeitkonfiguration von der (Nicht-)Existenz von Klassen abhängig machen, besser zu unterstützen
+* Neue Sicherheitsoptionen für Sandboxing von z.B. `eval`
+
+== Polyglotte Anwendungen mit GraalVM
+
+=== Fehlersuche
+
+Um Fehler oder Probleme in polyglotte Anwendungen zu finden, bringt GraalVM zum einen ein angepasstes jVisualVM Tool mit, das mit den verschiedenen Kontexten umgehen kann und zum Beispiel die Heaps der verschiedenen Sprachen anzeigt.
+
+Ein kompletter polyglotter Debugger, der die Google Chrome Debugger UI benutzt, ist nutzbar, wenn man bei der Programmausführung das `--inspect` Flag nutzt.
+Dann wird eine lokale URL ausgegeben, die man in Chrome öffnen kann.
+
+Neben dem Debuggen jedes polyglotten Fragments neben dem Hauptprogramm zeigt diese Integration auch polyglotte Stacktraces.
+
+image::{img}/graal-chrome-debugger.jpg[]
+
+Mittels der `--cpusampler --cpusampler.Mode=statements` Flags erhält man CPU Samples für das eigene Programm.
+
+.Ausgabe CPU Samples
+----
+ --------------------------------------------------------------------------------------------
+ Sampling Histogram. Recorded 39 samples with period 1ms
+   Self Time: Time spent on the top of the stack.
+   Total Time: Time the location spent on the stack. 
+   Opt %: Percent of time spent in compiled and therfore non-interpreted code.
+ --------------------------------------------------------------------------------------------
+  Thread: Thread[main,5,main]
+  Name       |      Total Time     |  Opt % ||   Self Time     |  Opt % | Location             
+ --------------------------------------------------------------------------------------------
+  :program~6 |         21ms  53.8% |   0.0% ||     21ms  53.8% |   0.0% | test.js~6:117-189 
+  :program~4 |         10ms  25.6% |   0.0% ||     10ms  25.6% |   0.0% | test.js~4:65-110 
+  :program~7 |          8ms  20.5% |   0.0% ||      8ms  20.5% |   0.0% | test.js~7:191-204 
+  :program   |         39ms 100.0% |   0.0% ||      0ms   0.0% |   0.0% | test.js~1-7:0-204 
+ --------------------------------------------------------------------------------------------
+----
+
+Wer unter die Haube schauen möchte, kann sich den generierten Operationsbaum von Graal in einer Netzwerkdarstellung im [Ideal] Visualisierungswerkzeug anzeigen lassen.
+Dazu muss man das Tool installieren und starten und kann dann seiner Anwendung die Flags `-Dgraal.Dump=` und optional `-Dgraal.MethodFilter=MyProgram.*` mitgeben.
+
+// TODO image
+
+image::https://chrisseaton.com/truffleruby/jokerconf17/average.png[]
+
+=== LLVM Unterstützung
+
+Die Entscheidung, auch LLVM Bitcode zu unterstützen, erlaubt es viele weitere Sprachen, die mittel der LLVM-Werkzeuge verarbeitet werden können, zu nutzen.
+
+Hier ist ein Beispiel das C-Code und eine notwendige Bibliothek (libcurl) einbindet und ausführt.
+
+.use-curl.c
+[source,c]
+----
+#include <stdio.h>
+#include <curl/curl.h>
+
+long request() {  
+    CURL *curl = curl_easy_init();
+    long response_code = -1;
+
+    if(curl) {
+      CURLcode res;
+      curl_easy_setopt(curl, CURLOPT_URL, "http://example.com");
+      res = curl_easy_perform(curl);
+      if(res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+      }
+      curl_easy_cleanup(curl);
+    }
+    return response_code;
+}
+----
+
+.CurlTest.groovy
+[source,groovy]
+----
+import org.graalvm.polyglot.*
+
+polyglot = Context.newBuilder()
+    .allowAllAccess(true)
+    .option("llvm.libraries", "/usr/lib/libcurl.dylib")
+    .build()
+source = Source
+    .newBuilder("llvm", new File("use-curl.bc"))
+    .build()
+
+result = polyglot.eval(source)
+
+responseValue = result.getMember("request").execute()
+responseCode = responseValue.asLong()
+
+print(responseCode)
+----
+
+.Mit clang LLVM Bitcode erzeugen und "CurlTest" Programm mittles Groovy ausführen
+----
+clang -c -O1 -emit-llvm use-curl.c
+groovy CurlTest.groovy
+----
+
+Ein interessantes Feature ist "Sandboxing" [Sandbox].
+Damit kann der Bitcode mit den Sicherheitsgarantien der JVM ausgeführt werden, so gibt es Schutz vor Null-Pointer-, ungültigen Feld- und Speicherzugriffen und vieles mehr.
+Das ist aber ein Feature der Enterprise Edition von GraalVM!
+
+== Polyglotte Datenbankprozeduren
+
+Wie im ersten Artikel angemerkt, kann Graal in Datenbanken wie Oracle [JS-Oracle] und MySQL für polyglotte Implementierungen von nutzerdefinierten Funktionen und Prozeduren eingebettet werden.
+Viel leichter ist es natürlich in Datenbanken die selbst in Java implementiert sind, was gerade bei NoSQL Datenbanken oft der Fall ist.
+
+Mein Beispiel ist Neo4j, das seit drei Jahren (Version 3.0) benutzerdefinierte Prozeduren unterstützt.
+Normalerweise müssen die in einer JVM Sprache geschrieben werden, aber dank der Graal-APIs können wir jetzt jede der unterstützten Sprachen nutzen.
+
+Hier ist der Kern der Implementierung zu sehen:
+
+.PolyglotFunctions.java
+[source,java]
+----
+@Context GraphDatabase graphDb;
+Map<String, Source> functions = new ConcurrentHashMap<>();
+
+@UserFunction("functions.define")
+public void function(String name, String lang, String code) {
+    Source source = Source.newBuilder(lang, code).build();
+    functions.put(name,source);
+}
+
+@UserFunction("functions.run")
+public Object run(String name, Map<String,Object> args) {
+    try (Context context = Context.newBuilder().build()) {
+        context.export("label",Label::label);
+        context.export("type",RelationshipType::withName);
+        context.export("db",graphDb);
+        context.export("args",args);
+        Source source = functions.get(name);
+    	return context.eval(source, params);		
+    }
+}
+----
+
+Wenn man jetzt Neo4j mittels GraalVM oder OpenJDK 11 mit den genannten Optionen ausführt, können diese Prozeduren genutzt werden, um z.B. dynamisch Funktionen in JavaScript, R, Ruby oder Python zu definieren und zu nutzen.
+
+.Polyglotte Funktion in Neo4j's Cypher anlegen und aufrufen
+[source,cypher]
+----
+CALL functions.define("avgFriendAge","js",
+   "const ages = db.findNode(label('Person'),'id',args.get('id'))
+      .getRelationships(type('FRIEND'))
+      .map(rel => rel.endNode().getProperty('age'))
+    ages.reduce((agg,age) => agg + age)/ages.length");
+
+CALL functions.run("avgFriendAge", {id:"007"});
+----
+
+== Ahead-of-Time Kompilierung (AOT)
+
+AOT-Kompilierung selbst ist ein größeres Thema, daher kann ich hier nur einen Überblick geben, wie und warum man sie mit Graal nutzen kann.
+Den Maschinencode den ein JIT-Compiler normalerweise aus Bytecode zur Laufzeit erstellt, kann schon im Buildprozess erzeuget und als ausführbare Binärdateien gespeichert werden.
+
+Das ist der Zweck des `native-image` Tools der GraalVM. 
+Von diesem wird eine Java-Main Klasse, ihre genutzten Abhängigkeiten, Bibliotheken, JDK Funktionen und die relevanten Teile einer in Java implementierten JVM (SubstrateVM) in minimierten, optimierten Maschinencode überführt und als Binary gespeichert.
+Besonder interessant war für mich, dass die SubstrateVM früher oft als irrelevantes Spielzeug belächelt, jetzt mit dem aggressiven Graal-Compiler aber zum essentiellen Bestandteil des Lösungsansatzes wurde.
+
+image::{img}/graal-aot.png[]
+
+Dieser Buildprozess ist ziemlich aufwändig und kann für komplexere Anwendungen schon ein längere Zeit dauern [AOT-Hands-On].
+Hier ist ein Beispiel das rekursiv die Größe eines Verzeichnisses ermittelt, und so etwas wie das Kommandozeilentool `du` darstellen könnte.
+
+.Files.java 
+----
+public class Files {
+  
+  public static void main(String[] args) {
+  	File root = new File(args[0]);
+    System.out.printf("Total size: %d %n",fileSizes(root));
+  }
+  private static long fileSizes(File file) {
+  	if (file.isDirectory()) {
+      return Stream.of(file.listFiles()).mapToLong(Files::fileSizes).sum();
+  	} 
+    return file.length();
+  }
+}
+----
+
+.Binary erstellen mit native-image
+----
+javac Files.java
+
+native-image Files
+
+Build on Server(pid: 22229, port: 54112)
+[files:22229]    classlist:     174.19 ms
+[files:22229]        (cap):     901.95 ms
+[files:22229]        setup:   1,179.42 ms
+[files:22229]   (typeflow):   2,885.87 ms
+[files:22229]    (objects):   1,224.52 ms
+[files:22229]   (features):      40.28 ms
+[files:22229]     analysis:   4,224.40 ms
+[files:22229]     universe:     120.25 ms
+[files:22229]      (parse):     312.36 ms
+[files:22229]     (inline):     531.09 ms
+[files:22229]    (compile):   2,065.76 ms
+[files:22229]      compile:   3,111.69 ms
+[files:22229]        image:     611.66 ms
+[files:22229]        write:     321.93 ms
+[files:22229]      [total]:   9,907.16 ms
+----
+
+.Test JIT vs. AOT
+----
+# GraalVM
+time java Files .
+Total size: 13110831 
+real	0m0.170s
+
+# Zulu
+time java Files .
+Total size: 13110831 
+real	0m0.230s
+
+# AOT image
+time ./files .
+Total size: 13110831 
+real	0m0.010s
+
+# Natives Unix Tool
+time du -sh .
+ 13M	.
+real	0m0.004s
+----
+
+Dabei werden folgende Hauptziele erreicht - _sehr schnelle Startzeit_, meist im einstelligen Millisekundenbereich, und deutlich _weniger Speichernutzung_ durch die Entfernung nicht erreichbaren Codes und Verzicht auf Klassen-Metainformationen.
+
+Hauptanwendungszwecke sind:
+
+- Kommandozeilentools
+- Microservices
+- Funktionen
+- Binärbibliotheken
+
+Ein sehr cooler Einsatzzweck sind ist die Optimierung von in Java implementierten, komplexen Entwicklerwerkzeugen wie Compiler (Scala, Clojure, Kotlin), Build-Tools (Maven, Gradle) oder Checker (Findbugs, Checkstyle) die oft und schnell aufgerufen werden sollen.
+Da Graal die objektorienterten bzw. funktionalen Ansätze in einigen dieser Sprachen besonders gut optimiert, bekommt man auch noch eine verbesserte Leistung.
+Für den Scala Compiler wurde in Benchmarks [ScalaC] eine Leistungssteigerung bis zu 30% nachgewiesen.
+
+Für Microservice-Frameworks wie Spring-Boot, Micronaut, vert.x, Fn-Project wird die Erzeugung solcher Binaries aktiv unterstützt bzw. entwickelt.
+Dort ist gerade bei der Erstellung von Docker-Images die Platzersparnis durch die Wegoptimierung von JVM/JDK erheblich, in den meisten Fällen Faktor 10 oder mehr.
+
+Die Nutzung polyglotten Features von Graal in der Host-Sprache ist auch in diesem Modus verfügbar.
+Das wird vom Graal Projekt selbst genutzt, um effiziente, schnell startende Laufzeitumgebungen für diese dynamischen Sprachen mitzuliefern.
+Diese haben dann zwar nicht die maximmale Laufzeitperformanz aber eine sehr kurze Startzeit.
+
+Das `native-image` Tool führt bei der Generierung auch schon die Initialisierung von Klassen und deren statischer Felder und Blöcke durch, und speichert die Informationen im "image heap".
+Damit wird dies nicht zum Start des Programms notwendig.
+
+Das muss man bedenken, wenn der eigene Code zum Zeitpunkt der statischen Klassen-Initialisierung schon aktiv wird und zum Beispiel Threads startet, Sockets öffnet, Speicher alloziert, Konfiguration liest usw.
+Wenn man diese Optimierung nicht nutzen kann oder will, ist es möglich die Initialisierung dieser Klassen mit `--delay-class-initialiazation-to-runtime=class,list` zu verzögern.
+
+Es gibt einige Einschränkungen [AOT-Limits] der Substrate-VM und des statischen Binärcodes, aber auch Workarounds bzw. Konfigurationsoptionen dafür, z.B. Auflistung von Klassen und Methoden für Reflection (`-H:ReflectionConfigurationFiles=json-files`), Nutzung von Unsafe, JNI, Laden von Klassen, usw.
+Wenn man damit leben kann, dass diese Einschränkungen erst zur Laufzeit zum Fehler führen, kann `-H:+ReportUnsupportedElementsAtRuntime` genutzt werden.
+Um Resourcen in das Binärfile zu integrieren, kann man sie mittels: `-H:IncludeResources=regexp` angeben, zum Beispiel: `-H:IncludeResources=application.yml|META-INF/services/.+`
+
+Eine sehr detaillierte Detektivgeschichte zur Anwendung dieser Optionen und Workarounds kann man in [AOT-Hands-On] miterleben. 
+
+Man darf nicht vergessen dass das erzeugte Binary weniger optimal ist, als im JIT, da die ganzen Laufzeit-Profilinformationen über die eigentliche Nutzung des Codes fehlen.
+
+Aber erhält man optimierten Code, der viel weniger Speicher belegt - da u.a. die Klassenmetainformationen nicht gespeichert werden müssen und durch die Codeeliminierung nur das minimale Gerüst, das für unser Programm wirklich notwendig ist, bereitgestellt wird.
+
+Wie schon erwähnt, ist dieser Ansatz besonders für die Erstellung von Container-Images interessant.
+
+Während sonst Java Anwendungen mehrere hundert Megabyte große Images erfordern, kommen statisch gelinkte, native Binaries mit wenigen Megabytes aus.
+Statt auf einem minimalen "Alpine" System zu basieren kann man einfach ein leeres `scratch` benutzen. 
+
+Dazu muss die erzeugte Binärdatei natürlich auf Linux ausführbar sein, wofür man auch wieder einen Docker Container nutzen kann der die Linux Version von GraalVM's `native-image` enthält.
+
+.`native-image/Dockerfile` Buildfile um Linux Binaries auf anderen Systemen zu erzeugen.
+[source,docker]
+----
+FROM ubuntu
+
+RUN apt-get update && \
+    apt-get -y install gcc libc6-dev zlib1g-dev curl bash && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV GRAAL_VERSION 1.0.0-rc11
+ENV GRAAL_FILENAME graalvm-ce-${GRAAL_VERSION}-linux-amd64.tar.gz
+
+# GraalVM herunterladen und auspacken
+RUN mkdir -p /usr/lib/graalvm
+RUN curl -4 -L https://github.com/oracle/graal/releases/download/vm-${GRAAL_VERSION}/${GRAAL_FILENAME} -o - |\
+    tar xzf - --strip-components 1 -C /usr/lib/graalvm
+
+# Arbeitsverzeichnis anlegen
+VOLUME /project
+WORKDIR /project
+
+# Ausführung
+ENTRYPOINT ["/usr/lib/graalvm/bin/native-image","--static"]
+----
+
+Wenn man später die Fehlermeldung `standard_init_linux.go:190: exec user process caused "no such file or directory"` bekommt, dann fehlen Standardbibliotheken im "nackten" Image.
+Dann hat man das `--static` bei der Erzeugung vergessen und stattdessen eine dynamisch gelinkte Datei erzeugt.
+
+Dann können wir dieses `graalvm-native` Docker Image nutzen, um unser Linux-Binary zu bauen und es dann in das minimale Docker Image einpacken und ausführen.
+
+.Minimales Docker Buildfile für unsere Binärdatei
+[source,docker]
+----
+FROM scratch
+VOLUME /folder
+
+ADD files /
+CMD ["/files","/folder"]
+----
+
+.Ablauf der Erzeugung der Docker-Images und Ausführung unserer Binärdatei
+----
+docker build native-image -t graalvm-native
+docker run --rm -v `pwd`:/project graalvm-native Files 
+Build on Server(pid: 12, port: 40339)*
+[files:12]    classlist:   2,537.64 ms
+...
+
+# Nicht ausführbar da Linux Binary
+./files
+./files: cannot execute binary file
+
+# Minimales Dockerfile bauen
+docker build . -t files
+# Unser Image ist nur 9.61MB gross
+
+docker run -v /tmp:/folder --rm files
+Total size: 3086078
+----
+
+== Fazit
+
+GraalVM ist wie eine Wundertüte [10-Things], egal an welcher Ecken man anfängt zu stöbern, man findet faszinierende Technologien und Lösungen, die aufeinander aufbauen und sich ergänzen.
+Das Team um Thomas Wuerthinger hat wirklich ganze Arbeit geleistet.
+Ich bin gespannt wie sich die Abdeckung der Sprachen (besonders Python für Data-Science) entwickelt und freue mich auf das 1.0 Release.
+Bei Neo4j werden wir weiter die Möglichkeiten von GraalVM für polyglotte Interaktion mit der Datenbank und Graphalgorithmen ausloten.
+
+== Referenzen
+
+* [WuerthingerShelajevDeepDive] https://www.youtube.com/watch?v=a-XEZobXspo
+* [Release Notes] http://www.graalvm.org/docs/release-notes/
+* [10-Things] https://medium.com/graalvm/graalvm-ten-things-12d9111f307d
+* [AOT-Limits] https://github.com/oracle/graal/blob/master/substratevm/LIMITATIONS.md
+* [ScalaC] https://www.codacy.com/blog/scala-faster-and-slimmer-with-graalvm/
+* [Ideal] https://github.com/oracle/graal/blob/master/compiler/docs/Debugging.md#dumping
+* [Sandbox] https://medium.com/graalvm/safe-and-sandboxed-execution-of-native-code-f6096b35c360
+* [Netty-Native] https://medium.com/graalvm/instant-netty-startup-using-graalvm-native-image-generation-ed6f14ff7692
+* [Native Kotlin] https://vorba.ch/2018/native-kotlin-on-graalvm.html
+* [Native Clojure] https://www.innoq.com/en/blog/native-clojure-and-graalvm/
+* [Micronaut Graal] http://guides.micronaut.io/micronaut-creating-first-graal-app/guide/index.html
+* [Native Function Fn Projekt] https://medium.com/criciumadev/serverless-native-java-functions-using-graalvm-and-fn-project-c9b10a4a4859
+* [JS-Oracle] https://medium.com/graalvm/bringing-modern-programming-languages-to-the-oracle-database-with-graalvm-80914d0c0167
+// * Shaun Smith Serverless: https://www.youtube.com/watch?v=bL2TVOlzRrg
+* [Fn-Projekt Graal Vortrag] https://jug-saxony-day.org/wp-content/uploads/JSD2018-Smith-Serverless-Java-Challenges-and-Triumphs.pdf
+* [AOT-Hands-On] https://royvanrijn.com/blog/2018/09/part-2-native-microservice-in-graalvm/
+* [Graal Internals] https://chrisseaton.com/truffleruby/jokerconf17/
+
+// https://vorba.ch/2018/native-kotlin-on-graalvm.html
+// https://royvanrijn.com/blog/2018/09/part-1-java-to-native-using-graalvm/
+// https://jonathangiles.net/natively-compiling-micronaut-microservices-using-graalvm-for-insanely-faster-startups/
