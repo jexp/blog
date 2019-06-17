@@ -1,0 +1,263 @@
+== Aussergewöhnliche Leistung in Java
+
+=== Was bei Exceptions unter der Haube passiert
+
+Neben der unvermeidlichen Diskussion um checked vs. unchecked Exceptions - mir sind unchecked Exceptions viel lieber - gibt es viele Mythen rund um Java's Methode zur Ausnahmebehandlung.
+Einiges davon möchte ich selbst behandeln, für anderes ziehe ich mir Expertenmeinungen heran.
+
+Alexander Shipilev, der Autor des Java Microbenchmark Harness (JMH) hat sich in einem Blog Post dieses Themas angenommen und diverse Performanzaspekte des Exceptionhandlings in der Java Virtual Machine (JVM) thematisiert [Shipilev].
+Dazu hat er in diversene Szenarien mittels JMH gemessen, was die Auswirkungen von verschiedenen Arten von Exceptions sind.
+
+=== Allgemeine Betrachtungen
+
+Anders als viele andere Sprachen, die Fehlerinformationen mittels Rückgabewerten oder expliziten Fehlerparametern in Callbacks handhaben.
+Manche Sprachen unterstützen statt numerischen Fehlercode auch Mehrfach-Rückgabewerte oder Tupel so dass Ergebnis und/oder Fehler zurückgegeben werden können.
+Viele Sprachen bieten Exceptions zusätzlich an, oft ist das aber nicht der "idiomatische" Weg Fehler zu behandeln.
+
+Seit Anbeginn unterstützte Java Exceptions als Kernkonzept in der Sprache. 
+
+Der Ansatz am Anfang checked Exceptions zu bevorzugen, hatte meines Erachtens 2 Gründe.
+
+Zum einem entstand Java in der Welt der Applets und AWT/Swing Anwendungen, daher konnten diese explizit getypten und gehandhabten Fehler oft vom Nutzer behandelt werden.
+Es ist viel einfacher an der Oberfläche mit einer `FileNotFoundException` (z.b. nach einem "Datei öffnen" Dialog) umzugehen als auf einem Backend, das im Batch-Processing Dateien an definierten Orten erwartet.
+
+Zum anderen war Java als objektorientierte "Einsteigersprache" konzipiert, die eher restriktiv mit ihrem Wortschatz und Möglichkeiten umging.
+Daher kommunizieren deklarierte, erwartete Fehler die dann auch explizit abgefangen und behandelt werden müssen, die Absicht des Programm- oder Bibliotheksautors besser.
+
+Daher sollten im allgemeinen "checked" Exceptions maximal für Fehlerfälle genutzt werden, von denen sich das Program definitiv *sauber erholen* kann.
+Das sind leider nur sehr wenige, die meisten Ausnahmen sind "unrettbar" und sollten lieber die aktuelle Verarbeitung abbrechen, protokollieren und ggf. eine Fehlermeldung an den Endnutzer geben, sofern das sinnvoll ist.
+
+Wie schon erwähnt, bin ich eher Freund von Laufzeitfehlern (`RuntimeException`), d.h. solchen die nicht in Methodensignaturen deklariert und an der Aufrufstelle deklariert und abgefangen werden _können_. 
+
+Neben dem `throws` Schlüsselwort, hat Java mit `try-catch-finally` Sprachkonstrukte um Exceptions zu handhaben.
+
+[source,java]
+----
+Reader reader;
+try {
+  reader = new FileReader(fileName);
+  processFile(reader);
+} catch(FileNotFoundException fnfe) {
+  throw new RuntimeException("File "+fileName+" could not be processed", fnfe);
+} finally {
+  if (reader!=null) reader.close();
+}
+----
+
+Im `catch`-Zweig sollte *eines* von 2 Dingen erfolgen.
+
+Enweder die Behandlung der Exception, z.B. durch einen alternativen Pfad im Programmfluss und entsprechendes Logging.
+*Oder* die Weiterleitung als angereicherte Exception die zusätzliche Informationen über den Kontext erhält.
+Dafür eigene Typen von Exceptions zu erzeugen ist sinnvoller für Bibliotheken als für Programme, diese können dann über ihren Typ und auch weitere Instanzvariablen und Methoden die Kontextinformationen kommunzieren.
+
+Im letzteren Fall sollte in einer äußeren Schicht des Programms (oder durch das Framework) ein zentrale Protokollierung und Behandlung von Fehler erfolgen, die dann alle mit genügend Information zur Reproduktion und Zuordnung versehen sein sollten.
+
+Im `finally` Block erfolgen Aktionen, die auf *jeden Fall* vor dem Verlassen des Blocks (selbst durch ein `break` oder `return`) ausgeführt werden müssen.
+Das bezieht sich vor allem auf Resourcenmanagement, wie Dateideskriptoren, oder Netzwerk- bzw. Datenbankverbindungen, die stets wieder geschlossen werden müssen.
+
+Seit Java 7 kann mittels "try-with-resources" ein automatisches Resourcemanagement erfolgen, dazu werden entsprechende Klassen, die das `AutoCloseable` interface  implementieren im `try`-Konstrukt erzeugt und zugewiesen werden.
+Diese (ein oder auch _mehrere, mittels Semikolon getrennt_) werden dann automatisch beim Verlassen des Blocks in umgekehrter Reihenfolge geschlossen.
+
+Unser Beispiel wird damit gleich viel lesbarer, es wird ausserdem kommunziert, welches die im Block genutzten Resourcen sind.
+
+[source,java]
+----
+try (Reader reader = new FileReader(fileName)) {
+  processFile(reader);
+} catch(FileNotFoundException fnfe) {
+  throw new RuntimeException("File "+fileName+" could not be processed", fnfe);
+}
+----
+
+Die Vererbungshierarchie der Sprache reicht von `Throwable` zu `Error` (reserviert für Fehler der JVM u.a. OutOfMemoryError) bzw. `Exception` unter welcher auch die Laufzeitfehler `RuntimeException` angesiedelt sind.
+Ausser `getMessage()`, `getCause()` und `printStackTrace([PrintStream])` Methoden enthalten Exceptions nicht viel Funktionalität.
+
+.Exception Class Hierarchy
+image::https://www.dropbox.com/s/djfdwlcu9gopiqd/ExceptionHierarchy.svg?dl=0[]
+// https://lh5.googleusercontent.com/WqqNoyFEkZXfmZBBQjgIutY72_BUV6_By_BAe7Ih9u36HfelS3nTWQEYtdRUkQS32Tuhg9P9CUXo-jgvOpkO84vLm2viI4Od0BNustwONdMm7DKZnKC6kyVHyRJbsESLIPV4uBU[]
+
+Die meiste Arbeit fällt innerhalb der virtuelle Maschine an.
+
+=== Was passiert bei einer Exception?
+
+Bei der Instanziierung einer Exception, wird neben der Erzeugung des Objekts auch ein *Stacktrace* erzeugt.
+Dieser Trace ist die komplette Aufrufkette von der Stelle des Erzeugens der Exception bis zum äußersten Block des Programms von dem der Aufruf gestartet wurde.
+Dazu muss die Exception nicht geworfen werden, es wird die Stelle der Erzeugung festgehalten, wie man leicht ausprobieren kann.
+
+[source,java]
+----
+new Exception().printStackTrace();
+----
+
+Gerade bei der Nutzung von Frameworks, die viel mit Delegation arbeiten, kann diese sehr tief sein (z.B. Spring Security).
+Bei der Nutzung von Lambdas bzw. (dynamisch) generiertem Code enthält dieser Stacktrace viele "Infrastruktur"-Aufrufe, die nicht sehr informativ sind.
+Diverse Frameworks bereinigen daher den Stacktrace, der nach aussen gereicht bzw. protokolliert wird.
+
+Seit Java 7 bietet Java auch eine API mit der Stacktraces ganz vernünftig navigiert werden können, vorher musste man sich mit dem Parsen von Stringausgaben von `printStackTrace` in einen `StringWriter` genügen. 
+
+Jetzt gibt es auch Methoden wie `getStackTrace()`, `getStackDepth()` oder `getStackTraceElement(level)` die das ganze sehr vereinfachen.
+
+Jedes `StackTraceElement` kann folgende Informationen bereitstellen:
+
+* Dateiname
+* Klassenname
+* Methodenname
+* "native" Methode (d.h. Implementierung in der C-Bibliothek der JVM)
+* Zeilennummer
+
+Die Erzeugung des Stacktraces ist eine _teure_ Angelegenheit, dazu muss die JVM in einem Safepoint sein.
+Diese befinden sich zum Beispiel an Ein- und Ausgängen von Methoden, Schleifenbeginn und ähnlichem und werden unter anderem auch bei der Garbage Collection benutzt.
+
+Um die Erzeugung von Stacktraces zu vermeiden, kann man im Ausnahmefall einen Kommandozeilenparameter `-XX:-StackTraceInThrowable` benutzen oder in einer eigenen Exceptionklasse `fillInStackTrace()` überschreiben.
+
+Das sollte aber nur ein Problem darstellen, wenn Exceptions zum 				 benutzt werden, normalerweise stellt das Auftreten einer Exception, wie der Name schon sagt, eine Ausnahme dar.
+
+=== Exceptions und Kontrollfluss
+
+Eine sehr unglückliche Nutzung von Exceptions ist der Abbruch von Schleifen oder rekursiven Aufrufketten, wie auch Joshua Bloch in "Effective Java" [Bloch] Punkt 57 ausführt .
+Besonders wenn das an einer Stelle erfolgt, die häufig aufgerufen wird, holt man sich ein Performanceproblem ins Haus.
+Hier ist ein unglückliches Beispiel, das die hilfreichen Test in Java, der uns vor Pufferüberläufen bewahrt, nutzt um sich bei der Iteration über ein Feld nicht um dessen Länge zu scheren.
+
+[source,java]
+----
+int summe = 0;
+try {
+  while (true) {
+   summe += daten[i++];
+  }
+} catch(IndexOutOfBoundsException ignore) {}
+return summe;
+----
+
+Natürlich würde man das eher über eine `for` Schleife oder "moderner" über `Arrays.stream(daten).sum()` erledigen.
+
+Was aber, wenn wir einen _internen Iterator_ ohne Abbruchmöglichkeit nutzen müssen?
+
+Man stelle sich vor, wir wollen hier die Iteration abbrechen, wenn wir eine Person mit invalidem Namen feststellen, aber trotzdem die Liste der bisherigen Ergebnisse zurückggeben.
+Wenn die API keine Indikation erlaubt, ob die Iteration fortgesetzt werden soll, und wir nicht die weiteren Elemente (umsonst) zur Verarbeitung präsentiert bekommen wollen, kann man nur mit einer Exception abbrechen.
+Das hat zum Beispiel das Spring Framework in früheren in einigen seiner SQL und Template API Implementierungen so gemacht.
+
+Hier ist ein Beispiel für eine (nicht-streams) API, die nur eine `forEach` Methode für ein `Callback` interface anbietet.
+
+[source,java]
+----
+List<Person> people = new ArrayList<>();
+results.forEach(r -> {
+  if (r.get("name") == null) throw new IllegalStateException("Ungültiges Record "+r);
+  people.add(new Person(r.get("name"),r.get("birthday")));
+})
+----
+
+Wenn jetzt diese Logik z.B. in einer Batchverarbeitung sehr häufig aufgerufen wird, summieren sich die Kosten der Erzeugung von Exceptions schnell auf.
+Ich selbst habe es in der Implementierung des Parboiled Parser erlebt, der in früheren Versionen Stacktraces nutzte um die Position eines Terms in einer Grammatik-DSL festzustellen.
+
+Stattdessen sollte so eine API z.b. eine Option haben, ein `Predicate` nutzen, das dann anzeigt, ob man weiter iterieren möchte.
+Dann könnte sogar der Zustand sauber festgehalten, und fehlerhafte Elemente kontrolliert entfernt werden.
+
+[source,java]
+----
+List<Person> people = new ArrayList<>();
+results.forEach(r -> {
+  if (r.get("name") == null) return false;
+  people.add(new Person(r.get("name"),r.get("birthday")));
+  return true;
+})
+----
+
+Wie immer ist die Welt hier aber nicht schwarz und weiss, manchmal hat man keine Wahl.
+
+Obwohl das der Dokumentation der "Ausnahme"
+
+=== Perfomanceimplikationen von Exceptions
+
+Nachdem die "Basics" erledigt sind, wollen wir jetzt die Ergebnisse von Shipilevs Artikel nachvollziehen.
+Er hat zum Testen eine einfache "checked" Exception benutzt, die ein einzelnes `int`-Feld als Kontext enthält.
+
+[source,java]
+----
+public class LilException extends Exception {
+    private final int metadata;
+
+    public LilException(int metadata) {
+        this.metadata = metadata;
+    }
+
+    public LilException(LilException e, int metadata) {
+        super(e);
+        this.metadata = metadata;
+    }
+
+    public int getMetadata() {
+        return metadata;
+    }
+}
+----
+
+Er hat dann mehrere Fälle getestet mit folgenden Größenordnungen an Laufzeit:
+
+1. das Werfen einer gecachten Exception (4ns)
+2. das Werfen der gecachten Exception und Nutzung des Stacktraces (25ns)
+3. das Erzeugen und Werfen einer Exception (2000ns)
+4. das Erzeugen, Werfen der Exception *und Benutzung* des Stacktraces (20000ns)
+
+Daran sieht man deutlich das das Erzeugen des Stacktraces in der JVM beim Erzeugen der Exception passiert und teuer ist.
+
+Und das die Übersetzung des VM-Traces in den Java-API StackTrace nochmal erheblich teurer ist.
+Diese wird aber nach dem ersten Aufruf gecached, wie man in Zeile 2 sehen, kann, wo die Trace-Initialisierung und erster Zugriff darauf schon im Warmup erfolgten.
+
+Wie er in einem weiteren Test zeigt, steigen die Kosten für die Erzeugung mit der Tiefe des Stacktraces linear an, beginnend bei ca. 2ns auf Level 1 bis zu 80ns auf Level 1024.
+
+Es gibt keine Unterschiede in der Performanz zwischen Checked- und Laufzeitexceptions.
+
+=== Was passiert beim Werfen
+
+Die Exception wird beim Werfen durch `throw` an den Exception Handler der VM übergeben (statt eines regulären `return`s der Methode), dieser kümmert sich dann darum, beim Aufrufer etwaigen Exception-Handler Code aufzurufen.
+// frame-pointer of the method call is dropped
+Falls keiner gefunden wird, geht immer eine Aufruferebene höher bis entweder entweder ein Exception-Handler existiert oder der globale Handler der JVM zum Tragen kommt.
+Dieser Prozess heisst auch _stack unwinding_.
+
+Der generierte Bytecode enthält explizite Typchecks (vom `catch`) die beim Fehlschlagen wieder die Kontrolle an dem VM-Handler zurückgeben.
+
+... TODO
+////
+The previous experiment highlighted how try {} catch {} is treated in terms of control-flow constructs and how it can be get optimized quite reliably. Let’s assess it a bit more rigorously. We do a very basic benchmark just to make sure these constructs do not yield any surprising behaviors while we are at it. Of course, with enough try/catch/finally blocks you can have a very convoluted control flow, but you can have the same with lots of branches!
+////
+
+Der Kontrollfluss eines throw-catch-finally wird oft durch Inlining gut optimiert, falls man viele davon verschachtelt, erhält man ein ähnliches Verhalten wie bei tief verschachtelten Verzweigungen.
+Beim Inlining wird ggf. die Handhabung der Exception durch die JVM wegoptimiert zu einem einfachen Return (wenn unser Exception-Handler nichts spektakuläres macht).
+Abhängig von der Inlining-Tiefe des Callstacks (kann durch `-XX:MaxInlineLevel=` beeinflusst werden), passiert auch kein _stack unwinding_ mehr für diese Teile der Aufrufhierarchie.
+
+=== Compiler-Flags
+
+
+
+=== Fazit
+
+Die Laufzeit einer Exception hat zwei Komponenten - einmal die Erzeugung des Stacktraces beim Erzeugen, und dass Ablaufen der Aufrufhierarchie bis zur Handhabung.
+Beides lässt sich nur bedingt kontrollieren.
+Die eigene Methode kann tief in einer Anwendung gerufen werden, und die Handhabung der Exception weit draussen erfolgen, was ja eigentlich auch empfohlen wird.
+
+Wenn man Exceptions nicht für den Kontrollfluss einsetzt, sondern sie wirkliche, seltene Ausnahmen (1:10000) darstellen, werden sie von der JVM wirklich gut optimiert und performant gehandhabt.
+Und dann sind die Laufzeitimplikationen auch vernachlässigbar.
+
+////
+Truly exceptional exceptions are beautifully performant. If you use them as designed, and only communicate the truly exceptional cases among overwhelmingly large number of non-exceptional cases handled by regular code, then using exceptions is the performance win.
+
+The performance costs of exceptions have two major components: stack trace construction when Exception is instantiated, and stack unwinding during Exception throw.
+
+Stack trace construction costs are proportional to stack depth at the moment of exception instantiation. That is already bad, because who on Earth knows the stack depth at which this throwing method would be called? Even if you turn off the stack trace generation and/or cache the exceptions, you can only get rid of this part of the performance cost.
+
+Stack unwinding costs depend on how lucky we are with bringing the exception handler closer in the compiled code. Carefully structuring the code to avoid deep exception handlers lookup is probably helping us get more lucky.
+
+Should we eliminate both effects, the performance cost of exceptions is that of local branch. No matter how beautiful it sounds, that does not mean you should use Exceptions as the usual control flow, because in that case you are at the mercy of optimizing compiler! You should only use them in truly exceptional cases, where the exception frequency amortizes the possible unlucky cost of raising the actual exception.
+
+The optimistic rule-of-thumb seems to be 10-4 frequency for exceptions is exceptional enough. That of course depends on the heavy-weightness of the exceptions themselves, the exact actions taken in exception handlers, etc.
+////
+
+
+
+=== Referenzen
+
+* [Shipilev] https://shipilev.net/blog/2014/exceptional-performance/
+* [Bloch] Joshua Bloch, Effective Java, 3rd Edition, Addison-Wesley
+* [Janssen] Thorben Janssen, 9 Best Practices to Handle Exceptions in Java, https://dzone.com/articles/9-best-practices-to-handle-exceptions-in-java

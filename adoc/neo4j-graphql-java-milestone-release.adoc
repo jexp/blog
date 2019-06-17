@@ -1,0 +1,130 @@
+= First Milesone Release of the GraphQL to Cypher Transpiler: neo4j-graphql-java
+
+image::https://github.com/neo4j-graphql/graphql-community/raw/master/images/neo4j-graphql-logo.png[float=right]
+
+If you want to use GraphQL with Neo4j from any JVM based web application or API, this library helps you to use your schema to transpile the query to Cypher.
+Because it's much more fun, I wrote it in Kotlin using graphql-java as a base library.
+
+We have learned a lot in the last 2 years of integrating GraphQL with Neo4j, especially how easy it is to translate GraphQL to Cypher.
+Now GRANDstack.io, neo4j-graphql-js and the original server extension offer different ways of using GraphQL with a Graph Database backend.
+
+And we're really happy how many different projects and companies are already using these integrations and hope that this JVM one will make it easier for even more enterprises to jump onboard the GraphQL train.
+
+== Why
+
+We got questions from users on the JVM that wanted to have the same freedom as you get with neo4j-graphql-js, i.e. using your own webapp, defining your own resolvers for subsets of the schema.
+And the server extension was written at a time when graphql-java didn't have a schema model, so I had to build my own.
+
+All of these are perfectly good reasons for separating the transpiler from the server extension and releasing it as a separate library.
+So you can use it from any JVM language: Java, Kotlin, Clojure, Scala, Groovy, Frege etc and any web-framework.
+The plan is also to replace the transpiler in the plugin with just the dependency to this library, and reducing the plugin to some minimal boilerplate for serving the API.
+
+The resulting Cypher statements and parameter maps can then be executed by Neo4j either using the Java driver, the Http-API or even the embedded database.
+
+== How does it work?
+
+The transpiler is stateless, it's just transforming inputs into outputs based on the schema.
+
+It works by inspecting the _result type_ of the given _query_ and then resolves _query arguments_ and selected _output fields_ based on that _object type_ taken from the GraphQL schema.
+Scalar _output fields_ are mapped to properties and accessed directly.
+Fields with _object type types_ are treated as a relationships in the graph (they need an `@relation` directive for relationship-type and direction mapping).
+
+While doing this, query and field _arguments_ are evaluated:
+
+- `first, offset` turned into `LIMIT, SKIP`
+- `orderBy: [name_asc]` turned into `ORDER BY person.name ASC`
+- scalar fields turned into equality comparisons, e.g. `name='Jane'`
+- `filter` fields allow deeply nested filtering, including on related entities
+
+.For this schema
+[source,graphql]
+----
+type Person {
+    name: String
+    age: Int
+    follows: [Person] @relation(name:"FOLLOW",direction:"OUT")
+}
+type Query {
+    person : [Person]
+}
+----
+
+.and this query
+----
+{ p:person(name:"Jane") { 
+  age
+  follows { 
+    name
+    age 
+} } }
+----
+
+.we get this Cypher query
+----
+MATCH (p:Person) 
+WHERE p.name = $pName 
+RETURN p { .age, 
+           follows:[(p)-[:FOLLOWS]->(pFollows:Person) 
+                  | pFollows { .name, .age }]} 
+AS p
+----
+
+.and these parameters
+----
+{pName:"Jane"}
+----
+
+The process is explained in more https://raw.githubusercontent.com/neo4j-graphql/neo4j-graphql-java/readme.adoc[details in the docs].
+
+== Features
+
+include::https://raw.githubusercontent.com/neo4j-graphql/neo4j-graphql-java/master/readme.adoc[lines=159..183]
+
+== How do I use it?
+
+You just add a dependency to your project, currently: https://search.maven.org/artifact/org.neo4j/neo4j-graphql-java/1.0.0-M01/jar[`org.neo4j:neo4j-graphql-java:1.0.0-M01`].
+
+Then you take a String with your schema information and pass it to `SchemaBuilder.buildSchema(schema)`.
+The resulting `GraphQL` object is passed to the `Translator` constructor, whose `translate(graphqlQuery,params)` method returns a List of `Cypher` objects.
+Each of those has a `query` and `params` field.
+
+== Demo
+
+To have a minimalistic, self-contained demo, I used this Groovy-script with `@Grab` annotations to fetch the 4 dependencies:
+
+1. `spark-java` a lightweight webserver
+2. `neo4j-graphql-java` our transpiler libary
+3. `neo4j-java-driver` the bolt driver to connect to neo4j
+4. Google's `Gson` library for JSON parsing and formatting
+
+Then I have a single endpoint which bascially
+
+1. takes a query from a JSON request body 
+2. transforms it into Cypher
+3. executes the Cypher statement with parameters against Neo4j
+4. returns the results to the web-response
+
+[source,groovy]
+----
+include::https://raw.githubusercontent.com/neo4j-graphql/neo4j-graphql-java/master/docs/Server.groovy[]
+----
+
+If you run the demo with: `groovy Server.groovy` it will download the dependencies and start a GraphQL endpoint on http://localhost:4567/graphql
+
+Which you then can use with, e.g. GraphiQL or GraphQL Playground.
+
+image::https://github.com/neo4j-graphql/neo4j-graphql-java/raw/master/docs/graphiql.jpg[]
+
+
+This demo doesn't include error handling or serving other GraphQL queries like the metadata inspection queries (which means no schema + docs is rendered in GraphiQL).
+I will add a more complete server example for the next milestone release.
+
+*I need your help:* if you have a favorite web-framework, I'd love to take a pull request adding a demo from you, you can use the https://github.com/neo4j-graphql/neo4j-graphql-java/tree/master/docs[existing ones] as baseline.
+
+I can think of adding demos for: spring-boot, micronaut, vert.x, ktor, play, compojure, luminus, ratpack, undertow and others.
+
+== Feedback
+
+For the first milestone release, I added minimal https://github.com/neo4j-graphql/neo4j-graphql-java[documentation to the readme], there is more to come.
+
+I would love if you'd try it out and provide feedback in the form of https://github.com/neo4j-graphql/neo4j-graphql-java/issues[GitHub issues].
