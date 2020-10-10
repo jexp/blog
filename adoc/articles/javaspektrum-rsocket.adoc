@@ -2,7 +2,7 @@
 
 Sockets sind ein integraler Bestandteil der Kommunikation von Prozessen, sowohl lokal auf einem Rechner aber insbesondere zwischen Maschinen über Netzwerkprotokolle.
 
-Mit Rsocket.io ist seit 20xx ein Framework verfügbar dass die Socketprogrammierung mit dem Paradigma des "reaktiven Programmierung" (HungerXX) verknüpft.
+Mit Rsocket.io ist seit 2015 ein Framework verfügbar dass die Socketprogrammierung mit dem Paradigma des "reaktiven Programmierung" (HungerXX) verknüpft.
 
 Es bietet ein "point-to-point" Applikations-Binärprotokoll auf der OSI-Schicht 5/6 für verschiedene Transportmechanismen von direktem TCP bis zu Websockets und Aeron mit besonderem Fokus auf nicht-blockierende Operationen.
 
@@ -18,7 +18,7 @@ Folgende Kommunkationsmodelle werden unterstützt:
 `Publisher<Payload> output = socketClient.requestChannel(Publisher<Payload> input)`
 
 Dabei werden Nachrichtenpakete asynchron über eine *einzige* Verbindung (Connection) ausgetauscht.
-Länger laufende Interaktionen (Sessions) können wiederaufgenommen werden, was besonders für mobile Anwendungen interessant ist, deren Konnektivität nicht immer stabil ist.
+Länger laufende Interaktionen (Sessions) können wiederaufgenommen werden, was besonders für mobile Anwendungen, deren Konnektivität nicht immer stabil ist, interessant ist.
 
 Die bekannten Mechanismen und APIs des reaktiven Programmiermodells, wie Observable, Publisher, Subscriber abstrahieren die darunterliegende Implementierung und bieten Eigenschaften wie Komposition, Flow-Control, Backpressure, Fehlerbehandlung usw. an.
 
@@ -27,6 +27,7 @@ Im Dokument zur Motivation [RSocketMotivation] werden die Ideen und Gründe für
 Ein paar interessante Aspekte daraus sind:
 
 * Netzwerkkommunikation ist asynchron, RSocket übernimmt das in die Anwendungsschicht
+// ^^Was "das"? Synchronisierung?
 * Lose-gekoppelte, nachrichtenbasierte System sind skalierbarer und robuster
 * Latenz und Resourceneffizienz sind Hauptgründe
 * Binärprotokoll zur effizienteren Resourcennutzung
@@ -38,14 +39,15 @@ Ein paar interessante Aspekte daraus sind:
 * Multiplexing über eine einzelne Netzwerkverbindung ist fairer gegenüber anderen Anwendungen
 * Frühzeitiger Abbruch aller Arten von Verbindungen ermöglicht zeitnahe Resourcenfreigabe
 
-Traditionell ist Socketprogrammierung in Java eine "synchrone" Angelegenheit, wo ein Server auf einem Port lauscht und bei Zustandekommen einer Verbindung mit einem Client die Verarbeitung des Datenaustauschs an einen Thread delegiert. (siehe Listing 1)
+Traditionell ist Socketprogrammierung in Java eine "synchrone" Angelegenheit, bei der ein Server auf einem Port lauscht und bei Zustandekommen einer Verbindung mit einem Client die Verarbeitung des Datenaustauschs an einen Thread delegiert. (siehe Listing 1)
 
-Dabei ist während Schreibens auf den Socket der Thread blockiert sobald der Netzwerkpuffer voll ist, und die Bytes die Reise übers Netzwerk antreten müssen.
-Beim Lesen wird blockiert sobald der Netzwerkpuffer leer ist, und auf neue Daten gewartet werden muss.
+Dabei ist während Schreibens auf den Socket der Thread blockiert sobald der Netzwerkpuffer voll ist und die Bytes die Reise übers Netzwerk antreten müssen.
+Beim Lesen wird blockiert sobald der Netzwerkpuffer leer ist und auf neue Daten gewartet werden muss.
 
-Da dabei ein ganzer Thread (halbe CPU) in Anspruch genommen wird, ist die ganze Angelegenheit nicht sehr skalierbar.
+// "Halbe CPU"?
+Da dabei ein ganzer Thread (halbe CPU) in Anspruch genommen wird, ist die ganze Angelegenheit nicht sehr skalierbar. 
 
-Seit Java X gibts es zwar NIO (non-blocking-IO) aber das ist bei der Socket-Programmierung nur bedingt angekommen.
+Seit Java 1.4 gibts es zwar NIO (non-blocking-IO) aber das ist bei der Socket-Programmierung nur bedingt angekommen.
 Es wird zwar z.B. in Netty für "pipelined processing" genutzt, wo ähnlich wie in Node.js die Verarbeitung in einem "Event-Loop" gehandhabt wird.
 Blockierende Operationen stoppen keinen Thread, sondern werden während ihrer Wartezeit auf "Halde" gelegt und melden sich beim Verfügbarkeit von Daten mittels "select" (TODO) zurück.
 
@@ -85,10 +87,12 @@ serverSocket.close();
 Um RSocket in Java zu nutzen, benötigt man zwei Bibliotheken von Maven Central `io.rsocket:rsocket-core` und `io.rsocket:rsocket-transport-netty` für den asynchronen Transportkanal über Netty.
 
 ====
-RSocket in Java benutzt die Reactor Bibliothek von Spring/Pivotal/VMWare für reaktive Implementierung,
-daher werden (leider) `Mono` und `Flux` auch in der API verwendet.
+RSocket in Java benutzt die Project-Reactor Bibliothek von VMWare für reaktive Implementierung,
+daher werden `Mono` und `Flux` auch direkt in der API verwendet.
 Dabei stellt ein `Flux<T>` einen reaktive Quelle von Nachrichten `T` dar, und bietet viele Operationen (`map, filter, ...`) darauf an. 
 Ein `Mono<T>` hat dagegen maximal ein Element.
+Die beiden anderen reaktiven Bibliotheken - SmallRye Mutiny und RX Java 2 - stellen Adapter-Typen für Project-Reactor zur Verfügungen
+bzw. können mit den Interfaces der Reactive-Streams-API umgehen.
 ====
 
 Damit können dann Client und Server-Anwendungen implementiert werden. 
@@ -98,40 +102,55 @@ Hier ein Beispiel für einen Client, er benutzt einen [DemoServer] `https://rsoc
 .RSocket-Java Client
 [source,java]
 ----
-// io.rsocket:rsocket-core:1.1.0-M2
-// io.rsocket:rsocket-transport-netty:1.1.0-M2
-// benötigt spring-milestone repository für reactor
+// io.rsocket:rsocket-core:1.0.2
+// io.rsocket:rsocket-transport-netty:1.0.2
 import io.rsocket.Payload;
-import io.rsocket.RSocket;
 import io.rsocket.core.RSocketConnector;
 import io.rsocket.transport.netty.client.WebsocketClientTransport;
 import io.rsocket.util.DefaultPayload;
 import reactor.core.publisher.Flux;
 
 import java.net.URI;
+import java.util.concurrent.CountDownLatch;
 
-var demoServer = URI.create("wss://rsocket-demo.herokuapp.com/rsocket");
-// Adresse für die Transportschicht
-var ws = WebsocketClientTransport.create(demoServer);
-// Cient verbinden, hier blockierend, normalerweise asynchron
-var client = RSocketConnector.connectWith(ws).block();
+public class Demo {
+	public static void main(String...a) {
+		var demoServer = URI.create("wss://rsocket-demo.herokuapp.com/rsocket");
+		// Adresse für die Transportschicht
+		var ws = WebsocketClientTransport.create(demoServer);
+		// Cient verbinden, hier blockierend, normalerweise asynchron
+		var client = RSocketConnector.connectWith(ws).block();
 
-try {
-   var payload = DefaultPayload.create("peace");
-   // Stream anfordern
-   Flux<Payload> s = client.requestStream(payload);
+		try {
+			var payload = DefaultPayload.create("peace");
+			// Stream anfordern
+			Flux<Payload> s = client.requestStream(payload);
 
-   // 10 Elemente empfangen und als UTF-8 Strings ausgeben
-   s.take(10).doOnNext(p -> System.out.println(p.getDataUtf8()))
-   // terminale Operation triggered den eigentlichen Empfang, 
-   // auch hier blockierend bis die 10 Nachrichten angekommen sind
-   .blockLast();
-} finally {
-  client.dispose();
+			// Wir brauchen eine Barriere, die solange blockiert, bist
+			// der Stream fertig ist.
+			var latch = new CountDownLatch(1);
+
+			// 10 Elemente empfangen und als UTF-8 Strings ausgeben
+			s.take(10)
+				.doOnComplete(latch::countDown) // Barriere öffnen, sobald der Stream "fertig" ist
+				.subscribe(p -> System.out.println(p.getDataUtf8())); // Ohne subscription fließen keine Daten.
+
+			// Ohne Barriere wäre das Programm vor dem Stream zu Ende.
+			latch.await();
+
+		} catch (InterruptedException e) {
+		} finally {
+			client.dispose();
+		}
+	}
 }
 ----
 
-Die weiteren Client-Server Beispiele sind von [Baeldung] entnommen, aber auf die aktuellen RSocket APIs angepasst.
+In den folgenden Beispielen wird zusätzlich das "Reactor-Test" Modul, ebenfalls aus Project-Reactor benutzt.
+Es stellt einen Step-Verifier zur Verfügung, der explizite, blockierende Calls vermeidet und so gar nicht 
+erst in Versuchung führt, doch wieder blockierenden Code zu Schreiben.
+Hier geht es zur Dokumentation https://projectreactor.io/docs/core/release/reference/#testing, die Koordinaten lauten 
+`io.projectreactor:reactor-test:3.3.9.RELEASE`
 
 == Server
 
@@ -146,7 +165,7 @@ RSocketServer.create(SocketAcceptor.with(new RSocket(){}))
       .block();
 ----
 
-Für einen echten Server wollen wir das Interface natürlich implementieren.
+Für einen echten Server müssen wir das Interface natürlich implementieren.
 Zuerst einmal für ein simples Echo Request-Response.
 
 == Request Response
@@ -156,19 +175,36 @@ Damit können diese ggf. bereitgestellt werden ohne, dass Kopien angelegt werden
 
 [source,java]
 ----
-new RSocket {
-   // Mono statt Flux -> einzelne Antwort (Response)
-   public Mono<Payload> requestResponse(Payload payload) {
-      try {
-         // Hilfsmethode um String aus Daten zu erzeugen
-         var text = payload.getDataUtf8().substring(1).toUpperCase();
-         // Und als Echo zurückgeben
-         return Mono.just(DefaultPayload.create(text));
-      } catch (Exception x) {
-         // Fehler werden auch als Nachricht zurückgeschickt
-         return Mono.error(x);
-      }
-   }  
+import io.rsocket.Payload;
+import io.rsocket.RSocket;
+import io.rsocket.SocketAcceptor;
+import io.rsocket.core.RSocketServer;
+import io.rsocket.transport.netty.server.TcpServerTransport;
+import io.rsocket.util.DefaultPayload;
+import reactor.core.publisher.Mono;
+
+public class Server {
+	public static void main(String...a) {
+		var handler = new RSocket() {
+			// Mono statt Flux -> einzelne Antwort (Response)
+			@Override
+			public Mono<Payload> requestResponse(Payload payload) {
+				try {
+					// Hilfsmethode um String aus Daten zu erzeugen
+					var text = payload.getDataUtf8().substring(1).toUpperCase();
+					// Und als Echo zurückgeben
+					return Mono.just(DefaultPayload.create(text));
+				} catch (Exception x) {
+					// Fehler werden auch als Nachricht zurückgeschickt
+					return Mono.error(x);
+				}
+			}
+		};
+
+		RSocketServer.create(SocketAcceptor.with(handler))
+			.bind(TcpServerTransport.create("localhost", 7000)).block() // Binde an Port 7000
+			.onClose().block(); // Starte den Server
+	}
 }
 ----
 
@@ -176,18 +212,30 @@ Unser Client ist auch nicht kompliziert, er konstruiert einen `RSocket`, über d
 
 [source,java]
 ----
-socket = RSocketConnector.create()
-   .connect(TcpClientTransport.create("localhost", 7000))
-   .block();
+import io.rsocket.Payload;
+import io.rsocket.core.RSocketConnector;
+import io.rsocket.transport.netty.client.TcpClientTransport;
+import io.rsocket.util.DefaultPayload;
+import reactor.test.StepVerifier;
 
-var text = "Hello RSocket!";
+public class Client {
+	public static void main(String... a) {
+		var socket = RSocketConnector.create()
+			.connect(TcpClientTransport.create("localhost", 7000))
+			.block();
 
-var result = socket.requestResponse(DefaultPayload.create(text))
-      .map(Payload::getDataUtf8)
-      .log()
-      .block();
+		var text = "Hello RSocket!";
 
-socket.dispose();
+		socket.requestResponse(DefaultPayload.create(text))
+			.map(Payload::getDataUtf8)
+			.log()
+			.as(StepVerifier::create)
+			.expectNextCount(1)
+			.verifyComplete();
+
+		socket.dispose();
+	}
+}
 ----
 
 Wenn wir unserer Server mit einem leeren String aufrufen, führt das zu einem Fehler, der im Client mittels `onError` behandelt wird.
@@ -210,36 +258,38 @@ ApplicationErrorException (0x201): begin 1, end 0, length 0
 Request-Stream ist der Modus, der im reaktiven Umfeld bevorzugt wird.
 Dann wird kein `Mono` sondern ein `Flux<Payload>` zurückgeliefert.
 In unserem Fall zerlegen wir den String in seine Bestandteile und geben sie als sortierten Stream zurück.
+Das folgende Listing zeigt nur noch den Handler, nicht mehr den orchestrierenden Code.
 
 
 [source,java]
 ----
-new RSocket {
-   public Flux<Payload> requestStream(Payload payload) {
-      return Flux.fromStream(
-         payload.getDataUtf8().chars().sorted()
-                .mapToObj(Character::toString))
-         .map(DefaultPayload::create);
-   }
-}
+var handler = new RSocket() {
+	@Override
+	public Flux<Payload> requestStream(Payload payload) {
+		return Flux.fromStream(
+			payload.getDataUtf8().chars().sorted()
+				.mapToObj(Character::toString))
+			.map(DefaultPayload::create);
+	}
+};
 ----
 
 Der Client sieht fast genauso aus wie vorher, wir transformieren nur den empfangenen Flux wieder zurück in einen String.
 
 [source,java]
 ----
-public String streamText(String text) {
-   return socket
-            .requestStream(DefaultPayload.create(text))
-            .map(Payload::getDataUtf8)
-            .log()
-            .collectList()
-            .map(chars -> String.join("", chars))
-            .block();
-}
+socket
+	.requestStream(DefaultPayload.create(text))
+	.map(Payload::getDataUtf8)
+	.log()
+	.collectList()
+	.map(chars -> String.join("", chars))
+	.as(StepVerifier::create)
+	.expectNext(" !HRSceeklloot")
+	.verifyComplete();
 ----
 
-Das Ergebnis von `Hello RSocket!` ist dann: `!HRSceeklloot`, passend zu Halloween.
+Das Ergebnis von `Hello RSocket!` ist dann: ` !HRSceeklloot`, passend zu Halloween.
 
 == Fire and Forget
 
@@ -248,15 +298,18 @@ Informative Nachrichten auf deren Ergebnis man nicht warten will, und die auch m
 .Fire and Forget Server
 [source,java]
 ----
-SubmissionPublisher<Payload> eventPublisher = acquireEventPublisher();
+var handler = new RSocket() {
 
-@Override
-public Mono<Void> fireAndForget(Payload payload) {
-   System.err.printf("Received fire-and-forget %d%n",payload.getData().getInt());
-   // weiterleiten, z.B. zu Event Benachrichtigungen
-   eventPublisher.submit(payload);
-   return Mono.empty();
-}
+	SubmissionPublisher<Payload> eventPublisher = new SubmissionPublisher<>();
+
+	@Override
+	public Mono<Void> fireAndForget(Payload payload) {
+		System.err.printf("Received fire-and-forget %d%n",payload.getData().getInt());
+		// weiterleiten, z.B. zu Event Benachrichtigungen
+		eventPublisher.submit(payload);
+		return Mono.empty();
+	}
+};
 ----
 
 Im Client ist ähnlich wie bisher die entsprechende Methode des RSocketClient interfaces aufzurufen.
@@ -264,22 +317,41 @@ Im Client ist ähnlich wie bisher die entsprechende Methode des RSocketClient in
 .Fire and Forget Client
 [source,java]
 ----
-/** Send numeric value every 50ms */
-public void sendData() {
-   ThreadLocalRandom rnd = ThreadLocalRandom.current();
-   var data = IntStream.generate(rnd::nextInt).boxed();
-      ByteBuffer buffer = ByteBuffer.allocate(4);
-      Flux.fromStream(data)
-         .delayElements(Duration.ofMillis(50))
-         .take(25)
-         .log()
-         .map(d -> DefaultPayload
-              .create(buffer.clear().putInt(d).rewind()))
-         .flatMap(socket::fireAndForget)
-         .blockLast();
+import io.rsocket.core.RSocketConnector;
+import io.rsocket.transport.netty.client.TcpClientTransport;
+import io.rsocket.util.DefaultPayload;
+import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
+
+import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.IntStream;
+
+public class Client3 {
+	public static void main(String... a) {
+		var socket = RSocketConnector.create()
+			.connect(TcpClientTransport.create("localhost", 7000))
+			.block();
+
+		var random = ThreadLocalRandom.current();
+		var data = IntStream.generate(random::nextInt).boxed();
+		ByteBuffer buffer = ByteBuffer.allocate(4);
+		// Alle 50 millisekunden werden zufällige Daten geschickt
+		Flux.fromStream(data)
+			.delayElements(Duration.ofMillis(50))
+			.take(25)
+			.log()
+			.map(d -> DefaultPayload.create(buffer.clear().putInt(d).rewind()))
+			.flatMap(socket::fireAndForget)
+			.as(StepVerifier::create)
+			// Wir können nichts erwarten, da `fireAndForget` leere Monos zurück gibt.
+			.verifyComplete();
+
+		socket.dispose();
+	}
 }
 ----
-
 
 == Bidirektionaler Channel
 
@@ -306,6 +378,7 @@ In response, we return a different Flux stream back to the client. This stream i
 
 Da RSocket auf Reactor basiert und VMWare/Pivotal auch stark in der RSocket Implementierung involviert waren, wundert es nicht, dass das Spring Framework mit Spring Boot, eine RSocket Implementierung von Hause aus mitbringt.
 
+// Hier in dem Satz fehlt wohl noch was.
 Man kann sich bei https://start.spring.io sich die notwendigen Dependencies gleich 
 
 ////
