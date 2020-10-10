@@ -1,0 +1,651 @@
+== Keine Angst vorm AST dank Java Parser
+:img: ../../img
+
+Beim JUG Saxony Day, unserer alljährlichen JUG Konferenz, hatten wir ein interessantes Gespräch über die Möglichkeiten der JavaParser Bibliothek.
+Ich hatte sie bisher nur für das Parsen und Visualiseren von Quellcode innerhalb von jQAssistant benutzt und ich wusste um die API zu Inspektion und Abfragen der geparsten Informationen.
+
+Mein Freund Jens Nerche erzählte mir aber über den Einsatz von JavaParser für die Modifikation von geparstem Code, also eine Art automatisches Refactoring, was ich natürlich sehr interessant fand.
+Damit einhergehend ist zu erwähnen dass JavaParser in diesem Kontext das originale Layout des Quelltextes erhalten kann, also nur die minimalen Änderungen des Refactorings im generierten Code erscheinen.
+Und nicht zuletzt kann man JavaParser auch einsetzen, um neuen JavaCode zu generieren, zum Beispiel aus einem semantischen Modell einer DSL.
+
+Da ich denke, dass so ein Werkzeug für alle Leser nützlich sein könnte, möchte ich es in dieser Kolumne etwas näher vorstellen.
+
+Java Parser ist ein Open-Source Projekt, man hat als Nutzer die freie Wahl zwischen der LGPL als auch der Apache v2 Lizenz.
+Da das Tool meist während des Entwicklungsprozesses und nicht während der Laufzeit von Projekten eingesetzt wird, ist das nur bedingt relevant.
+
+Es besteht aus einem Parser der einen Abstrakten Syntaxbaum (AST) aufbaut, den man mittels Methoden direkt auf den AST-Knoten navigieren und inspizieren kann.
+Um größere Analysen typsicher vorzunehmen, wird aber der Visitor-Ansatz empfohlen, für den in JavaParser verschiedene Basisklassen vorliegen.
+Dabei wird zwischen modifizierenden und nur-lesenden Visitoren unterschieden, die während ihrer Traversierung jeweils auch Zustandsinformationen aufsammeln können.
+Für Modifikationen können an jedem AST-Knoten mittels entsprechender APIs neue Attribute oder sogar neue Syntax-Knoten eingefügt oder entfernt werden.
+
+Um den AST wieder textuell auzugeben, kann man zwischen einem konfigurierbaren "Pretty-Printing" oder einer Wiederherstellung des Ursprungslayouts wählen.
+
+=== Syntaxbaum
+
+Jeder Quelltext kann als hierarchischer Baum verschiedener, geschachtelter Elemente (Knoten) dargestellt werden, wobei bestimmte Informationen implizit in der Struktur gehalten werden (z.B. Klammern, Operatoren oder `throws`), andere wie Modifikatoren können als Attribute abgelegt sein.
+
+Komplexe Knoten stellen Klassen, Methoden, Variablendeklarationen und Ausdrücke dar, die wiederum aus Knoten bestehen.
+Terminale Elemente oder Blattknoten sind zum Beispiel Namen, Typen oder Literale.
+Dieser Baum ergibt sich direkt aus den Regeln der Grammatik der Sprache.
+
+Für meine Tests benutze ich praktischerweise `jshell` mit einem jar-Bundle aus dem [javasymbolsolver-maven-sample] `jshell -c target/javasymbolsolver-maven-sample-1.0-SNAPSHOT-shaded.jar`
+Im Listing 1 sieht man, wie die AST-Struktur der Klasse `A` ausgegeben werden kann.
+
+.Beispiel Ausgabe AST
+[source,java]
+----
+import com.github.javaparser.*;
+import com.github.javaparser.ast.*;
+
+var cu = StaticJavaParser.parse("class A { { System.out.println(40+2); } }");
+
+void print(Node node, int level) {
+  System.out.printf("%"+level+"s %s%n","",node.getClass().getSimpleName());
+  node.getChildNodes().forEach(c -> print(c, level+1));
+}
+print(cu,1);
+
+// Ausgabe Syntaxbaum
+CompilationUnit
+ ClassOrInterfaceDeclaration
+  SimpleName
+  InitializerDeclaration
+   BlockStmt
+    ExpressionStmt
+     MethodCallExpr
+      FieldAccessExpr
+       NameExpr
+        SimpleName
+       SimpleName
+      SimpleName
+      BinaryExpr
+       IntegerLiteralExpr
+       IntegerLiteralExpr
+----
+
+=== Parser
+
+Der einfachste Parser im Paket ist der `StaticJavaParser` dessen `parse` Methode man mit Strings, Dateien, Readern usw. aufrufen kann und als Ergebnis eine `CompilationUnit` erhält.
+
+.Beispiel für das rekursive Parsen von Java Dateien
+[source,java]
+----
+// find /Users/mh/d/java/neo/neo4j -name "*.java" | wc -l -> 7638 files
+var sourceDir = "/Users/mh/d/java/neo/neo4j";
+
+import java.nio.*;
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+var matcher = FileSystems.getDefault().getPathMatcher("glob:**.java");
+var fileNames = new ArrayList<Path>();
+var start = System.currentTimeMillis();
+Files.walkFileTree(Paths.get(sourceDir), new SimpleFileVisitor<Path>() {
+    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+        if (matcher.matches(file)) fileNames.add(file);
+        return FileVisitResult.CONTINUE;
+    }
+});
+
+List<CompilationUnit> files = fileNames.parallelStream()
+   .map(file -> { try { return StaticJavaParser.parse(file); } 
+                  catch(IOException ioe) { return null; } })
+   .filter(cu -> cu != null)
+   .collect(Collectors.toList());
+
+System.out.printf("%d files %d parsed in %d seconds%n",
+files.size(),fileNames.size(),
+TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()-start));
+
+// Ergebnis: 7638 files 7638 parsed in 88 seconds
+----
+
+Die `CompiliationUnit` steht für die Information, die aus einer Java-Datei gewonnen werden kann, also Paketdeklaration, Imports, alle Klassendefinitionen mit ihrem Variablen, Methoden und inneren Klassen sowie deren Bestandteilen.
+
+Jede `CompiliationUnit` ist auch ein Knoten (`Node`) des Syntaxbaums, stellt also dieselben Basismethoden wie die `Node` Superklasse bereit:
+
+////
+.Beispiel
+[source,java]
+----
+import com.github.javaparser.*;
+
+CompiliationUnit cu = StaticJavaParser.parse("class A {}");
+
+File file = new File("src/main/java/org/example/SpringBootApplication.java");
+CompiliationUnit cu =  StaticJavaParser.parse(file);
+----
+////
+
+Relevante Methoden der `Node`-Klasse:
+
+* Kommentare: `getAllContainedComments(), getComment(), getOrphanComments()`
+* Navigation: `getParentNode(), getParentNodeForChildren(), getChildNodes(), getChildNodesByType(), getNodesByType(type)`
+* Beispiel: `cu.getNodesByType(SimpleName.class) -> [A, System, out, println]`
+
+* Metadaten: `getMetaModel(), getDataKeys(), getData(key), getParsed()`
+* Bereiche: `getRange(), getBegin(), getEnd(), getTokenRange()`
+* Beispiel: `n.getRange() -> Optional[(line 1,col 1)-(line 1,col 41)]`
+
+Mit dieser API können wir die CompiliationUnit auch visuell als Graph rendern:
+
+.AST als Graphviz dot Datei ausgeben
+[source,java]
+----
+var graph = cu.getNodesByType(Node.class).stream()
+  .filter(n -> n.getParentNode().isPresent())
+  .map(n -> String.format("%s->%s", 
+       n.getParentNode().get().getClass().getSimpleName(),
+       n.getClass().getSimpleName()))
+  .collect(Collectors.joining( "\n", "digraph G {", "}" ));
+
+try (var fw = new FileWriter("graph.dot")) { fw.write(graph); }
+// dot graph.dot -Tpng -o graph.png && open graph.png
+----
+
+image::{img}/graph.png[width=400]
+
+Zusätzlich stehen in der `CompiliationUnit` noch folgende Informationen zur Verfügung, entsprechend ihrer Rolle in der Java-Sprachgrammatik:
+
+.Attribut-API in CompilationUnit
+[source,java]
+----
+getModule()
+getPackageDeclaration()
+getImports()
+getImport(index)                                     
+
+getPrimaryType()
+getPrimaryTypeName()
+getStorage()                      
+
+getAnnotationDeclarationByName(name)
+getClassByName(name)
+getEnumByName(name)
+getInterfaceByName(name)
+
+getTypes() -> List<ClassOrInterfaceDefinition>
+getType(index)
+----
+
+Adäquat dazu haben die anderen, konkreten AST-Knoten spezielle Methoden zum Lesen und Veränderung ihres Zustands und Struktur.
+
+////
+accept(                                addAnnotationDeclaration(              addClass(                              addEnum(                               
+addImport(                             addInterface(                          addOrphanComment(                      addType(                               
+clone()                                containsData(                          containsWithin(                        equals(                                
+findAll(                               findAncestor(                          findCompilationUnit()                  findFirst(                             
+findRootNode()                         getAllContainedComments()              getAnnotationDeclarationByName(        getBegin()                             
+getChildNodes()                        getChildNodesByType(                   getClass()                             getClassByName(                        
+getComment()                           getComments()                          getData(                               getDataKeys()                          
+getEnd()                               getEnumByName(                         getImport(                             getImports()                           
+getInterfaceByName(                    getMetaModel()                         getModule()                            getNodesByType(                        
+getOrphanComments()                    getPackageDeclaration()                getParentNode()                        getParentNodeForChildren()             
+getParsed()                            getPrimaryType()                       getPrimaryTypeName()                   getRange()                             
+getStorage()                           getTokenRange()                        getType(                               getTypes()                             
+hashCode()                             isRegistered(                          notify()                               notifyAll()                            
+notifyPropertyChange(                  recalculatePositions()                 register(                              registerForSubtree(                    
+remove(                                removeComment()                        removeData(                            removeForced()                         
+removeModule()                         removeOrphanComment(                   removePackageDeclaration()             replace(                               
+setBlockComment(                       setComment(                            setData(                               setImport(                             
+setImports(                            setLineComment(                        setModule(                             setPackageDeclaration(                 
+setParentNode(                         setParsed(                             setRange(                              setStorage(                            
+setTokenRange(                         setType(                               setTypes(                              stream(                                
+toString(                              tryAddImportToParentCompilationUnit(   unregister(                            wait(                                  
+walk(                                  
+////
+
+=== Abfragesprache
+
+Durch die Unterstützung der Java-Streams API auf allen Elementen kann man mit deren Methoden wie `filter, map, anyMatch` usw. eine relative flüssige Abfragedefinition erstellen.
+
+Hier im Beispiel finden wir alle Testklassen in unserem Quellcodeverzeichnis und analysieren dann ihre `@Test` annotierten Methoden auf das Fehlen eines Methodenaurufs der mit "assert" beginnt, d.h. Testmethoden ohne Assertions.
+
+Das ist eine relevante, komplexe Suche, die in echten Projekten oft Abgründe zutage bringt und mit den Mitteln der IDE schwer zu handhaben ist.
+Man kann ein Tool wie [jQAssistant] nutzen, um solche und andere Validierungen in den Buildprozess zu integrieren.
+
+Ohne echte Typeinformationen können wir aber nicht feststellen aus welchen Paketen bzw. Klassen die Annotationen und aufgerufenen Methoden stammen, daher nur die Überprüfung auf textuelle Übereinstimmung.
+Dazus würde der JavaSymbolSolver genutzt, der weiter unten vorgestellt wird.
+
+.Beispiel Alle Testmethoden ohne assert
+[source, java]
+----
+import com.github.javaparser.ast.body.*;
+import com.github.javaparser.ast.expr.*;
+
+var cu = StaticJavaParser.parse("import junit.*; class MyTest { @Test public void testAnswer() { assertEquals(42, 3*4+5*6); } @Test public void testUniverse() { /* assertNotNull(universe); */ } }");
+var files = Collections.singletonList(cu);
+
+// Anzahl Testklassen
+files.stream().flatMap( cu -> 
+        cu.getNodesByType(ClassOrInterfaceDeclaration.class).stream()
+       .filter( cls -> cls.getNameAsString().endsWith("Test") ) )
+     .count();
+
+// @Test annotierte Methoden einer Klasse
+cls.getMethods().stream().filter( m -> m.getAnnotationByName("Test").isPresent() )
+   .map(MethodDeclaration::getSignature)
+   .forEach(System.out::println);
+
+// @Test Methoden der "Test"klassen ohne "assert*" Aufrufe
+files.stream().flatMap( cu -> 
+        cu.getNodesByType(ClassOrInterfaceDeclaration.class).stream()
+       .filter( cls -> cls.getNameAsString().endsWith("Test") ) )
+       .flatMap( cls -> cls.getMethods().stream()
+           .filter( m -> m.getAnnotationByName("Test").isPresent() && 
+                    m.getBody().flatMap(b -> 
+                       b.findFirst(MethodCallExpr.class, 
+                           mc -> mc.getNameAsString().startsWith("assert")))
+                        .isEmpty()))
+           .map( m -> m.findAncestor(ClassOrInterfaceDeclaration.class).get()
+                .getNameAsString()+"."+m.getNameAsString())
+       .forEach(System.out::println);
+----
+
+// TODO Node.TreeTraversal
+
+=== Visitoren
+
+Ein Syntaxbaum ist ein komplexe Struktur mit vielen Detailinformationen in beliebig rekursiver Tieefe an denen man oft nicht einmal interessiert ist.
+Statt nun selbst manuell und mühselig sich durch diesen Baum zu navigieren, kann man die Visitor Infrastruktur von JavaParser nutzen.
+Diese stellen sicher, dass jede Stelle des Baums erreicht wird und man einen typsicheren "Callback" bekommt.
+Durch die Vielzahl existierender Typen im AST und in den Visitoren wird mit einem Adapter eine Basisimplementierung in der man nur relevante Methoden überschreiben muss.
+
+Jeder Visitor kann mit einem konfigurierbaren Typparameter ein Zustandsobjekt durch alle Aufrufe hindurchreichen, in dem man Informationen aggregieren oder Entscheidungskriterien festhalten bzw. zugreifbar machen kann.
+
+Wenn wir unser Beispiel auf einen Visitor umschreiben, können wir alle `@Test` annotierten Methoden, die keine Assertions enthalten in einer Liste aufsammeln.
+
+Es wird zwischen einem nur-lesenden `VoidVisitor<State>` Visitor der keine Modifikationen vornimmt und dem Gegenstück `ModifierVisitor<State>` unterschieden.
+Im letzteren kann jede Visitor-Methode einen "neuen" Zustand des Syntaxknotens zurückgeben in dem Modifikationen vorgenommen worden.
+
+.Visitornutzung für Aufsammeln relevanter Methoden
+[source,java]
+----
+import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+
+class NoAssertMethodVisitor extends VoidVisitorAdapter<List<MethodDeclaration>> {
+   public void visit(MethodDeclaration m, List<MethodDeclaration> missingAssertMethods) {
+       super.visit(m, missingAssertMethods);
+       if (m.getAnnotationByName("Test").isPresent() && 
+           m.getBody().flatMap(b -> 
+             b.findFirst(MethodCallExpr.class, 
+                         mc -> mc.getNameAsString().startsWith("assert")))
+           .isEmpty()) {
+          missingAssertMethods.add(m);
+       }
+   }
+}
+
+var missing = new ArrayList<MethodDeclaration>();
+var visitor = new NoAssertMethodVisitor();
+files.forEach(cu -> visitor.visit(cu, missing));
+----
+
+Es wird empfohlen, die Supermethode der Adapter aufzurufen, da über diese die Traversierung erfolgt.
+Das ist leider nicht das beste Design für einen Visitor, da normalerweise die Traversierung unabhängig von den Callbacks sein sollte, kann aber im Einzelfall auch nützlich sein, wenn man ganze Teilbäume ausblenden will.
+
+=== Kommentare
+
+Laut der Autoren der Bibliothek sind Kommentare unerwarteterweise das komplexeste Feature.
+Zum einen können sie überall im Quellcode stehen, und sind in der Sprachspezifikation keinem Grammatikelement explizit zugordnet.
+Zum anderen werden sie normalerweise von Parsern genau wie Leerräume und literale Token ignoriert.
+Da JavaParser aber auch zur Modifikation / Reproduktion von existierendem Code eingesetzt wird, sollten Kommentare erhalten werden.
+
+Im Allgemeinen werden Kommentare in Javadoc `+/** ... **/+` , Block `+/* ... */+` und Zeilenkommentare `+//...+` unterschieden.
+Kommentare enthalten auch Informationen welchem Bereich sie im Quelltext abdecken.
+
+Spannend ist, wie Kommentare anderen Syntaxelementen zugeordnet werden.
+Im Regelfall werden sie dem nächstfolgenden Syntaxelement `getCommentedNode` zugewiesen, dieses erhält dann auch einen Verweis auf den Kommentarknoten `getComment`.
+Falls es kein "nächstes" Element gibt oder ein Kommentar folgt, ist der aktuelle Kommentar verwaist ("orphan").
+Diese sind dann im übergeordneten Syntaxelement mit `getOrphanedComments` zugreifbar.
+
+Nur Zeilenkommentare die auf einer Zeile einem Syntaxelement folgen werden diesem Vorgänger zugewiesen, z.B. `int masse; // in Gramm`
+
+Vieles davon ist aber auch wieder konfigurierbar.
+
+.Bespiele Ausgabe von Kommentaren einer Datei
+[source,java]
+----
+cu.getAllContainedComments().forEach(c->
+System.out.printf("In %s: %d..%d type %s orphan %s%n%s%n",
+       c.findAncestor(ClassOrInterfaceDeclaration.class)
+        .map( cid -> cid.getNameAsString()).orElse("k.A."), 
+       c.getRange().get().begin.line,
+       c.getRange().get().end.line,
+       c.getClass().getSimpleName(),
+       c.isOrphan(),
+       c.getContent()))
+
+// Beispielausgabe:
+In k.A.: 1..1 type BlockComment orphan false
+ always true
+----
+
+=== Quelltext-Ausgabe
+
+Jeder Syntaxknoten kann mittels `toString()` in eine sinnvoll formatierte (und konfigurierbare) Textform überführt werden.
+Solange das für Anschauungszwecke, Code-Generierung oder temporäre Nutzung (z.b. vor Kompilierung) erfolgt, ist diese API das Mittel der Wahl.
+
+.Beispiel für automatische Neuformatierung bei Ausgabe
+[source,java]
+----
+import com.github.javaparser.*;
+
+var cu = StaticJavaParser.parse(
+   "class A { \n/* always true */ private int defaultValue = 42; \n" +
+   "public int answer(String question) { return defaultValue; }\n}");
+System.out.println(cu);
+
+// Ausgabe
+class A {
+
+    /* always true */
+    private int defaultValue = 42;
+
+    public int answer(String question) {
+        return defaultValue;
+    }
+}
+----
+
+Mittels der `PrettyPrinterConfiguration` kann dies Ausgabe angepasst werden, man kann sogar mit einem eigenen `PrettyPrintVisitor` die Darstellung bestimmter Programmteile ausblenden oder massiv verändern.
+Damit könnte man z.B. nur die Outline von Klassen rendern, ohne Methodenrümpfe.
+Für die Nutzbarkeit des ausgegebenen Quellcodes trägt man dann aber selbst die Verantwortung.
+
+.Konfiguration des Ausgabeformats
+[source,java]
+----
+import com.github.javaparser.printer.*;
+import com.github.javaparser.ast.body.*;
+import com.github.javaparser.ast.stmt.*;
+
+PrettyPrinterConfiguration conf = new PrettyPrinterConfiguration()
+.setIndentSize(1)
+.setIndentType(PrettyPrinterConfiguration.IndentType.SPACES)
+.setPrintComments(false);
+
+conf.setVisitorFactory(prettyPrinterConfiguration -> new PrettyPrintVisitor(conf) {
+     public void visit(BlockStmt body, Void nothing) { }
+});
+
+System.out.println(new PrettyPrinter(conf).print(cu));
+
+// Ausgabe
+class A {
+
+ private int defaultValue = 42;
+
+ public int answer(String question) 
+}
+----
+
+Für die Modifikation existierenden Codes möchte man oft so viel Originallayout wie möglich erhalten.
+Dazu nutzt JavaParser intern eine reichhaltigere Repräsentation des Codes, in dem alle Leerräume, Klammern, Einrückungen usw. als zusätzliche `Token` zwischen den Syntaxelementen gespeichert werden.
+
+Damit werden bei der Änderung bzw. Erweiterung von Knoten nur diese Elemente beeinflusst, alle anderen Formatierungen bleiben erhalten.
+Das führt zu einer Minimierung des Unterschieds zwischen Start- und Zielzustand.
+
+Neu hinzugefügte und veränderte Elemente werden mit dem "Pretty-Printer" formatiert.
+
+.Beispiel für exakte Wiederherstellung des Originallayouts
+[source,java]
+----
+import com.github.javaparser.printer.lexicalpreservation.*;
+
+LexicalPreservingPrinter.setup(cu); 
+System.out.println(LexicalPreservingPrinter.print(cu));
+
+// Ausgabe (genau wie der originale Quelltext)
+class A { 
+/* always true */ private int defaultValue = 42; 
+public int answer(String question) { return defaultValue; }
+}
+----
+
+=== Refactoring
+
+Für viele Refactorings sind Java IDEs gut geeignet und können diese sicher ausführen.
+JavaParser glänzt für komplexere Operationen, die potentiell mehrere punktuelle Änderungen über ein breites Spektrum von zu modifizierenden Stellen ausführen müssen.
+
+In unserem Beispiel wollen wir die schon gefundenen Methoden ohne Assertions mit einem "fail()" Aufruf versehen, so dass sie im nächsten Testlauf garantiert auffallen.
+Dazu können wir am Anfang des Methodenköpers einfach den Methodenaufruf einfügen und zusätzlich noch die Datei um den notwendigen Import ergänzen.
+Das kann zum einen über die hier gezeigte imperative API geschehen, aber auch über den erwähnten `ModifierVisitor`.
+
+.Beispiel für Veränderung des geparsten Codes
+[source,java]
+----
+import com.github.javaparser.ast.stmt.*;
+import com.github.javaparser.ast.expr.*;
+
+// Methoden mit fehlenden Asserts
+List<MethodDeclaration>> missing = ...
+
+missing.forEach(m -> {
+  m.getBody().ifPresent(b -> {
+     var stmts = b.getStatements();
+     var msg = new StringLiteralExpr("Method "+m.getSignature()+" has no assert");
+     stmts.addFirst(new ExpressionStmt(new MethodCallExpr("Assert.fail", msg)));
+  });
+  m.findCompilationUnit().ifPresent(cu -> cu.addImport("org.junit.Assert"));
+})
+
+// Ausgabe für unser Beispiel
+import junit.*;
+import org.junit.Assert;
+
+class MyTest {
+
+    @Test
+    public void testAnswer() {
+        assertEquals(42, 3 * 4 + 5 * 6);
+    }
+
+    @Test
+    public void testUniverse() {
+        /* assertNotNull(universe); */
+        Assert.fail("Method testUniverse() has no assert");
+    }
+}
+----
+
+
+=== Symbolauflösung
+
+Der Parser selbst kann keine Symbole auflösen, er kennt nur Ausdrücke, die als Elemente des Syntaxbaumes existieren, so kann deren Herkunft und Typ unbekannt sein.
+
+Für die Bestimmung von Symbolen wie Klassen, Variablen und Methoden ist mehr Kontext notwendig, besonders wenn diese aus direkt oder indirekt aus verschiedenen Quellen stammen könnten.
+
+Dafür ist der `JavaSymbolSolver` zuständig, der seit neuestem mit dem JavaParser zusammen in einem Bundle ausgeliefert wird.
+Er ist dafür zuständig, benannte Symbole aufzulösen.
+
+Um Informationen von externen, vollqualifizierten Typen aufzulösen kann dieser mit einem entsprechenden `TypeSolver` konfiguriert werden:
+
+* `JavaParserTypeSolver` für Informationen aus Quellcodedateien, die aus einem Basisverzeichnis (mit Unterverzeichnissen) geparst werden
+* `JarTypeSolver` für Klassen aus externen JAR-Dateien
+* `ReflectionTypeSolver` für Klassen aus dem JDK
+* `CombinedTypeSolver` um mehrere TypeSolver zu kombinieren
+
+=== Fazit
+
+Mit der JavaParser Bibliothek kann man sehr schnell Java Quellcode in einen gut navigierbaren Objektbaum parsen.
+Dieser ist vielseitig nutzbar - für Analysen, für die strukturelle Suche nach bestimmten Mustern, partielle Modifikationen oder Codegenerierung.
+
+Auch größere Projekte, wie zum Beispiel Neo4j sind schnell geparst.
+
+////
+
+TODO Java versions? / modules / package-info ....
+TODO Performance, Parsing of Large projects
+
+----
+import com.github.javaparser.*;
+
+var cu = StaticJavaParser.parse("class A { public int answer = 42; }")
+
+cu.getClassByName("A")
+
+import com.github.javaparser.ast.body.*
+
+cu.findAll(FieldDeclaration.class).stream()
+  .filter(FieldDeclaration::isPublic)
+  .peek(System.out::println)
+  .map()
+
+import com.github.javaparser.ast.*;
+
+var cU = new CompilationUnit();
+var myClass = cU.addClass("MyClass").setPublic(true)
+    .addField(int.class, "A_CONSTANT", PUBLIC, STATIC);
+    .addField(String.class, "name", PRIVATE);
+String code = myClass.toString();
+
+
+transform java code:
+
+var cU = new CompilationUnit();
+var myClass = cU.addClass("MyClass").setPublic(true)
+    .addField(int.class, "A_CONSTANT", PUBLIC, STATIC);
+    .addField(String.class, "name", PRIVATE);
+String code = myClass.toString();
+----
+////
+
+=== Referenzen
+
+* Website: https://javaparser.org
+* GitHub: https://github.com/javaparser
+* Beispielprojekt: https://github.com/javaparser/javaparser-maven-sample
+* Buch: "JavaParser: Visited", Smith, van Bruggen,Tomassetti, LeanPub, 2019 https://leanpub.com/javaparservisited
+* JavaDoc http://www.javadoc.io/doc/com.github.javaparser/javaparser-core
+
+
+////
+In its simplest form, the JavaParser library allows you to interact with Java source code as a Java object representation in a Java environment. More formally we refer to this object representation as an Abstract Syntax Tree (AST).
+Additionally, it provides a convenience mechanism to navigate the tree with what we have termed as Visitor Support. This gives developers the ability to focus on identifying interesting patterns in their source, rather than writing laborious tree traversal code.
+The final principal feature of the library is the ability to manipulate the underlying structure of the source code. This can then be written to a file, providing developers with the facility to build their own code generating software.
+
+JavaParser is not
+Although the library lends itself being used as part of one, it is not a code refactoring toolkit. This is perhaps the most popular misconception about the library we see.
+Think of the library as providing a mechanism to answer the question “what is this code?”, the why and the how you might choose to manipulate or report on it is up to you, the language engineer.
+It is not a symbol solver, it will not answer the question “where is this variable defined?” You will need another library for that, for which we recommend the JavaSymbolSolver12.
+
+in the majority of cases when choosing to parse source code you are looking either to identify something, usually issues in the code, or ways to automated the generation of code.
+
+TODO JQA Parser as an example
+refactoring
+querying
+
+
+Explain AST / root / branch / leaf
+
+Node types: MethoDeclaration, Parameter ClassDefinition aus Java JLS
+substructures or parameters (e.g. method modifiers)
+AST no comments, whitespace, parenthesis
+but JavaParser keeps comments
+
+• the JavaParser class provides a full API for producing an AST from code
+• the StaticJavaParser class provides a quick and simple API for producing an AST from code. 
+• the CompilationUnit is the root of the AST
+• the Visitors are classes which are used to find specific parts of the AST
+
+complete class files, and in this instance the .parse method is overloaded to accept a Path, a File, InputStream and a String will return a CompiliationUnit
+
+
+It is also possible to work with source fragments as well, although in order to parse a String you will need to know the resulting type to avoid a parsing error.
+For example:
+1 Statementstatement=StaticJavaParser.parseStatement("inta=0;");
+
+
+CU:From here you can access all the nodes of the tree to examine their properties, manipulate the
+underlying Java representation or use it as an entry point for a Visitor you have defined.
+
+
+<dependency>
+<groupId>com.github.javaparser</groupId> <artifactId>javaparser-symbol-solver-core</artifactId> <version>3.13.3</version>
+</dependency>
+
+Although that sounds like an odd name we can break in down into its constituent parts. The Void means we’re not expecting the visit to return anything, i.e. this visitor may produce a side effect, but will not operate on the underlying tree. There are other types of visitors that will do this, which we will come to later.
+The Adaptor refers to the class being part of an adaptor pattern, which provided default imple- mentations of the VoidVisitor interface, which accepts around 90 different types as arguments (see Appendix B for the full list). So when defining your own visitor you will want to override the visit method for the type you are interested in. In practice, this means that you can define only the method to handle a certain type of nodes (e.g. field declarations), while your visitor will not do anything with the dozens of other node types you are not interested in.
+
+call super methods, to ensure all deeper children are visited
+pass in argument of type T into visitor (aggregator/state)
+adapter to only overrride required visit methods
+
+@Override visit(MethodDeclaration, T state) {}
+
+state for decision making or aggregation
+
+VoidVisitor<State>
+for read-only on AST
+vs
+ModifierVisitor<State>
+for updates on AST
+return new AST node from visitoor method
+
+fieldDeclaration.getVariables.getInitializers() ... setInitializer(String)
+
+cu.toString() <- formatted output
+
+cu.getAllCContainedComments
+either at a source node or orphaned
+
+Comment
+c.getClass().getSimpleName(), c.getContent(),
+                c.getRange().get().begin.line,
+                !c.getCommentedNode().isPresent()
+
+or node.getCOmment(), node.getOrphanedComments
+
+comments, difficult topic
+more time has been spent discussing thoughts on comment parsing rather than any other feature within JavaParser project.
+
+Well, formally comments do not constitute part of the abstract syntax tree for a language. The abstract part meaning that it omits the elements of the syntax tree that are are uninteresting to the compiler.
+As such they’re not really covered by the Java language specification, beyond a single page; in a document that is 800 pages that barely constitutes as a footnote.
+For the most part what you include in comment tokens, and where you include them, becomes “prison rules” i.e. anything goes. Even when you think all eventualities are catered for, someone will come provide a new edge case for where comment parsing falls short.
+
+not attached to any language construct unlike annotations
+In itself that is a good exercise; see if you can identify line comments that appear on consecutive multiple lines and make them into a single block comment.
+
+A node can have at most one comment associated with it, which is referenced in its comment field. Then the type of comment, as you might expect will be one of either LineComment, BlockComment or JavadocComment.
+
+During attribution the comments parser will look to assign block or Javadoc style comments to the following node; either on the same line or subsequent line. Line comments, on the other hand, will be assigned to the node preceding them when they appear on the same line as another node or the following node when they’re on a line of their own.
+
+
+For Richard: Comment parsing is enabled by default, if you decide you wish to disable it, you can provide an instance of a ParserConfiguration with setAttributeComments to false. Doing so will lead to faster parsing, although this will be unnoticeable when working with single source files, but is worth remembering if you are looking to parse large numbers of files.
+
+parser
+setAttributeComments
+setDoNotAssignCommentsPrecedingEmptyLines
+
+explaine comment attribution rules basics
+
+code generation
+code transformation
+
+pretty printing
+lexical preserving printing -> preserves layout and whitespace,
+except for modified/added nodes that will be pretty printed
+
+PrettyPrinterConfiguration conf = new PrettyPrinterConfiguration();
+8 conf.setIndent(" ");
+9 conf.setPrintComments(false);
+10 PrettyPrinter prettyPrinter = new PrettyPrinter(conf);
+11 System.out.println(prettyPrinter.print(myClass));
+
+or modify PrettyPrintVisitor
+to e.g. skip or add certain outputs
+conf.setVisitorFactory(prettyPrinterConfiguration -> new PrettyPrintVisitor(conf
+
+
+LexicalPreservingPrinter.setup(cu); 
+System.out.println(LexicalPreservingPrinter.print(cu));
+keeps formatting even in light of changes
+
+NodeText -> nodes (token or regular nodes) with placeholders for children
+recalculate offsets etc. after each change with an attached observer
+compute delta between two concrete syntax models and apply to node text list
+
+for a long time only pretty printing
+
+
+
+////

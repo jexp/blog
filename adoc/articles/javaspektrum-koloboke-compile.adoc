@@ -1,0 +1,7 @@
+== On The Fly Generierung von spezialisierten Implementierungen
+
+Koloboke Compile https://koloboke.com
+Blog Posts? 
+ref. to Valhalla und Map Artikel
+
+

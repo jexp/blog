@@ -1,0 +1,431 @@
+= Alle Daten im Eimer?
+
+image::https://upload.wikimedia.org/wikipedia/commons/7/7e/Schlagwortkatalog.jpg[link=https://de.wikipedia.org/wiki/Bibliothekskatalog#/media/Datei:Schlagwortkatalog.jpg]
+
+Alles was Sie schon immer über Java Maps wissen wollten.
+
+Die Speicherung von Daten als Schlüssel-Wert Paare war schon immer eine wichtige Anforderung, nicht erst seit Bibliotheksregistern mit Karteikarten.
+
+Auch Dateisysteme sind im Wesentlichen nichts anderes, mit dem vollständigen Pfad einer Datei bekommt man Zugriff auf deren Inhalt (und Metadaten).
+Mit Online-Speicherung wie S3 und den vielfältigen Key-Value NoSQL Datenbanken werden leicht Petabyte-Größen erreicht.
+
+Je nach Programmiersprache hat die Datenstruktur zwar einen anderen Namen - Map (Java), Dict (Python), Hash (Ruby), Dictionary (C#), Object (Javascript), assoziatives Array (PHP) aber das Grundkonzept wird in allen Sprachen unterstützt.
+
+== Geschichte der Maps im JDK
+
+In Java ist die `java.util.Hashtable` seit JDK 1.0 verfügbar, die war zwar praktisch aber etwas schwergewichtig.
+Wie die anderen alten Container Implementierungen waren die meisten ihrer Methoden synchronisiert, was für lange Zeit eine hohe Leistungseinbusse zur Folge hatte.
+Ausserdem ist es nicht genug, nur einzelne Methoden abzusichern, sobald diese unabhängig voneinander genutzt werden, muss man den ganzen Block mittels `synchronized` schützen.
+So wurden die Entwickler die Hashtable in nebenläufigen Szenarien einsetzen, in falscher Sicherheit gewogen.
+
+Mit Java 1.2 und der neuen Collection API von Joshua Bloch hielt auch eine neue Abstraktion über das `Map` Interface und diverse Implementierungen Einzug.
+In seinem "Effective Java" gibt es auch diverse Einträge zum diesem Thema [BlochXX].
+
+Die Map API war zwar nicht so umfangreich (nur 12 Methoden in Java 5), neben Methoden zum Einfügen, Auslesen, Löschen von Schlüssel-Wert Paaren können Schlüssel, Werte und die Paare als entsprechende Collections bereitgestellt werden.
+
+Dabei sind die Sets, die von `entrySet()` und `keySet()` zurückgegeben werden live, d.h. Operationen auf ihnen spiegeln sich sofort im Inhalt der Map wieder.
+Wenn die Map-Struktur während der Iteration extern verändert wird, werfen die meisten Implementierungen eine `ConcurrentModificationException`.
+
+Beispiele:
+
+[source,java]
+----
+Map<Integer, Double> squares = new HashMap<>(100);
+for (int i=0;i<100;i++) squares.put(i, (double)i*i);
+squares.size(); // 100
+
+// etwas unbeholfen mit Generics, `var` sollte das einfacher machen
+Iterator<Map.Entry<Integer,Double>> it = squares.entrySet().iterator();
+while (it.hasNext()) {
+  Map.Entry<Integer,Double> entry = it.next();
+  // Live-View auf Map, diese wird verändert!
+  if (entry.getKey() % 2 == 0) it.remove();
+  // Änderung des Wertes
+  else entry.setValue(entry.getValue()*2);
+}
+squares.size(); // 49
+
+squares.get(8); // null, da entfernt
+squares.get(9); // 162.0 (2 x 81.0)
+
+// Wenn das `remove()` nicht benötigt wird, sollte man foreach nutzen
+for (Map.Entry<Integer,Double> entry : squares.entrySet()) {
+   entry.setValue(entry.getValue()*2);
+}
+// Exception java.util.ConcurrentModificationException
+for (Integer key : squares.keySet()) {
+   if (key % 2 == 0) squares.remove(key+1);
+}
+----
+
+In Java 5 wurde `Map<KEY,VALUE>` wie alle anderen Collection Interfaces und Klassen für Schlüssel und Werte generifiziert, so dass man sie "typsicher" benutzen kann.
+
+Das bedeutet aber nicht, dass primitive Typen wie `double` oder `long` effizient als Schlüssel genutzt werden können, da sie in ihre Objekt-Pendants überführt werden müssen.
+Das "Boxing" zu `Double` oder `Long` ist aufwändig und kostet zusätzlichen Speicher und Performance.
+Daher gibt es eine Reihe von "primitive collections" Bibliotheken ausserhalb des JDKs die nachfolgend auch noch Thema sein werden.
+
+== Schlüsselobjekte
+
+Ein semantisch gleicher Schlüssel sollte in einer Map wieder auffindbar sein.
+Daher müssen sie folgenden Kontrakt erfüllen, mittels `equals` sollten zwei äquivalente Instanzen des Schlüssels bijektiv gleich sein.
+Der `hashCode` der Objekte muss ebenfalls gleich sein und darf sich über seine Lebenszeit nicht ändern.
+
+Daher kann man sich nicht nur auf die geerbten Methoden von `java.lang.Object` verlassen, da dieses nur die "Speicherstelle" als  Hashcode (delegiert an `System.identityHashCode(Object)`) zurückgibt und Gleichheit nur für dasselbe Objekt (Speicherreferenz) gilt.
+Es sei denn man möchte eine Map ala `IdentityHashMap` nutzen, die jede Instanz eines Schlüssels separat betrachtet, was im entsprechenden Anwendungsfall deutlich effizienter sein kann.
+
+[source,java]
+----
+var a = new Key("Foo");
+var b = new Key("Foo");
+
+assert a.hashCode() == b.hashCode() &&
+       a.equals(b) && b.equals(a)
+----
+
+Für die Nutzung einer `SortedMap` wie `TreeMap` sollten Schlüssel entweder `Comparable<T>` implementieren oder über einen separaten `Comparator<T>` vergleichbar sein,  um eine Sortierung festzulegen.
+
+== My first Map
+
+Eine eigene Map zu implementieren ist dank der `AbstractMap` einfach (wenn auch nicht sehr effizient).
+Man muss nur `entrySet()` Methode überschreiben und ist dann schon dabei.
+Das geschieht meistens mit einem `AbstractSet` in dem `size()` und `iterator()` bereitgestellt werden müssen.
+
+Seit Java 1.6 gibt es praktischerweise Hilfsklassen für `Map.Entry` implementierungen, wie `Simple(Immutable)Entry`.
+
+Diese Map ist dann nicht veränderbar, dazu müsstee man noch `put` und `remove` des Set-Iterators überschreiben, aber das ist auch relativ oft gewollt.
+
+[source,java]
+----
+var keys = new String[] { "a", "b", "c"};
+var values = new int[] { 1,2,3 };
+
+var map = new AbstractMap<String, Integer>() {
+   public Set<Entry<String,Integer>> entrySet() {
+      return new AbstractSet<String,Integer>() {
+          public int size() { return keys.length; }
+	      public Iterator<Map.Entry<String,Integer>> iterator() {
+			 new Iterator<Map.Entry<String,Integer>>() {
+			    int idx = 0;
+			    public boolean hasNext() { idx < keys.length; }
+			    public Map.Entry<String,Integer> next() { 
+                   return new SimpleImmutableEntry(keys[idx],values[idx++]);
+			    }
+			 }
+	      }		
+      }
+   }
+}
+----
+
+Für eine effizientere Implementierung sollte man eher das Map Interface implementieren bzw. zumindest Methoden wie `put` und `get` ersetzen.
+Die Implementierung von `AbstractMap.get` sieht leider so aus:
+
+[soure,java]
+----
+public V get(Object key) {
+    Iterator<Entry<K,V>> i = entrySet().iterator();
+    if (key==null) {
+        while (i.hasNext()) {
+            Entry<K,V> e = i.next();
+            if (e.getKey()==null)
+                return e.getValue();
+        }
+    } else {
+        while (i.hasNext()) {
+            Entry<K,V> e = i.next();
+            if (key.equals(e.getKey()))
+                return e.getValue();
+        }
+    }
+    return null;
+}
+----
+
+Für eine Variante, die z.B auf 2 sortierten Arrays (für Schlüssel und Werte) basiert, käme man auf dieses Ergebnis:
+
+[soure,java]
+----
+private K[] keys;
+private V[] values;
+
+public V get(Object key) {
+	int idx = Arrays.binarySearch(keys,key);
+	return idx < 0 ? null : values[idx];
+}
+----
+
+== Unveränderliche Maps
+
+Wenn eine Map eine fixes Datenset darstellt, hat das viele Vorteile.
+Zum einen muss man sie nicht für nebenläufigen Zugriff synchronisieren.
+Zum anderen fällt Kapazitätsmanagement und resizing weg und die Hälfte der API muss nicht implementiert werden.
+
+Leider gibt es in der Java Collection API _keine_ Unterscheidung zwischen unverändlichen und aktualisierbaren Datenstrukturen.
+Im Allgemeinen wird Unveränderlichkeit durch einen Laufzeitfehler (`UnsupportedOperationException`) der Update-Methoden umgesetzt.
+Zum Beispiel erzeugt `Collections.unmodifiableMap` einen Wrapper um die Quell-Map, in dem alle Aktualisierungsmöglichkeiten diesen Fehler werfen.
+Wenn man das selbst implementieren möchte, muss man daran denken, dass die API auch `Iterator.remove` und `Map.Entry.setValue` umfasst.
+
+== Veränderliche Maps
+
+Das Modifizieren von Maps während ein anderer Konsument gerade deren Elemente iteriert (z.b. via `entrySet()`, `keys()` oder `values()`, führt in den meisten Implementierungen zu einer `ConcurrentModificationException`.
+Nur die `ConcurrentHashMap` nebenläufige Iteration sauber abbilden, da ihre Iteratoren einen Snapshot der Daten ablaufen.
+
+=== HashMap
+
+Die HashMap ist die am häufigsten genutzte Map in Java, sie ist effzient (Komplexität von O(1)), für kleinere Datenmengen "relativ" kompakt.
+Einträge in einer HashMap werden über eine zweistufige Datenstruktur abgelegt.
+
+Zum einen wird der Hashcode des Schlüssels mittels einer Modulo-Operation, einer von N Eimer-Listen ("Buckets") zugeordnet.
+Innerhalb dieser Listen werden dann mittels Vergleich der Schlüssel via `equals` Duplikate ignoriert und ansonsten der Eintrag vorgenommen.
+
+Da es wichtig ist, die Einträge möglichst gleichmäßig über die Buckets zu streuen, sollte ein Hashcode möglichst breit über den Wertebereich von Integer verteilt sein.
+Da dies oft nicht der Fall ist, wird das Ergebnis der `hashcode()` Methode des Schlüssels intern noch weiter modifiziert, so dass weniger Kollisionen erfolgen.
+
+image::https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/Hash_table_5_0_1_1_1_1_1_LL.svg/2560px-Hash_table_5_0_1_1_1_1_1_LL.svg.png[]
+
+Äquivalent wird das Auffinden eines Schlüssels vorgenommen.
+Falls dort der Kontrakt von `equals` und `hashCode` nicht eingehalten wurde und sich deren Ergebnis sich über die Lebenszeit eines Objekts ändern, kann dieses nicht wiedergefunden werden.
+
+In einer HashMap gibt es *keinerlei Reihenfolgegarantie für die Schlüssel*, da diese rein von der Anzahl und Länge der Eimerlisten und der Hashfunktion der Schlüssel abhängen, die sich z.B. auch zwischen JVMs unterscheiden kann.
+
+HashMaps haben ihr Effizienzmaximum beim einem Füllgrad von 75%??, dann ist die Balance zwischen der schnellen Zugriff über den Hash und minimalen sequentiellen Vergleich in den Listen gegeben.
+
+Damit beim Wachsen einer HashMap diese Balance gehalten wird, sollte man sie möglichst mit ihrer Zielgröße und dem entsprechenden Resize-Füllgrad initialisieren.
+Das verhindert unnötige interne Kapazitätsverdopplungen, die mit einer Menge Speicherallokationen und Kopieroperationen verbunden sind.
+
+=== LinkedHashMap
+
+Die `LinkedHashMap` hat die praktische Eigenschaft, dass ihre Einfügereihenfolge beibehalten wird.
+Das wird über eine doppelt verkettete Liste der Einträge sichergestellt.
+Mit einem zusätzlichen Flag im Konstruktor kann man sogar angeben, ob statt der Einfüge- die Zugriffsreihenfolge vorgehalten wird.
+Die Reihenfolge wird bei den Iteratoren der Map API berücksichtigt.
+
+=== TreeMap
+
+In der `TreeMap`, die als sortierte Map das `SortableMap` Interface implementiert, wird der Zugriff auf die Schlüssel über eine Baumstruktur gewährleistet, die Schlüssel mittels expliziter Komparatoren vergleicht und einsortiert.
+Der Komparator kann entweder der Map mitgegeben werden, oder in Schlüsseln, die `Comparable<T>` implementieren realisiert sein.
+
+////
+=== WeakHashMap 
+
+Eine spezielle Art Map ist die `WeakHashMap`, diese kann als Cache genutzt werden, da sie bei Speicherknappheit Einträge freigibt, da diese als `WeakReference`s gehalten werden.
+Leider funktioniert das in der Praxis nicht so gut wie erwartet (es wird nicht inkrementell, sondern alles freigegeben) so dass man lieber zu einer dedizierten Cache-Implementierung wie [caffeine] greifen sollte.
+////
+
+=== ConcurrentHashMap
+
+Den missglückten Ansatz von Hashtable zur korrekten nebenläufigen Nutzung wurde erst im JDK 1.5 abgeholfen.
+
+Zum einen gibt es mit `Collection.synchronizedMap()` eine Methode um eine zur Hashtable äquivalente, synchronisierte Map bereitzustellen, in der einfach alle Methoden auf die Instanz synchronisiert sind.
+Dabei wird die übergebene Quell-Instanz in einem Adapter gekapselt der diese Funktionalität bereitstellt.
+Dieser Ansatz hat aber dasselbe Problem wie Hashtable, dass voneinander unabhängige Methodenaufrufe manuell gemeinsam synchronisiert werden müssen.
+
+
+Viel besser ist die von Doug Lea entwickelte (und mit 1500 Zeilen entsprechend komplexe) `ConcurrentHashMap`, eine Implementierung einer Map, die nebenläufigen Zugriff erlaubt.
+Intern wird das über CAS (Compare-And-Swap) Operationen für Einträge und ggf. Warteschleifen (Spin-Loop) für Aktualisierungen gewährleistet.
+
+Damit *atomare Änderungen* möglich sind, wurde ein zusätzliches `ConcurrentMap` Interface bereitgestellt, dieses enhält:
+
+* `putIfAbsent(key, value)` 
+* `remove(key,value)`
+* `replace(key, value)`
+* `replace(key, oldValue, newValue)` - Aktualisierung nur, wenn der erwartete alte Wert vorhanden ist
+
+In Java 8 sind diese Methode direkt im `Map` Interface zu finden.
+
+== Neue API in Java 8 mit Closures und Streams
+
+Mit Java 8 und dem Einzug von Streams und Closures in Java, wurde auch das `Map` Interface deutlich erweitert, es wurden eine Menge sehr nützliche neue Operationen hinzugefügt.
+
+Die neuen Methoden haben alle "default" Implementierungen, so dass auch alte Implementierungen des `Map` Interfaces problemlos weiter funktionieren.
+
+[%autowidth, opts=headers, cols="m,a"]
+|===
+| compute(key, (key, existingValue) -> value)
+| Berechnet den Wert beim Zugriff, falls noch nicht vorhanden ist `existingValue` null
+
+| computeIfAbsent(key, (key) -> value)
+| Berechnet Wert mittels Funktion sofern noch nicht vorhanden, günstig bei "teurer" Berechnung wie Objekterzeugung
+
+| computeIfPresent(key, (key, existingValue) -> value)
+| Ersetzt existierenden Wert mittels Funktionsergebnis
+
+| forEach((key,value) -> {})
+| Erlaubt eine Operation auf jedem Schlüssel-Wert Paar der Map, Abbruch durch Exception
+
+| getOrDefault(key, default)
+| Statt `null` wird der angegebene Standardwert zurückgegeben, kann genutzt werden um Standardwerte nicht zu speichern
+
+| merge(key, value, (key, existingValue) -> value)
+| Wenn der Schlüssel noch nicht existiert (oder `null` Wert hat) wird der berechnete Wert zugewiesen
+
+| putIfAbsent(key, value)
+| Wert wird nur hinzugefügt, falls der Schlüssel noch nicht existiert (atomare Operation)
+
+| remove(key, value)
+| Eintrag wird nur entfernt, wenn sowohl Schlüssel als auch Wert übereinstimmen
+
+| replace(key, value)
+| Wert wird ersetzt, wenn Schlüssel vorhanden ist
+
+| replace(key, oldValue, newValue)
+| Eintrag wird nur aktualisiert, wenn sowohl Schlüssel als auch Wert übereinstimmen
+
+| replaceAll((key,existingValue)-> value)
+| Alle Einträge werden ersetzt (neu berechnet), es sei denn der Vorgang wird mittels Exception abgebrochen
+|===
+
+Beispiele:
+
+[source,java]
+----
+var map = new ConcurrentHashMap<String, Integer>(20);
+
+// mit HashMap gäbe das zufällig eine Concurrent Modification Exception 
+// oder unerwartete Ergebnisse
+
+IntStream.range(0,10).parallel().forEach(
+  i -> map.compute("counter", (k,v) -> v == null ? 1 : v + 1)
+);
+
+map.replace("counter",10,42);
+
+map.forEach( (k,v) -> System.out.printf("%s : %d",k,v) );
+// counter: 42
+----
+
+Um eine Map in einen Stream zu transformieren, muss sie mittels `keySet`, `entrySet` oder `values` in eine Collection umgewandelt werden.
+
+Im Gegenzug kann man Maps aus Streams mittels der terminalen `collect` Operation erzeugen, die mit einem `groupBy` Operator erzeugt werden kann die es mit diversen Signaturen mit Kollektoren und Mapping-Funktionen gibt.
+
+.Erzeugung einer Map gerader/ungerader-Werte aus einem Stream mittels `reduce`
+[source,java]
+----
+IntStream.range(0,10).boxed().reduce(
+  // Initialwert Multi-Map
+  new HashMap<Boolean,List<Integer>>(), 
+  // Reduce-Funktion, Hinzufügen zu Multi-Map abh. von Geradzahligkeit des Wertes
+  (map,value) -> { map.computeIfAbsent( value % 2==0 , 
+                         (key)->new ArrayList<Integer>())
+                     .add(value); 
+                   return map;}, 
+  // Merge-Funktion zweier Maps (bes. für fork-join von parallelen Streams)
+  (map1,map2)->{ map1.putAll(map2); return map1;}
+)
+
+$6 ==> {false=[1, 3, 5, 7, 9], true=[0, 2, 4, 6, 8]}
+----
+
+.Dasselbe Beispiel nur mittels `collect` Operation
+[source,java]
+----
+IntStream.range(0,10).boxed().
+collect(Collectors.groupingBy(v -> v % 2 == 0));
+
+$8 ==> {false=[1, 3, 5, 7, 9], true=[0, 2, 4, 6, 8]}
+
+// groupingBy kann ein sekundärer Collector (ad infinitum) mitgegeben werden
+// zum Beispiel um Wert-Typ zu ändern
+titles.stream()
+collect(Collectors.groupingBy(title -> title.substring(0,1), Collectors.toSet()));
+
+// Oder um die Werte noch einmal zu Aggregieren
+// Beispiel: doppelte Gruppierung nach Jahr und Autor
+Map<String, Map<Integer, List<Book>>> booksByYearAndAuthor
+    = booksStream.collect(Collectors.groupingBy(Book::getAuthor,
+                                     Collectors.groupingBy(Book::getYear)));
+
+// der Typ der Map, kann mittels eines Suppliers angegeben werden
+titles.stream().collect(
+   Collectors.groupingBy(title -> title.length(),
+   LinkedHashMap::new, 
+   Collectors.toList()));
+----
+
+Leider gibt es in Java keine literale Map-Syntax wie in anderen Sprachen wie z.b. `{42 : "Antwort"}`.
+Seit Java 9 können aber zumindest statische Builder Methoden im Map Interface genutzt werden, um (kleine) unveränderliche Maps zu erzeugeen.
+
+Zum einen mit `Map.of(key, value,[key2, value2,...])` über fixe (bis Länge 10), getypte Liste von Schlüsseln und Werten, bzw. mit einer var-args Methode und dedizierten, getypten Tupeln `Map.ofEntries(Map.entry(schlüssel, wert),....)`.
+Diese erlauben keine Null-Schlüssel oder Werte und auch keine duplikaten Schlüssel bei Anlage.
+
+Seit Java 10 kann man mittels `Map.copyOf(map)` eine unveränderliche Kopie einer Map erzeugen.
+
+////
+== Maps aus anderen Bibliotheken
+
+Es gibt diverse Gründe warum andere Bibliotheken eigene Map-Implementierungen anbieten.
+
+Zum einen war und ist die Java Collections API nicht so anwenderfreundlich, wie sie sein könnte, zum Beispiel die fehlende Trennung in unveränderliche und veränderbare Maps.
+Desweiteren sind bessere APIs für Multi-Maps, Builder-Patterns, Iteration und zusätzliche Implementierungen für spezielle Anwendungsfälle in Apache Commons-Collections [commons] und Guava [guava] zu finden.
+
+Die Chronicle Map [chronicle-map] ist eine spezielle Implementierung aus OpenHFT (high-frequency-trading) die besonders effizient mit großen Datenmengen umgehen kann und ihre Werte transparent in Dateien auslagern kann und sogar zwischen Prozessen oder Maschinen teilen und replizieren kann. 
+
+Ein anderer Grund ist die Speicherung von primitiven Werten in Maps. 
+In den JDK-APIs werden wie schon erwähnt nur Objekte gespeichert, dh. primitive Werte müssen aufwändig über Boxing konvertiert werden und belegen unnützen Speicherplatz.
+Daher gibt es eine Reihe von Bibliotheken, die spezielle Implementierungen für Containern und insbesondere Maps für primitive Schlüssel und/oder Werte anbieten.
+Meist werden diese aus Code-Vorlagen für alle möglichen Kombinationen von `byte,short,int,long,char,float,double` sowie Objekttypen generiert.
+
+Die Maps für primitive Typen enthalten eigene APIs für Zugriff und Iteration die ähnlich der JDK APIs sind aber ggf. nicht mit ihnen kompatibel.
+Bibliotheken, die solche Container anbieten sind:
+
+* Eclipse Collections (ehemals Goldman Sachs) [eclipse]
+* Koloboke [koloboke]
+* Carrotsearch HPPC - High Performance Primitive Collections [hppc]
+* Fastutil Collections [fastutil]
+* Trove
+
+.Beispiel Eclipse Collections IntDoubleHashMap
+[source,java]
+----
+MutableIntDoubleMap map = new IntDoubleHashMap(1_000_000);
+for (int i=0;i<1_000_000;i++) {
+ map.put(i, (double)i*i);
+ // oder etwas abstruser
+ // map.getIfAbsentPutWithKey(key, (key) -> (double)key*key);
+}
+
+for (int i=0;i<1_000_000;i++) {
+  map.addToValue(i, 1);
+}
+
+// Filter: Inklusion
+evenNumbers = map.select((intKey, doubleValue) -> intKey % 2 == 0);
+// Exklusion
+oddNumbers  = map.reject((intKey, doubleValue) -> intKey % 2 == 0);
+
+// Map transponieren
+MutableDoubleIntMap square2base = map.flipUniqueValues()
+
+// (Double)Iterable API des DoubleValuesMap Interfaces
+map.sum();
+map.count(value -> Math.ceil(value) == value);
+map.allSatisfy(value -> Math.log(value) < Math.sqrt(value));
+map.summaryStatistics();
+map.toSortedArray();
+----
+
+In diversen Artikeln [primitive-performance] wurden die Bibliotheken verglichen, oft ist Koloboke oder Eclipse Collections am effizientesten.
+Für das letzte Quäntchen an Leistung, lohnt es sich aber, für die eigenen Anwendungsfälle [JMH] Tests mit den verschiedenen Implementierungen durchzuführen.
+////
+
+== Fazit
+
+Es gibt viele Details rund um das doch relativ einfach Konzept eines Schlüssel-Wert und auch in diesem Artikel habe ich nur die Oberfläche angekratzt.
+Wenn Sie Tips haben, die Sie gern mit anderen teilen möchten, tweeten Sie sie doch an @javaspektrum und @jexp mit Verweis auf die Kolumne #effectivejava.
+
+== Referenzen
+
+* [map] https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/util/Map.html
+* [grouping] https://www.baeldung.com/java-groupingby-collector
+* [unveränderlich] https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/util/Map.html#unmodifiable
+// * [commons] https://commons.apache.org/proper/commons-collections/userguide.html#Maps
+// * [guava] https://www.baeldung.com/guava-maps
+* [chm] https://docs.oracle.com/en/java/javase/12/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html
+// * [hppc] https://labs.carrotsearch.com/hppc.html
+// * [koloboke] https://koloboke.com/implementation-library/
+// * [eclipse] https://www.eclipse.org/collections/
+// * [eclipse-int-double] https://www.eclipse.org/collections/javadoc/9.2.0/org/eclipse/collections/impl/map/mutable/primitive/IntDoubleHashMap.html
+// * [primitive-performance] http://java-performance.info/hashmap-overview-jdk-fastutil-goldman-sachs-hppc-koloboke-trove-january-2015/
+// * [fastutil] http://fastutil.di.unimi.it/
+// * [chronicle-map] https://github.com/OpenHFT/Chronicle-Map
+// * [JMH] Hunger Javaspektrum 03/2014 - Effective Java: Java Microbenchmark Harness (JMH)
