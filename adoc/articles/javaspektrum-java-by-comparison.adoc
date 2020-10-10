@@ -1,0 +1,629 @@
+////
+- Das didaktische Konzept haben wir in unserem Paper "Teaching Clean Code" http://ceur-ws.org/Vol-2066/isee2018paper06.pdf nochmal detaillierter dargestellt. Kann auch gerne in die Referenzen.
+- Mit Adam Tornhill haben wir übrigens ein Paper geschrieben, um den Code der Studierenden auf Basis dessen das Buch entstanden ist, zu analysieren: Code Process Metrics in University Programming Education http://ceur-ws.org/Vol-2308/isee2019paper05.pdf
+
+- Die Kapitel "Objekte" und "Funktionen" würde ich eher mit "Objektorienties Design" und "Funktionale Programmierung" betiteln.
+////
+== Gutes Gelingen - Java By Comparison 
+
+Als im Frühjahr 2018 das Buch "Java by Comparison" von Simon Harrer, Jörg Lenhard, Linus Dietz bei den Pragmatic Programmers erschien, war ich sehr gespannt auf ihren Ansatz zur Wissensvermittlung.
+
+Ich selbst habe im Jahr 2000 eine Studienarbeit zu Refactoring geschrieben und seit dem ist mir Codequalität und die gute Nutzung von Sprach- und Strukturmitteln beim Entwickeln sehr wichtig.
+
+Im letzten Jahr konte ich für Martin Fowler die zweite Edition von "Refactoring" reviewen, was viele Erinnerungen, aber auch interessante Diskussionen wieder hervorgebracht hat.
+Neben den Kern-Refactorings und Unit-Tests, stellen für mich die Code-Smells [C2], immer noch den wichtigsten Teil des Buches dar.
+Heutzutage sind viele von ihnen dankenswerterweise schon in den "Code-Intentions" von IDEs, wie z.B. IntelliJ verwirklicht.
+Übrigens eines der Tools das schon vor 19 Jahren während meiner Studienarbeit als "IntelliJ Renamer" verfügbar war.
+
+Adam Tornhills Ansätze [TornhillXRay] helfen bei der Identifikation von "Hotspots" via Quelltext- und Repository-Analyse. (Das Thema ist einen eigenen Artikel wert.s)
+Die Autoren haben zusammen mit Adam ein Paper zum Thema "Code Process Metrics in University Programming Education" [Tornhill] veröffentlicht.
+
+////
+Es gibt eine ganze Menge Bücher zu diesem Thema.
+Ich persönlich fand die Essenz von "Implementation Patterns" von Kent Beck [Beck] sehr aufschlussreich, trotz einiger Probleme und Fehler im Buch.
+////
+
+Ich war daran interessiert, wie die Autoren von "Java by Comparison" ihren Studenten, die Nutzung relevanter Sprach-Idiome in einer eingängigen Weise nahegebracht haben.
+Das didaktische Konzept des Buches wird in der Veröffentlichung "Teaching Clean Code" [Dietz] diskutiert.
+Das bevorzugte, individuelle Tutoring ist im grossen Gruppen leider nicht mehr möglich.
+
+// Falls man die Gelegenheit zum Pair Programming im Man hat es leichter
+// Beim Pair-Programmieren im Job kann man da leichter selbst Gelerntes weitergeben.
+
+Die Idee von Java by Comparison ist so einfach wie wirkungsvoll:
+ 
+In 9 Kapiteln werden verschiedene Themen behandelt, die bewährte Ansätze in der Java- und Entwicklercommunity darstellen.
+Jedes Idiom wird auf einer Doppelseite gegenübergestellt - als "Vorher- vs. Nachher"-Beispiele (einer "Mission zum Mars"), mit Hervorhebung der relevanten Stellen im Quellcode.
+Damit kann man auf einen Blick erkennen, welche Aspekte im Negativbeispiel vermieden werden, und _wie_ sie stattdessen gehandhabt werden sollten.
+
+In jedem, der aufeinander aufbauenden, Beispiele wird nur jeweils ein neuer Aspekt auf einmal eingeführt.
+
+Das ganze Thema wird sehr eingängig präsentiert, das Buch hat man sehr schnell "verschlungen".
+
+Java by Comparison" mehr eine Einführung in die Nutzung sinnvoller Idiome dar, dann in "Effective Java" [Bloch] und "Implementation Patters" [Beck] vertieft werden kann.
+
+In diesem Artikel möchte ich Beispiele aus einigen Kapiteln diskutieren, und meine eigenen Erfahrungen beisteuern.
+
+Wie wir alle wissen, schreiben wir sauberen Code nicht für den Rechner, sondern für andere Entwickler, die nach uns den Quelltext verstehen und sinnvoll verändern können müssen.
+Im Zweifelsfalls sind wir das selbst, 2 Jahre oder 2 Wochen später.
+
+////
+Um den Aufwand für den Leser unseren Codes zu minimieren, sollte man den "Java Code Style" [GoogleStyle] benutzen.
+
+Das Entdecken und Beheben von kritischen Stellen (u.a. Code-Smells) geht einem nach einiger Zeit ins Blut über.
+Und solange ausreichend abdeckende Tests existieren ist auch das Refactoring größerer Anwendungen möglich.
+Worüber man sich aber im Klaren sein sollte, ist dass verschiedene Komponenten unterschiedlich kritisch sind.
+////
+
+== 1. Aufräumen
+
+In diesem Kapitel ging es um erste Ansätze, aufgefundenen Code zu nachvollziehbarer zu machen.
+
+////
+=== Negationen vermeiden
+
+Hier fand ich sowohl das _Vermeiden von Negationen_ als auch das _Vereinfachen komplexer Prädikate_ wichtig.
+
+Mehrfache Negationen sind zwar im Deutschen sehr beliebt, machen es aber nicht verständlicher. 
+Dasselbe trifft auf Code zu.
+
+Daher ist man gut beraten, negierte Ausdrücke oder auch Methoden per IDE ins Positive umzukehren.
+Die De Morgan'schen Regeln zur  Umwandlung von `!(a && b)` zu `(!a || !b)` und vice versa zu beherrschen, ist hier nützlich.
+
+Hier ist ein, etwas übertriebenes, Beispiel aus dem Buch:
+
+.Negation invertieren
+[source,java]
+----
+// davor
+if (!microscope.isInorganic(sample)) {
+  return analyzeOrganic(sample); 
+} 
+else {
+  return Result.INORGANIC; 
+}
+
+// danach
+if (microscope.isOrganic(sample)) {
+  return analyzeOrganic(sample); 
+} 
+else {
+  return Result.INORGANIC; 
+}
+----
+////
+
+=== Vereinfachung komplexer Ausdrücke
+
+Komplexe, mehrteilige Prädikate sind nur schwer zu erfassen.
+Sie führen oft dazu, dass nachfolgende Entwickler aus Angst, irgend etwas zu beschädigen, einfach weitere Ausdrücke anhängen um ihren Anforderungen gerecht zu werden.
+
+Wie eine achtlos weggeworfene Verpackung in der Natur wächst so etwas nach und nach zu einem großen Müllhaufen an.
+
+Das ist auch einer der Code-Smells, namens _Complex Conditionals_. 
+Es gibt einige Refactorings (z.B: _Consolidate Conditional Expression, Decompose Conditional_), die sich dieses Problems annehmen.
+
+Man könnte Kommentare zur Erläuterung relevanter Teilprädikate hinzuzufügen.
+Viel besser ist es, diese entweder in Variablen oder Methoden mit guten Namen zu extrahieren.
+
+Auch dabei hilft uns die IDE. 
+In IntelliJ sind die Shortcuts für das _Extract-**E**lement_ Refactoring vom Namen der Elemente abgeleitet:
+
+[%autowidth,opts="header"]
+|===
+| Shortcut (Win) | Mac | Aktion
+| Ctrl-Alt-V | Cmd-Opt-V | Extract **V**ariable
+| Ctrl-Alt-M | Cmd-Opt-M | Extract **M**ethod
+| Ctrl-Alt-P | Cmd-Opt-P | Extract **P**arameter
+| Ctrl-Alt-C | Cmd-Opt-C | Extract **C**onstant
+| Ctrl-Alt-F | Cmd-Opt-F | Extract **F**ield
+|===
+
+.Boolesches Prädikat vereinfachen
+[source,java]
+----
+// davor
+boolean willCrewSurvive() {
+  return hull.holes == 0 &&
+    fuelTank.fuel >= navigator.requiredFuelToEarth() &&
+    oxygenTank.lastsFor(crew.size) > navigator.timeToEarth();
+}
+
+// danach
+boolean willCrewSurvive() {
+  boolean hasEnoughResources = hasEnoughFuel() && hasEnoughOxygen(); 
+  return hull.isIntact() && hasEnoughResources;
+}
+
+private boolean hasEnoughOxygen() {
+  return oxygenTank.lastsFor(crew.size) > navigator.timeToEarth();
+}
+private boolean hasEnoughFuel() {
+  return fuelTank.fuel >= navigator.requiredFuelToEarth();
+}
+----
+
+== 2. Code mit Stil
+
+Dieses Kapitel befasste sich mit nützlichen Aspekten der Programmiersprache Java.
+
+Ein Fakt, der vielen Entwicklern nicht bewusst zu sein scheint, ist dass Enums ordentliche Klassen darstellen.
+Sie können Interfaces implementieren, und auch (abstrakte) Methoden bereitstellen, die in den Enum-Instanzen überschrieben werden können.
+Enums können auch Instanzvariablen enthalten, die vom ihrem Konstruktor gesetzt werden sollten.
+
+Man sollte aber beachten, das Enums globale Konstanten darstellen, daher ist es keine gute Idee (ich habe diesen Fehler nur einmal gemacht), Enums einen veränderlichen Zustand zu verpassen.
+
+Statt "klassischer" primitiver Konstanten, kann man Enums als deren objektorientierte Weiterentwicklung betrachten.
+Durch die Nutzung von Ojekten kann man auch nicht versehentlich statt `MAX_SPEED` eine `-100` übergeben.
+
+Da die Anzahl der Instanzen einer Enum-Klasse beschränkt ist, kann man sie als _Abstract Data Types_ nutzen.
+Dann benötigt man nicht einmal ein `switch` Statement für die Auswertung von Enum-Instanzen und kann stattdessen Vererbung nutzen.
+
+.Enums als Konstanten
+[source,java]
+----
+// davor
+void setTargetSpeedKmh(double speedKmh) { 
+  targetSpeedKmh = speedKmh;
+}
+void setPreset(int speedPreset) {
+  if (speedPreset == CRUISE_SPEED_PRESET) {
+    setTargetSpeedKmh(CRUISE_SPEED_KMH);
+  } else if (speedPreset == PLANETARY_SPEED_PRESET) {
+    setTargetSpeedKmh(PLANETARY_SPEED_KMH); 
+  } else if (speedPreset == STOP_PRESET) {
+    setTargetSpeedKmh(STOP_SPEED_KMH);
+  }
+}
+
+// danach
+enum SpeedPreset {
+  STOP(0), PLANETARY_SPEED(7667), CRUISE_SPEED(16944);
+  final double speedKmh;
+  SpeedPreset(double speedKmh) {
+    // ggf. Wertebereich überprüfen
+    this.speedKmh = speedKmh;
+  }
+}
+
+void setPreset(SpeedPreset speedPreset) { 
+  Objects.requireNonNull(speedPreset);
+  setTargetSpeedKmh(speedPreset.speedKmh);
+}
+----
+
+////
+== 3. Kommentare
+
+Dieses Kapitel versucht, sinnvollere Nutzung von Kommentaren nahezubringen.
+
+Die meisten Quelltextkommentare sind entweder nutzlos oder veraltet, oft sogar beides.
+Sie können daher, genau wie auskommentierter Code, einfach entfernt werden.
+Falls man wirklich noch einmal darauf zugreifen muss, findet man die Altlasten in der Versionsverwaltung.
+
+Kommentare, die erklären *warum* ein bestimmter Aspekt so und nicht anders implementiert wurde, sind wirklich relevant.
+
+.Erläuternder Kommentar
+[source,java]
+----
+// davor
+private List<Supply> list = new ArrayList<>();
+void add(Supply supply) { 
+  list.add(supply); 
+  Collections.sort(list);
+}
+boolean isInStock(String name) {
+  // fast implementation
+  return Collections.binarySearch(list, new Supply(name)) != -1;
+}
+
+// danach
+boolean isInStock(String name) { 
+  /*
+  * In the context of checking availability of supplies by name,
+  * facing severe performance issues with >1000 supplies
+  * we decided to use the binary search algorithm
+  * to achieve item retrieval within 1 second,
+  * accepting that we must keep the supplies sorted.
+  */
+  return Collections.binarySearch(list, new Supply(name)) != -1; 
+}
+----
+
+Statt benennende Kommentare zu pflegen, sollte man Felder, Methoden, Variablen oder Klassen extrahieren, die sowohl das was (Typ) als auch das _wie und warum_ im Namen tragen.
+Dazu kann man die schon genannten Refactoringfunktionen der IDE nutzen.
+////
+
+////
+== 4. Namensfindung
+
+Um beim Thema zu bleiben - das Benennen von Dingen,  eine der schwierigsten Übungen für Entwickler, ist Thema dieses Kapitels.
+
+Die Spanne reicht von unsäglich kurzen Namen wie `i`, `x`, `it` bis zu unsäglich langen wie `AbstractAnnotationConfigDispatcherServletInitializer`.
+
+Im Allgemeinen ist es sinnvoll Namen zu vergeben, die im aktuellen Kontext (Scope) aussagekräftig sind.
+Welchen man in Methoden oder anderen Blöcken klein halten sollte, da er das mentale Modell darstellt, in dem man sich aktuell bewegt.
+
+Es ist ein Unterschied, ob man sich die Bedeutung von 20 Variablen über 200 Zeilen, oder von 3 Variablen über 10 Zeilen merken muss.
+Die meisten Variablen in einem Programm sollten auch nur im lokalen Kontext (Parameter und lokale Variablen) definiert und genutzt werden, möglichst mit einer einmaligen Zuweisung.
+
+Zu kurze Namen, die zu Informationsverlust führen, stellen nur eine Bequemlichkeit des Autors dar, für den Leser ist es wichtig, die _relevanten_ Informationen im Namen zu haben.
+Mit heutigen IDEs und Auto-Vervollständigung sind auch längere Namen nur wenige Tastendrücke entfernt.
+
+Je nach Teil des Systems, sollten entweder technische oder domänenspezifische Bezeichner gewählt werden.
+
+Die Diskussion um englische vs. lokale Bezeichner, sowohl in Code als auch z.B. in Datenbanken wird oft ausdauernd geführt.
+Eine Bezeichnung in Landessprache erleichtert es, die korrekten Bestandteile der Anwendung der Nutzeroberfläche und -schnittstellen zuzuordnen.
+
+Sie erübrigt sich aber spätestens dann, wenn die ersten, nicht-deutsch-sprechenden Teammitglieder im Projekt aktiv werden, bzw. das System international eingesetzt wird.
+// Ob die deutschen Bezeichner dann auch noch dem spanischen Kollegen geläufig sind ist fraglich.
+
+Im folgenden Beispiel sind Kontext, Typinformationen, Pattern und sogar Sprachdetails (Interfaces) in den Namen kodiert - definitiv zuviel des Guten.
+Die aufgeräumte Klasse ist inhaltlich äquivalent, ohne die nutzlosen Zusatzinformationen.
+
+.Sinnvolle Namen wählen
+[source,java]
+----
+// davor
+class MainSpaceShipManager {
+  AbstractRocketPropulsionEngine abstractRocketPropulsionEngine; 
+  INavigationController navigationController;
+  boolean turboEnabledFlag;
+  void navigateSpaceShipTo(PlanetInfo planetInfo) {
+    RouteData data = navigationController.calculateRouteData(planetInfo); 
+    LogHelper.logRouteData(data); 
+    abstractRocketPropulsionEngine.invokeTask(data, turboEnabledFlag);
+  } 
+}
+
+// danach
+class SpaceShip { 
+  Engine engine;
+  Navigator navigator; 
+  boolean turboEnabled;
+
+  void navigateTo(Planet destination) {
+    Route route = navigator.calculateRouteTo(destination);
+    Logger.log(route);
+    engine.follow(route, turboEnabled);
+  }
+}
+----
+////
+
+////
+Brevity in naming isn’t necessarily a virtue. Most often, it’s better to have a verbose but descriptive name instead of a cryptic abbreviation whose only benefit is that it’s easy to type. Normally, you won’t type a full name anyway. Your IDE’s auto-completion will do this for you. And we have to emphasize: names are read much more often than they’re written. If a name is confusing, misleading, wrong, hard to understand, or missing the right information, a new developer will have a hard time working with the code.
+////
+
+== 5. Fehler- und Resourcenmanagement
+
+In diesen Kapitel wurden Ansätze zu besserem Handling von Fehlern und Resourcen gegenenübergestellt.
+
+=== Guard Clauses
+
+// Einen Kampf den ich stets geführt habe, ist der um die Anzahl der Rücksprungpunkte (return) in einer Methode.
+
+Ich war schon immer ein Freund von "Guard Clauses", d.h. der Abprüfung von ungewollten Bedingungen am Methodenanfang und dem sofortigen Zurückkehren zum Aufrufer.
+
+Wenn man das nicht möchte, entsteht eine vielfach verschachtelte Kette von `if then else` Verzweigungen und Zustandsvariablen.
+Diese zwingen den Leser dazu, sehr viele dieser möglichen Pfade und Zustände im Kopf zu behalten, da sie ja potentiell noch relevant sein könnten. 
+
+Dagegen kann man jede Bedingung die schon frühzeitig abgehandelt wird, sofort wieder vergessen.
+Damit wird es einfacher, die verbliebene Essenz einer Methode zu verstehen.
+
+.Guard Clauses
+[source,java]
+----
+// davor
+void setTargetSpeedKmh(double speedKmh) { 
+  if (speedKmh < 0) {
+    throw new IllegalArgumentException(); 
+  } else if (speedKmh <= SPEED_LIMIT) {
+    targetSpeedKmh = speedKmh; 
+  } else {
+    throw new IllegalArgumentException(); 
+  }
+}
+
+// danach
+void setTargetSpeedKmh(double speedKmh) {
+  if (speedKmh < 0 || speedKmh > SPEED_LIMIT) {
+    throw new IllegalArgumentException(); 
+  }
+  targetSpeedKmh = speedKmh; 
+}
+----
+
+Ein guter Rat aus Kent Becks Buch "Implementation Pattern" war: _Versuche immer nur ein Abstraktionslevel (also Einrückungslevel) in Deinen Funktionen zu haben._
+Damit werden tiefere Schachtelungen zu Methoden extrahiert, so dass sich der Block wie eine Schrittfolge von benannten Aufträgen liest, was dem Verständnis sehr zuträglich ist.
+
+////
+=== Exceptions
+
+Ich bin immer noch der Meinung das Checked Exceptions in Java keine gute Idee waren.
+Auch wenn die Intention gut gemeint war, führen sie meist nur zu endlosen catch-throw Ketten ohne dass ihre eigentliche Bedeutung zum tragen kommt.
+Es ist sinnvoller Runtime-Exceptions durchfliessen zu lassen und an einer dedizierten Stelle in den äusseren Gefilden der Anwendung Exceptions zu loggen und zu behandeln.
+
+Wichtig ist, bei Fehlermeldungen genügend Kontextinformationen mitzugeben, dh. an welcher Stelle der Eingabe (z.b. Datei und Zeilenummer), mit welchem Feld und Wert der Fehler aufgetreten ist.
+Dazu kann es hilfreich sein, strukturierte Daten in einer Exception abzulegen, um später darauf zuzugreifen.
+
+Eine gute Empfehlung ist auch Fehlermeldungen so zu gestalten dass der Nutzer der Anwendung oder Bibliothek eine Handhabe bekommt, den Fehler selbst zu beheben, also "Hilfe zur Selbsthilfe".
+
+Ein immer noch weit verbreiteter, aber hässlicher und vor allem langsamer Ansatz ist, Exceptions zum Kontrollfluss zu nutzen, d.h. statt eine Schleife oder Rekursion zu beenden wird einfach eine Exception geworfen.
+Das ist sehr langsam, und für den Leser schwer nachzuvollziehen.
+
+////
+
+=== Resourcenmanagement
+
+Ein sehr nützliches Feature dass mit Java 7 eingeführt wurde, hilft dabei, Resourcen die `AutoCloseable` implementieren automatisch und korrekt beim Verlassen eines Blockes zu schliessen.
+Dass das auch mit mehreren Variablenzuweisungen funktioniert, ist nicht allgemein bekannt.
+Damit wird auch das Problem umgangen, dass das Schliessen der ersten Resource fehlschlagen kann und dann die zweite nicht geschlossen wird.
+
+.Mehrfache Try-With-Ressources
+[source,java]
+----
+// davor
+void createStatistics() throws IOException { 
+  DirectoryStream<Path> directoryStream =
+    Files.newDirectoryStream(LOG_FOLDER, FILE_FILTER);
+  BufferedWriter writer =
+    Files.newBufferedWriter(STATISTICS_CSV);
+  try {
+    for (Path logFile : directoryStream) {
+      writer.write(computeLine(logFile));
+	}
+  } finally { 
+    directoryStream.close(); 
+    writer.close();
+  }
+}
+
+// danach
+void createStatistics() throws IOException { 
+  try (DirectoryStream<Path> directoryStream =
+         Files.newDirectoryStream(LOG_FOLDER, FILE_FILTER);
+       BufferedWriter writer =
+         Files.newBufferedWriter(STATISTICS_CSV)) {
+    for (Path logFile : directoryStream) {
+      writer.write(computeLine(logFile));
+	}
+  }
+}
+----
+
+== 6. Tests
+
+Tests sind zum einen eine Richtschnur, die unserem Code dabei hilft, das Richtige zu tun.
+
+Zum anderen sind sie ein Sicherheitsnetz für Änderungen am Code, wie z.B. beim Refactoring oder Erweiterungen.
+Kent Beck hat einmal gesagt, _Tests sind wie ein weiteres Paar Augen wenn man keinen Pair-Programming Partner hat_.
+Sie sind auch der erste "Client" unserer APIs und helfen uns diese besser (auch testbarer) zu gestalten.
+
+Für die Implementierung von Tests, sollte man immer ein Testframework benutzen, nur dann ist auch sichergestellt, dass die Tests korrekt ausgeführt werden und IDE/Build-Support existiert.
+
+Junit5 hat viele nützliche Ergänzungen erfahren, unter anderen Exception-Handling mittels Lambda-Callbacks.
+
+[source,java]
+----
+// davor
+@Test
+void readLogbook() {
+  Logbook logbook = new Logbook();
+  try {
+     List<String> entries = logbook.readAllEntries(); 
+     Assertions.assertEquals(13, entries.size());
+  } catch (IOException e) { 
+    Assertions.fail(e.getMessage());
+  } 
+}
+
+@Test
+void readLogbookFail() {
+  Logbook logbook = new Logbook();
+  try {
+     logbook.readAllEntries(); 
+     Assertions.fail("read should fail");
+  } catch (IOException ignored) {} 
+}
+
+// danach
+@Test
+void readLogbook() throws IOException {
+  Logbook logbook = new Logbook();
+  List<String> entries = logbook.readAllEntries(); 
+  Assertions.assertEquals(13, entries.size());
+}
+
+@Test
+void readLogbookFail() {
+  Logbook logbook = new Logbook();
+  Executable when = () -> logbook.readAllEntries();
+  Assertions.assertThrows(IOException.class, when);
+}
+----
+
+////
+== 7. Objekte
+
+Die Grundlagen von Kapselung und Kombination von Verhalten und Zustand erlernt man recht schnell.
+
+Wie dann aber mit Veränderlichkeit umgegangen werden sollte, oder Schnittstellen sicher gestaltet werden können ist ein viel weiteres Feld.
+
+// Ich sehe immer wieder Klassen, die in Sets oder Maps genutzt werden, aber keine oder keine vernünftige equals + hashCode Implementierung besitzen.
+
+Ich denke dass Tools wie Lombok oder Sprachen wie zum Beispiel Kotlin dabei helfen, diese Fehler zu vermeiden, indem Unveränderlichkeit, Nullsicherheit und korrekte Einhaltung von Kontrakten sichergestellt wird.
+
+Die Bevorzugung von abstrakten Klassen oder Interfaces für Variablen und Parameterdefinitionen ist ein weiterer wichtiger Aspekt.
+Damit legt man sich auf keine Implementierung fest und deklariert auch welchen Kontrakt man gern nutzen möchte: `Iterable < Collection < List < ArrayList`.
+Of reicht der `Collection` oder `List` Kontrakt, wenn man nur `foreach` nutzen möchte, sogar nur `Iterable`.
+
+Ein Pattern, dass die ungesunde Null-Pointer-Exception (NPE) oder den "Milliarden Dollar Fehler" (Tony Hoare) vermeidet ist das "Null Object Pattern".
+Dabei wird statt `null`, eine Standard-Implementierung eines Interfaces oder eine abstrakten Klasse zurückgegeben bei der alle Felder und Methoden einen _sicheren_ Wert zurückgeben.
+
+Also leere Listen, leere Strings, numerische Null usw, damit sie im späteren Verarbeitungsprozess transparent übergangen werden.
+
+[source,java]
+----
+// davor
+
+class SpaceNations {
+  static List<SpaceNation> nations = Arrays.asList( 
+       new SpaceNation("US", "United States"), new SpaceNation("RU", "Russia") );
+
+  static SpaceNation getByCode(String code) { 
+    for (SpaceNation nation : nations) {
+      if (nation.getCode().equals(code)) { 
+        return nation;
+      } 
+    }
+    return null; 
+  }
+}
+
+// danach
+class SpaceNations {
+  /** Null object. */
+  static final SpaceNation UNKNOWN_NATION = new SpaceNation("", "");
+
+  static List<SpaceNation> nations = Arrays.asList( 
+       new SpaceNation("US", "United States"), new SpaceNation("RU", "Russia") );
+
+  static SpaceNation getByCode(String code) { 
+    for (SpaceNation nation : nations) {
+      if (nation.getCode().equals(code)) { 
+        return nation;
+      } 
+    }
+    return UNKNOWN_NATION; 
+  }
+}
+----
+
+Dieses Beispiel wäre natürlich perfekt für Enums und damit Abstract Data Types geeignet, dann müsste auch dort ein Null-Objekt definiert werden.
+////
+
+== 8. Funktionen
+
+Das funktionale Programmierung auch in Java möglich ist, zeigt dieses Kapitel in dem verschiedene Baussteine erläutert werden.
+
+Wenn ich mein Programm als reine Transformation von Daten darstellen kann, habe ich den "funktionalen Himmel" erreicht.
+Aber bis dahin ist ein weiter Weg, auf dem viele Stolperfallen und ganz eigene Komplexitäten liegen - man denke nur an die unhandlichen APIs einiger reaktiven Ansätze.
+Mit Java 8 sind Lambdas und Streams auch in Java angekommen, an diversen Features fehlt es aber noch immer, z.b. eine `zip` Funktion.
+
+Was mir in "funktionalen" Java Programmen oft auffällt, ist, dass man den Wald vor lauter Bäumen nicht mehr sieht.
+Mehrfach ineinander, mehrzeilige und geschachtelte Lambdas und Streams ohne vernünftige Variablennamen und Struktur machen es unmöglich zu erkennen, was da eigentlich passiert.
+
+Zum anderen sollte man auch testen, besonders in performancekritischen Anwendungen, dass der elegante, funktionale Code mit den übergebenen Datenstrukturen nicht Komplexitätsprobleme hervorruft.
+Mir ist das in der Vergangenheit mit gutaussehenden Scala Funktionen passiert.
+Diese erhielten Listenimplementierungen als Übergabeparametre, welche für viele einfache Operationen eine `O(n)` Komplexität hatten.
+Das hatte zur Folge hatte, dass die ganze Verarbeitung dann auf `O(n^2)` oder höher stieg.
+
+Oder wie letztens im Flamegraph Artikel erwähnt, das Detail ob nicht doch die Methodenreferenz oder Lambda eine veränderliches Feld der Klasse umschliesst und sie damit für jeden Aufruf teuer neu erzeugt werden muss.
+
+Der Teufel steckt wie immer im Detail und im Wissen darum, wie die von aussen nett aussehenden APIs intern funktionieren.
+
+`Optional` ist ein guter Weg, mit Nullreferenzen sicher umzugehen.
+Dieses nur mit den `ifPresent` oder `getOrElse` Methoden zu benutzen, trägt seinen Fähigkeiten nicht genug Rechnung.
+Denn es kann wie ein `Stream` genutzt werden und bietet Operationen wie `filter`, `map` und `flatMap` an, mit dem etwaig vorhandene Werte elegant weiterverarbeitet werden, wie im Beispiel gezeigt.
+
+[source,java]
+----
+// davor
+void backupToEarth() {
+  Optional<Connection> connectionOptional =
+     communicator.getConnectionToEarth(); 
+  if (!connectionOptional.isPresent()) {
+    throw new IllegalStateException();
+  }
+  Connection connection = connectionOptional.get(); 
+  if (!connection.isFree()) {
+    throw new IllegalStateException(); 
+  }
+  connection.send(storage.getBackup());
+}
+
+// danach
+void backupToEarth() {
+  communicator.getConnectionToEarth()
+              .filter(Connection::isFree)
+              .map(c -> c.send(storage.getBackup()))
+              .orElseThrow(IllegalStateException::new); 
+}
+----
+
+== 9. Produktiveinsatz
+
+In diesem Kapitel werden weiterführende Aspekte diskutiert, die relevant werden, wenn man den eigenen Code in Betrieb nehmen will.
+
+Zum einen der Fakt, dass publizierte Programme nie in Stein gemeißelt sind, und in ihrem unerwartet langen Leben oft angepasst und modifiziert werden müssen, um den neuen Anforderungen gerecht zu werden.
+Diese können sich auf die Laufzeitumgebung (einzelner lokaler Recher vs. hochskaliert in der Cloud), Nutzervolumen und Leistungsumfang beziehen. 
+
+//Eine Empfehlung hinter der ich voll stehe, ist den weiterverbreiteten Java Code Style im Team zu benutzen, der von [Google Style] weiterentwickelt wurde.
+
+Statische Code-Analyze kann viele Fehler aufzeigen, was hilfreich, aber aufgrund der schieren Menge von gemeldeten Problemen auch paralysierend sein kann.
+An deren Behebung sollte man sich in kleinen, beherrschbaren Schritten herantasten.
+
+CI/CD Systeme helfen durch ihre komplette Automatisierung beim verlässlichen Build- und Deployment von Anwendungen, manuelle Schritte werden möglichst auf Null reduziert.
+
+Es wird auch darauf eingegangen, dass das Verständnis der Anforderungen nebenläufiger Programmierung wichtig ist, man aber eher auf unveränderliche Datenstrukturen und Tools wie Parallel-Streams oder Co-Routines setzen sollte.
+
+Im finalen Beispiel des Buches wird eine interessante Entscheidung diskutiert.
+
+Soll man versuchen, aus übergebenen Daten "entgegenkommend" relevante Teile zu extrahieren und dem Nutzer diese Arbeit abnehmen, oder besser die Verantwortung an ihn bzw. ein vorgelagertes System abgeben?
+Die Anzahl der Möglichkeiten die man behandeln müsste ist schier endlos und selbst wenn man denkt fertig zu sein, hat man garantiert nicht alle erfasst.
+
+[source,java]
+----
+// davor, Extraktion des "Nachnamens" aus einem übergebenen String
+class NameTag {
+  final String name;
+  NameTag(String fullName) {
+    this.name = parse(fullName).toUpperCase();
+  }
+  String parse(String fullName) {
+    String[] components = fullName.split("[,| ]");
+    if (components == null || components.length < 2) {
+      return fullName; 
+    }
+    if (fullName.contains(",")) { 
+      return components[0];
+    } else {
+     return components[components.length - 1];
+    } 
+  }
+}
+
+// danach, keine Annahme gemacht, Verantwortung des Nutzers der Klasse
+  NameTag(String name) {
+    Objects.requireNonNull(name);
+    this.name = name;
+  }
+----
+
+Weiterführende Informationen zu diesem Thema findet man auch in "Release It" [Nygard] oder in meinem Review des Buches in JavaSpektrum.
+Ich hätte mir noch einen Abschnitt zu Refactoring gewünscht, das dies einen wichtigen Beitrag zur "Gesunderhaltung" eines Systems beisteuert.
+
+== Fazit
+
+Das waren nur ein paar kleine Ausschnitte aus dem Buch, die hoffentlich Interesse auf mehr gemacht haben.
+
+Obwohl es mit 170 Seiten doch recht handlich ist, ist es doch mit einer Menge Erfahrungen gefüllt und stellt diese sehr anschaulich dar.
+Neben den praktischen Beispielen der Idiome die ausreichend detailliert diskutiert werden, enthält es auch generelle Betrachtungen, die zum Verständnis beitragen.
+Mir hat es sehr gut gefallen und ich denke, dass es eine echte Bereicherung für alle Entwickler ist, die ihre Fähigkeiten speziell in Java, aber auch im Allgemeinen auf das nächste Level heben wollen.
+
+== Referenzen
+
+* [Harrer] Java by Comparison, PragProg, Simon Harrer et al, https://java.by-comparison.com
+* [Code] Quellcode zum Buch, https://pragprog.com/titles/javacomp/source_code
+* [Dietz] Teaching Clean Code, Paper, http://ceur-ws.org/Vol-2066/isee2018paper06.pdf
+* [Fowler] Refactoring, 2nd Edition Peasons, Martin Fowler, https://www.amazon.de/dp/0134757599/
+* [C2] Code Smells, C2 Wiki: http://wiki.c2.com/?CodeSmell
+* [Beck] Implementation Patterns, Peasons, Kent Beck, https://www.amazon.de/dp/0321413091
+* [Bernstein] Beyond Legacy Code, PragProg,  David Scott Bernstein, https://pragprog.com/book/dblegacy/beyond-legacy-code
+* [TornhillXRay] Software Design X-Rays, PragProg, Adam Torhill, https://pragprog.com/book/atevol/software-design-x-rays
+* [Tornhill] Code Process Metrics in University Programming Education http://ceur-ws.org/Vol-2308/isee2019paper05.pdf
+* [Henney] 97 Things every Programmer should know, O'Reilly, Kevlin Henney, et.al.
+* [Bloch] Effective Java 3rd Edition, Addison-Wesley, Joshua Bloch, https://www.pearson.com/us/higher-education/program/Bloch-Effective-Java-3rd-Edition/PGM1763855.html
+* [Google] Google Code Style, https://google.github.io/styleguide/javaguide.html
+* [Nygard] Release It, PragProg, Michael Nygard (siehe auch Hunger in JS)
