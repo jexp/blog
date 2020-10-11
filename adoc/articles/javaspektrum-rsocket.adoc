@@ -1,6 +1,8 @@
 == RSocket.io - Sockets on Stereoids
+:author: Michael Hunger, Michael Simons
 
 google image search: pouring coffee
+
 image::https://image.freepik.com/free-photo/pouring-coffee-with-smoke-cup-coffee-beans-burlap-sack-black-background_126277-480.jpg[]
 
 Sockets sind ein integraler Bestandteil der Kommunikation von Prozessen, sowohl lokal auf einem Rechner aber insbesondere zwischen Maschinen über Netzwerkprotokolle.
