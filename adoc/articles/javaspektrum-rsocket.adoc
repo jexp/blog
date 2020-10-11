@@ -29,8 +29,7 @@ Im Dokument zur Motivation [RSocketMotivation] werden die Ideen und Gründe für
 
 Ein paar interessante Aspekte daraus sind:
 
-* Netzwerkkommunikation ist asynchron, RSocket übernimmt das in die Anwendungsschicht
-// ^^Was "das"? Synchronisierung?
+* Netzwerkkommunikation ist asynchron, RSocket übernimmt diesen Aspekt in die Anwendungsschicht
 * Lose-gekoppelte, nachrichtenbasierte System sind skalierbarer und robuster
 * Latenz und Resourceneffizienz sind Hauptgründe
 * Binärprotokoll zur effizienteren Resourcennutzung
@@ -52,8 +51,41 @@ Da dabei ein ganzer Thread (halbe CPU) in Anspruch genommen wird, ist die ganze 
 Seit Java 1.4 gibts es zwar NIO (non-blocking-IO) aber das ist bei der Socket-Programmierung nur bedingt angekommen.
 Es wird zwar z.B. in Netty für "pipelined processing" genutzt, wo ähnlich wie in Node.js die Verarbeitung in einem "Event-Loop" gehandhabt wird.
 
-Blockierende Operationen stoppen keinen Thread, sondern werden während ihrer Wartezeit auf "Halde" gelegt und melden sich beim Verfügbarkeit von Daten mittels "select" (TODO) zurück.
+Im darunterliegenden Socket-Code, kann ein Socket als nicht-blockierend [SocketsNonBlocking] markiert werden, dann sind typische Operationen wie read, write und accept nicht blockierend, sondern geben die Kontrolle zurück an den Aufrufer.
 
+Stattdessen werden in einer Liste von Sockets mittels des `select` Systemaufrufs diejenigen Sockets markiert, die bereit sind Daten zu lesen oder zu schreiben.
+Modernere Systemimplementierungen nehmen dafür `epoll`, ein eventbasiertes Notifikationssystem für nichtblockierende Sockets.
+
+////
+ep = epoll_create(size)
+epoll_ctl(ep,  add/remove/modify, socketDescriptor, notify-on-these-events)
+while (true) {
+   // check for sockets that are ready for read/write
+   // times out in a few ms
+   epoll_wait(ep, &events, timeout, &sockets);
+}
+
+Create a socket
+Mark it as non-blocking (this will make even the accept call non-blocking)
+Bind it to an address
+Listen on the socket
+Create an epoll instance
+Add your socket to the epoll instance (this way the incoming requests can be monitored through event notification)
+Create a read event queue
+Create threads for processing tasks from read queue
+Create a write event queue
+Create threads for processing tasks in the write queue
+Wait for events on epoll instance in a loop
+For incoming requests events
+  . call accept
+  . mark the accepted socket as non-blocking
+  . add it to the epoll instance for monitoring
+For read events, push the file descriptor and user data to read event queue
+For write events, push the file descriptor and user data to write event queue
+For close events, remove the file descriptor from the epoll instance
+////
+
+////
 Im Vergleich der Socket-Programmierung (Pseudocode) wird deutlich, wie sich die beiden Ansätze unterscheiden.
 
 .Blockierender Server (Pseudocode)
@@ -74,18 +106,23 @@ while (true) {
 .Nichtblockierender, asynchroner Server (Pseudocode)
 ----
 serverSocket = socket(AF_INET, SOCK_STREAM, TCP)
-fnctl(serverSocket, )
+// setze Socket auf non-blocking
+fnctl(serverSocket, F_SETFL, O_NONBLOCK)
 bind(serverSocket, host, port)
 listen(serverSocket, queueSize)
-while (true) {
-   // accept ist blockierend
-   clientSocket = accept(serverSocket, &clientInfo)
-   // read ist blockierend
-   bytesRead = read(clientSocket, buffer)
-   // write ist blockierend
-   write(clientSocket, buffer, bytes)
+sockets_set = fd_set(sockets)
+select(sockets_set)
+for (s in socket_set where is_available(s)) {
+   read(s)
+   // oder write(s)
 }
 ----
+////
+////
+By setting the O_NONBLOCK flag on a file descriptor, we instruct the system calls to return with an indication that it is yet to complete its work, instead of just waiting. In this way, it can continue to serve other clients, and finish the remaining task whenever the socket is ready to be served again.
+
+
+////
 
 .Beispiel für "traditionelle" Socket Programmierung in Java
 [source,java]
@@ -115,13 +152,13 @@ while(!isStopped) {
 serverSocket.close();
 ----
 
-== RSocket Testen
-
-Hier ein Beispiel für einen Client, er benutzt einen [DemoServer] `https://rsocket-demo.herokuapp.com` der für verschiedene Protokolle einen Stream von Twitter Daten bereitstellt.
+== Erste Schritte mit RSocket 
 
 Es gibt ein hilfreiches Kommandozeilentool namens `rsc` von Toshiaki Maki [RSC] das man zum Testen von RSocket Servern nutzen kann.
 
 Nach dem Download der JAR-Datei kann es direkt gestartet werden.
+
+Wir benutzten hier einen [DemoServer] `https://rsocket-demo.herokuapp.com` der für verschiedene Interaktonsmodelle einen Stream von Twitter Daten bereitstellt.
 
 ----
 curl -L -o rsc.jar https://github.com/making/rsc/releases/download/0.6.1/rsc-0.6.1.jar
@@ -134,18 +171,17 @@ java -jar rsc.jar --stream --take 10 "wss://rsocket-demo.herokuapp.com/rsocket"
 ----
 
 Man kann mittels `--request`, `--channel`, `--fnf` zwischen den Interaktionsmodellen wählen und auch andere Attribute des Streams, wie Verzögerung, Limits kontrollieren.
-Authentication und Requestparameter werden auch unterstützt.
+Authentifizierung und das Senden von Daten werden auch unterstützt.
 
 == RSocket in Java
 
 Um RSocket in Java zu nutzen, benötigt man zwei Bibliotheken von Maven Central `io.rsocket:rsocket-core` und `io.rsocket:rsocket-transport-netty` für den asynchronen Transportkanal über Netty.
 
 ====
-RSocket in Java benutzt die Project-Reactor Bibliothek von VMWare für reaktive Implementierung,
-daher werden `Mono` und `Flux` auch direkt in der API verwendet.
+RSocket in Java benutzt die Project-Reactor Bibliothek von VMWare für reaktive Implementierung, daher werden `Mono` und `Flux` auch direkt in der API verwendet.
 
 Dabei stellt ein `Flux<T>` einen reaktive Quelle von Nachrichten `T` dar, und bietet viele Operationen (`map, filter, ...`) darauf an. 
-Ein `Mono<T>` hat dagegen maximal ein Element.
+Ein `Mono<T>` beinhaltet dagegen maximal ein Element.
 
 // Die beiden anderen reaktiven Bibliotheken - SmallRye Mutiny und RX Java 2 - stellen Adapter-Typen für Project-Reactor zur Verfügung bzw. können mit den Interfaces der Reactive-Streams-API umgehen.
 ====
@@ -533,15 +569,19 @@ Vielen Dank an Michael Simons für das Feedback und die Hilfe mit den Code Beisp
 
 == Referenzen
 
+* [Demo Repository] https://github.com/jexp/javaspektrum/tree/master/rsocket
 * rsocket.io
 * [Rsocket-Java] https://github.com/rsocket/rsocket-java
 * [DemoServer] https://github.com/rsocket/rsocket-demo
 * [RSocketMotivation] https://rsocket.io/docs/Motivations
 * [Baeldung] https://www.baeldung.com/rsocket
 * [RSocket-RPC] https://github.com/rsocket/rsocket-rpc-java
+* [RSocketSpring] https://spring.io/blog/2020/03/02/getting-started-with-rsocket-spring-boot-server
+* [RSocketSpringChannels] https://spring.io/blog/2020/04/06/getting-started-with-rsocket-spring-boot-channels
+* [RSocketSpringVideo] https://www.youtube.com/watch?v=iSSrZoGtoSE
 * [RSocket-RPC-Spring] https://grapeup.com/blog/reactive-service-to-service-communication-with-rsocket-abstraction-over-rsocket/
 * [RSocket Ressourcen] https://github.com/linux-china/awesome-rsocket
-* [SocketsSelect] https://techtake.info/2016/09/19/non-blocking-tcp-server-explained/
+* [SocketsNonBlocking] https://techtake.info/2016/09/19/non-blocking-tcp-server-explained/
 * [ReactorTest] https://projectreactor.io/docs/core/release/reference/#testing
 * [StepVerifier] https://projectreactor.io/docs/test/release/api/reactor/test/StepVerifier.html
 * [RSC] RSocket Command Line Tool https://github.com/making/rsc
