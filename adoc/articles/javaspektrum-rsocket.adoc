@@ -10,6 +10,14 @@ Sockets sind ein integraler Bestandteil der Kommunikation von Prozessen, sowohl 
 Mit Rsocket.io ist seit 2015 ein Framework verfügbar dass die Socketprogrammierung mit dem Paradigma des "reaktiven Programmierung" (HungerXX) verknüpft.
 
 Es bietet ein "point-to-point" Applikations-Binärprotokoll auf der OSI-Schicht 5/6 für verschiedene Transportmechanismen von direktem TCP bis zu Websockets und Aeron mit besonderem Fokus auf nicht-blockierende Operationen.
+Dabei wird sowohl Kommunikation zwischen Services als auch zwischen Client und Services unterstützt, was für moderne Anwendungsarchitekturen besonders interessant ist.
+// requester <-> responder, server can also initiate connection
+// backpressure per stream
+// request throttling with lease (number of streams)
+// heartbeats, keep-alive
+// (composite) (routing) metatdata, message/x.rsocket.routing.v0
+// initial request frame to select model
+// agreement on mime types
 
 Folgende Kommunkationsmodelle werden unterstützt:
 

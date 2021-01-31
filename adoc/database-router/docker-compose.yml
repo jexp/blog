@@ -1,0 +1,55 @@
+version: '3'
+
+networks:
+  neo4j_cluster:
+    driver: bridge
+
+services:
+
+  core1:
+    image: neo4j:4.0.5-enterprise
+    hostname: core1
+    container_name: core1
+    ports:
+      - 7686:7687
+    networks:
+      - neo4j_cluster
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_AUTH: neo4j/test
+      NEO4J_dbms_mode: CORE
+      NEO4J_dbms_routing_enabled: "true"
+      NEO4J_causal__clustering_initial__discovery__members: core1:5000,core2:5000,core3:5000
+      NEO4J_dbms_connector_bolt_advertised__address: localhost:7686
+
+  core2:
+    image: neo4j:4.0.5-enterprise
+    hostname: core2
+    container_name: core2
+    ports:
+      - 7688:7687
+    networks:
+      - neo4j_cluster
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_AUTH: neo4j/test
+      NEO4J_dbms_mode: CORE
+      NEO4J_dbms_routing_enabled: "true"
+      NEO4J_causal__clustering_initial__discovery__members: core1:5000,core2:5000,core3:5000
+      NEO4J_dbms_connector_bolt_advertised__address: localhost:7688
+
+  core3:
+    image: neo4j:4.0.5-enterprise
+    hostname: core3
+    container_name: core3
+    ports:
+      - 7689:7687
+    networks:
+      - neo4j_cluster
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_AUTH: neo4j/test
+      NEO4J_dbms_mode: CORE
+      NEO4J_dbms_routing_enabled: "true"
+      NEO4J_causal__clustering_initial__discovery__members: core1:5000,core2:5000,core3:5000
+      NEO4J_dbms_connector_bolt_advertised__address: localhost:7689

@@ -1,0 +1,465 @@
+== JDK Flight Recorder - Sicher Reisen mit der JVM
+:img: ../../img
+
+Das Eventsystem von JDK Flight Recorder (JFR) ist seit einiger Zeit in der JVM integriert.
+Wie ein Flugschreiber, daher der Name, ermöglicht es bei interessanten Ereignissen Events zu feuern, zu filtern und aufzuzeichnen, die relevante Informationen erfassen, um beobachtetes Verhalten nachzuvollziehen.
+
+In der JVM können mehr als 500 Aktionen des Garbage Collectors, JIT-Compilers, Classloaders, Objektallokationen, oder Netzwerkzugriffe aufgezeichnet werden.
+Da die Erzeugung der Events nur minimale Last auf dem System produziert, kann JFR auch in Produktivsystemen genutzt werden.
+Die aufgezeichneten Ereignisse können auch ohne Zugriff auf die laufende Anwendung für detaillierte Analyse und Korrelation bereit gestellt werden.
+
+Zur Auswertung und Anzeige von JFR Aufzeichnungen wird meist das Werkzeug (JDK) Mission Control (JMC) benutzt.
+
+In vergangenen Artikeln habe ich immer mal wieder auf JFR hingewiesen, zum Beispiel bei der Betrachtung von JVM Kommandozeilentools [HungerXxx], bin aber noch nie tiefer in die Materie abgetaucht.
+
+Im letzten Jahr hat Gunnar Morling (Java-Champion, Debezium Lead bei Redhat in Hamburg) eine Reihe von Artikeln zum Thema geschrieben und Tools vorgestellt bzw. entwickelt, die für JFR Anwender nützlich sind, die mich zum Schreiben dieses Artikels veranlassten.
+
+=== Geschichte von JFR und JMC
+
+Der JFR hat eine bewegte Geschichte, die einen eigenen Abschnitt rechtfertigt.
+
+Ursprünglich war Flight Recorder ein Teil der JRockit VM von BEA Systems, die 2008 von Oracle gekauft wurde.
+Mit der Integration von JRockit Features in die Hotspot VM, wurde auch Java Flight Recorder (JFR) verfügbar. 
+Es war ursprünglich ein kommerzielles Feature das separat aktiviert werden musste.
+
+Seit 2018 (Java 11) ist JFR auch in OpenJDK frei verfügbar, es gibt auch einen Backport von Azul zu Java 8.
+Aus Trademark-Gründen musste eine Umbenennung nach "JDK Flight Recorder" erfolgen.
+
+Java Mission Control (JMC) war ebenso ein Werkzeug von BEA das zuerst nur eingeschränkt verfügbar war.
+JMC ist nicht nur eine Analyse- und Visualsierungsoberfläche auf Eclipse-Basis für JFR-Aufzeichnungen sondern auch eine JMX Konsole und kann durch Plugins, z.b. für Heap-Analyse erweitert werden.
+Es kann auch als Plugin in die Eclipse IDE integriert werden.
+
+image::{img}/jmc-profiling.png[]
+
+2018 hat Oracle das Tool als quelloffene Software zur Verfügung gestellt, und das Team aufgelöst.
+
+Zum Glück hat dies nicht zu einer Aufgabe geführt, sondern zu neuen Bemühungen im JMC Release 7 mündeten.
+Klara Ward und Marcus Hirt [Hirt] sind hier besonders aktiv in der Entwicklung und leisten sehr viel Aufklärungsarbeit (Artikel, Vorträge) rund um das Thema.
+
+Das jüngste Familienmitglied, JDK Mission Control 8.0 steht im Januar 2021 ins Haus.
+
+In Java 14 wurde die JFR Event Streaming API eingeführt ([JEP-349]), die es erlaubt Ereignisse in Echtzeit (weniger als 1% Performanceverlust) aus der JVM zu konsumieren.
+
+In Java 16 gibt es die Möglichkeit besonders für häufige JFR Events ein Sampling zu aktivieren, um die Zusatzlast für Produktionssysteme zu kontrollieren.
+
+=== Unser Testprogramm
+
+Unser Testprogramm alloziert ausgehend von zwei Zufallswerten ein Integer-Array, füllt dieses mit Werten und multipliziert diese dann zu einem Long-Wert auf.
+Dabei werden das Autoboxing und die unnötige Allokation bewusst als "Verschwendung" von Ressourcen genutzt.
+
+Das Programm läuft für eine feste Zeit, so dass wir die Messung auch manuell mittels der Tools auslösen können.
+
+.Testprogramm für Eventaufzeichnung
+[source,java]
+----
+public class JfrProgram {
+
+    public static void main(String[] args) {
+        int maxElements = 100_000;
+        int seconds = 120;
+        long runtime = System.currentTimeMillis() + 
+             TimeUnit.SECONDS.toMillis(seconds);
+        Random r = new Random();
+        Long result = 0L;
+        while (System.currentTimeMillis() < runtime) {
+            result += compute(r.nextInt(), r.nextInt(maxElements));
+        }
+        System.out.println("result = " + result);
+    }
+
+    // let's be a bit wasteful
+    public static Long compute(int start, int count) {
+        int[] data = new int[count];
+        for (int i=0;i<count;i++) {
+            data[i]=start + i;
+        }
+        Long result = 1L;
+        for (int i=0;i<count;i++) {
+            result *= data[i];
+        }
+        return result;
+    }
+}
+----
+
+=== Erste Schritte mit JFR und JMC
+
+JFR ist, seitdem es keine kommerzielles Feature mehr darstellt (die Lizenz wurde auch damals nicht überprüft), nutzbar ohne es vorher mittels Kommandozeilenflags zu aktivieren.
+
+Die Aufzeichnung kann bei Bedarf direkt beim Start der Anwendung gestartet werden, hier einige der nutzbaren Flags:
+`-XX:StartFlightRecording=filename=recording.jfr,maxsize=1024m,settings=profile,dumponexit=true,delay=20ms`
+
+Es gibt auch eine JFR-API die die programmatische Aufzeichnung mittels `jdk.jfr.Recording` erlaubt [JFRJava8].
+
+Normalerweise wird die Aufzeichnung gestartet und läuft dann für einen angegebenen Zeitraum, an dessen Ende sie dann gestoppt und in die Datei geschrieben wird.
+Mittels `dumponexit` passiert das auch wenn das Programm beendet bevor der Zeitrahmen abgelaufen ist.
+Mittels `disk=true` wird die Aufzeichnung kontinuierlich ohne Aufforderung gespeichert.
+
+Mittels `settings` kann die "profile" Einstellung aktiviert werden, die zusätzliche Speicherallokationen, GC Informationen uvm. aufzeichnet.
+Daher erzeugt diese Aufzeichnung aber auch mehr als die gewünschten 1% Last auf dem System, und wird daher für Produktionseinsatz nicht empfohlen.
+Es können auch eigene Einstellungsdateien mittels JMC's Template Export erzeugt werden, die hier als Pfad angegeben werden können.
+
+.Konfigurationsoptionen
+|===
+| Option | Werte | Kommentar
+| settings | default / profile / eigene | Bei "profile" werden zusätzliche Speicherallokationen aufgezeichnet
+| maxage | 1d | Alter der Dateien bei dauerhafter Aufzeichnung
+| maxsize | 1024m | Maximale Größe der Aufzeichnung (default: kein Limit)
+| filename | filename.jfr | Dateiname für Aufzeichnung
+| path-to-gc-roots | true / false | Objektreferenzen werden zu Root-Objekten im Heap verfolgt
+| disk | true / false | Datei schon während der Aufzeichnung geschrieben
+| dumponexit | false / true | Aufzeichnung wird auch bei Programmende gespeichert
+| delay | 10s | Verzögerung vor Start der Aufzeichnung
+| duration | 1m | Dauer der Aufzeichnung
+|===
+
+Besser kann man die Standardereignisse einfach mit Tools [HungerTools0420] wie `jcmd` bzw. `jfr` oder mit der Oberfläche von JMC aufzeichnen und abspeichern.
+
+Mittels `jcmd`:
+
+.Nutzung von jcmd für Aufzeichnung
+[source,shell]
+----
+# Ohne Parameter, alle Java Prozesse anzeigen
+jcmd
+# JFR Aufzeichnung starten
+jcmd <pid> JFR.start name=jfrprogram settings=profile delay=20s duration=2m
+
+# JFR Dump (zwischenzeitlich) erzeugen
+jcmd <pid> JFR.dump name=jfrprogram filename=recording.jfr
+
+# JFR Aufzeichnung stoppen und Datei erzeugen
+jcmd <pid> JFR.stop name=jfrprogram filename=recording.jfr
+----
+
+Das jfr Tool erlaubt es, JDK Flight Recorder Dateien zu lesen und anzuzeigen (print, summary und metadata). 
+Das kann in einem lesbaren Textformat oder JSON/XML (--json, --xml) erfolgen.
+
+* print stellt das ganze Event-log dar
+* metadata zeigt welche Events aufgezeichnet wurden (Event-Klassen)
+* summary stellt in einen Histogramm dar, welche Events wie oft aufgezeichnet wurden
+
+.jfr Werkzeug zur textuellen Darstellung der Aufzeichungen
+[source,shell]
+----
+jfr summary recording.jfr | head -15
+
+ Version: 2.0
+ Chunks: 1
+ Start: 2021-01-24 19:50:55 (UTC)
+ Duration: 10 s
+
+ Event Type                            Count  Size (bytes) 
+===========================================================
+ jdk.ExecutionSample                     973         13622
+ jdk.ModuleExport                        895         12353
+ jdk.BooleanFlag                         648         21810
+ jdk.PromoteObjectInNewPLAB              627         12540
+ jdk.JavaMonitorWait                     508         14732
+ jdk.NativeMethodSample                  499          6986
+ jdk.SystemProcess                       357         87358
+----
+
+Um die Menge an Informationen zu beschränken können Kategorien mittels `--categories "GC,JVM,Java*"` und Events via `--events CPULoad,GarbageCollection` bzw. `--events` "jdk.*" gefiltert werden. 
+Leider ist das nicht bei `summary` oder `metadata` möglich, nur bei `print`.
+
+Das bessere Tool, JFR Aufzeichnungen auszuwerten, ist natürlich JDK Mission Control.
+
+Nach dem Öffnen der Oberfläche sieht man alle laufenden Java Prozesse und kann sich per Klick einen Überblick über jede Instanz verschaffen.
+
+Mittels Rechtsklick auf den Prozess kann man die JFR Aufzeichnung starten, zwischenspeichern und beenden.
+
+image::{img}/jmc-capture-recording.png[]
+
+Sobald ersten Daten vorliegen, werden in einer Detailanzeige sowohl die JVM- und Systemereignisse als auch eigene Events dargestellt.
+
+So können wir Allokationen, Garbage Collection, JIT-Compilation usw. unseres Testprogramms sehen.
+
+JMC kann anhand von integrierten Regeln bestimmte Verhaltensmuster erkennen und Vorschläge zur Behebung von Problemen machen.
+Diese werden gleich im ersten Übersichtsansicht einer Aufzeichnung angezeigt.
+
+=== Eingebaute JFR Events 
+
+Wenn man sich die Anzeige von `jfr` oder JMC anschaut, kann man leicht von der Vielzahl der aufgezeichneten Ereignistypen überwältigt werden.
+
+image::{img}/jmc-event-browser.png[]
+
+Die Hauptkategorien und ihre Bereiche sind:
+
+* Java Application (Threads, Speicheroperationen, Methodenprofiling, Exceptions, File und Socket I/O)
+* JVM Internals (Garbage Collection, JIT Compiler, Classloading, TLAB, Locks)
+* Environment (Umgebungvariablen, Prozesse, Systemproperties, native Bibliotheken)
+
+Im Event Browser von JMC kann man für alle diese Bereiche alle aufgezeichneten Ereignistype im Detail ansehen, filtern und analysieren.
+Neben Stacktraces für die Events können diese auch in Flamegraphs aggregiert dargestellt werden.
+Je nach Eventtyp gibt es noch zusätzliche Anzeigen in Diagrammen, Heatmaps, Histogrammen und Zeitstrahlen.
+
+Die verfügbaren JFR Events pro Java Version werden von Tom Schindl in einer detaillierten Übersicht [JFRbyVersion] gepflegt.
+Für jedes Ereignis sind Name, Label, Beschreibung, Kategorie und alle Attribute mit ihren Datentypen aufgelistet.
+
+////
+to showcase JMC’s ability to automatically analyze data and suggest improvements. JMC’s analysis is based on a feature called the rules engine. The rules engine is currently being overhauled for JMC 8.0 in order to add more options for analysis, offer a better API for direct consumption via tooling, and improve overall performance.
+////
+
+=== Eigene JFR Events
+
+Die JFR APIs erlauben es neben den eingebauten Events auch eigene Typen zu definieren und zu nutzen, um relevante Metriken des Systems aufzuzeichnen.
+Nützliche Informationen sind zum Bespiel, Anzahl, Ausführungszeit und Latenz von Anfragen einer API, Durchsatz von Transaktionen und Speichernutzung einer kritischen Komponente.
+
+Gunnar Morling hat in seinem sehr empfehlenswerten, ausführlichen Artikel [MorlingREST] dargestellt, wie das in einer REST-API einer Quarkus Anwendung (Quelltext und Nutzung) aussehen würde.
+
+Wir nutzen hier einen deutlich einfacheren Eventtyp.
+
+Abgeleitet von der Klasse `jdk.jfr.Event`, die neben anderer Infrastruktur schon Zeitstempel und Dauer eines Ereignisses bereitstellt, kann man eigene relevante Attribute im eigenen Event definieren.
+Mittels Annotationen können Metainformationen (insbesondere für JMC) angegeben werden.
+
+[source,java]
+----
+import jdk.jfr.*;
+
+@Name(ComputeEvent.NAME) // <1>
+@Label("Compute Event")
+@Category("JavaSpektrum")
+@Description("Simple Demonstration Compute Event")
+@StackTrace(false)  // <2>
+public class ComputeEvent extends jdk.jfr.Event {
+    static final String NAME = "javaspektrum.ComputeEvent";
+
+    @Label("Count") // <3>
+    @Unsigned // <4>
+    long count;
+    @Label("Memory")
+    @DataAmount
+    long bytes;
+    @Label("Frequency")
+    @Frequency
+    double operationsPerSecond;
+}
+----
+
+<1> `@Name, @Category, @Description, @Label` Annotationen sind Metadaten für die JMC UI
+<2> Unser Event braucht keinen stacktrace, da wir wissen wo er erzeugt wird
+<3> Die Attribute stellen relevante Messgrößen dar
+<4> `@DataAmount, @Frequency, @Unsigned` spezialisieren die Datentypen
+
+Metadaten-Annotationen für Felder sind:
+
+* DataAmount - Datenmenge in Byte
+* Experimental
+* Timespan, Timestamp
+* MemoryAddress - Speicheraddressen
+* Percentage 
+* Frequency - in Hertz
+* Unsigned
+
+Diese Ereignisse müssen jetzt an der korrekten Stelle im Kontrollfluss unserer API erzeugt und aufgezeichnet werden.
+Es ist sinnvoll dies von der Geschäftslogik zu trennen, so dass diese "technischen" Ereignisse z.B. in vor- oder nachgelagerten Infrastruktur-Lebenszyklen gehandhabt werden.
+
+Um das mittels Bytecode-Instrumentierung zu erreichen gibt es einen [JMC-Agent].
+
+Für dynamische Events, deren Inhalt erst zur Laufzeit bekannt ist, gibt es die `jdk.jfr.EventFactory`.
+
+Das Aufzeichnen von Events innerhalb eines Kontrollflusses kann z.B. in einem RequestFilter/Interceptor erfolgen:
+
+* Erzeugung der Event-Instanz
+* Überprüfung ob Aufzeichnung aktiv ist `event.isEnabled()`
+* Setzen von Attributen
+* Start der Aufzeichnung mittels `event.begin()`
+* Temporäre Ablage des Events entweder in einem ThreadLocal oder in einem Kontext
+* Während der Abarbeitung ggf. Hinzufügen weiterer Attribute
+* Nach der Aufzeichnung `event.end()`
+* Falls `event.shouldCommit()` (Aufzeichnung noch aktiv, Laufzeitkriterien erfüllt)
+* Setzen verbleibender Attribute
+* Aufruf von `event.commit()`
+* Aufräumen - Entfernen der Instanz aus ThreadLocal oder Kontext
+
+[source,java]
+----
+while (System.currentTimeMillis() < runtime) {
+    ComputeEvent event = new ComputeEvent();
+    int count = r.nextInt(bound);
+    long startTime = System.nanoTime();
+    if (event.isEnabled()) {
+        event.count = count;
+    }
+    long computed = JfrProgram.compute(r.nextInt(), count);
+    result += computed;
+    if (event.shouldCommit()) {
+        event.bytes = count * Integer.BYTES;
+        event.operationsPerSecond = 1_000_000_000d * count / (System.nanoTime()-startTime);
+        event.commit();
+    }
+}
+----
+
+Wenn man Events innerhalb von JMC sehen und konfigurieren möchte, dann sollten diese im Vorab beim Start der Anwendung registriert werden.
+
+[source,java]
+----
+FlightRecorder.register(ComputeEvent.class);
+----
+
+Ab dann kann die Anwendung mittels JMC nicht nur die Ereignisse der JVM sondern auch die eigenen Events aufzeichnen und analysieren.
+
+Dann wird im "Event Browser" auch unsere Kategorie "JavaSpektrum" und darunter die Labels unserer Events angezeigt.
+In der Detailansicht bzw. den Diagrammen können dann die numerischen Attribute visualisiert werden.
+
+image::{img}/jmc-custom-event.png[]
+
+Es ist möglich die Aufzeichnung von Events mittels der API (`SettingControl`) und nutzerdefinierten Einstellungen noch feingranularer zu kontrollieren (erfolgt in `shouldCommit`), wie im Artikel von Gunnar Morling näher erläutert.
+Mit diesem Ansatz könnten auch Detailinformationen nur bei Bedarf aufgezeichnet werden.
+
+// , dann muss eine Subklasse von `SettingControl` einer mit `SettingDefinition` annotierten Methode übergeben wreden.
+
+=== JFR ist effizient
+
+Die Standardeinstellungen des JDK Flight Recorders belasten das System mit weniger als 1%. 
+Die Profiler-Einstellungen erzeugen ca. 2% Last, werden daher für Produktivsysteme nicht empfohlen.
+
+Effizienzmechanismen in der JFR Aufzeichnung:
+
+* Binärrepräsentation benötigt keine Translation in Strings
+* (thread-lokale) Aufzeichnungspuffer werden in globalen Ringpuffer übertragen
+* wenn dieser Puffer voll ist, schreibt ein separater Thread in die Datei
+* Integer-Kompression (LEB128)
+* Tiefe Integration der Aufzeichnung im JVM Kern für effiziente Ermittlung der Informationen, in dem Moment, in dem sie anfallen
+* Detaillierte Filterung beim potentiellen Erzeugen der Events, um unnötige Aufzeichnungen zu vermeiden
+
+Alle JFR Events in Blöcken (chunk) einer Aufzeichnung sind selbstbeschreibend, die Metadaten und Datentypen zur Auswertung sind in jedem Block enthalten.
+
+=== Streaming JFR Events
+
+Mit dem JEP-349 können JFR Events mittels einer Consumer-API kontinuierlich verarbeitet werden.
+Dieses Feature erlaubt die Integration in Überwachungsinfrastrukturen die auf Echtzeitmonitoring basieren.
+Das Rohdatenvolumen von JFR ist dafür wahrscheinlich zu hoch - daher sollten entweder Stichproben, Überschreitungen oder abgeleitete Metriken überwacht werden.
+
+// Dabei ist es egal ob die Quelle eine Aufzeichnungsdatei, ein "Repository" (noch nicht gespeicherte Aufzeichnungen) oder die Aufzeichnungsinfrastruktur selbst ist.
+
+Die genutzte `RecordingStream` API basiert auf dem `jdk.jfr.consumer.EventStream` interface, das feingranulare Konfiguration erlaubt, welche Events, wann, wie konsumiert werden sollen.
+Zusätzlich wird ein Handler definiert, der bei der Ankunft eines neuen Ereignisses aufgerufen wird.
+
+.JFR Streaming API Beispiel
+[source,java]
+----
+try (var rs = new RecordingStream()) {
+  rs.enable("jdk.CPULoad").withPeriod(Duration.ofSeconds(1));
+  rs.onEvent("jdk.CPULoad", event -> {
+    System.out.println(event.getFloat("machineTotal"));
+  });
+  rs.enable("jdk.JavaMonitorEnter").withThreshold(Duration.ofMillis(10));
+  rs.onEvent("jdk.JavaMonitorEnter", event -> {
+    System.out.println(event.getClass("monitorClass"));
+  });
+  rs.start();
+}
+----
+
+Mit diesem Ansatz können JFR Events leicht an Monitoring Bibliotheken wie Micrometer.io oder MicroProfile Metrics weitergereicht werden, die dann die Integration mit Tools wie Grafana oder Prometheus übernehmen.
+
+Hinter den Kulissen werden die schon erwähnten Puffer regelmässig geleert und dabei Dateistrukturen erzeugt, die dann von einem separaten Thread ausgelesen werden, der die Konsumenten bedient.
+
+Damit kann die JFR Infrastruktur nicht nur für Profiling von Problemen sondern auch für ein aktives Monitoring von Produktionssystemen eingesetzt werden.
+
+=== Weitere JFR Tools
+
+Gunnar Morling hat sich im JFR Umfeld ausgetobt, dabei sind zwei weitere nützliche Tools entstanden, die ich Ihnen nicht vorenthalten will.
+
+==== JfrUnit
+
+Die Idee hinter JfrUnit erlaubt es einige nichtfunktionale Performanz-Aspekte und Zusicherungen eines Systems mit Tests abzudecken.
+
+Dazu werden indirekte Kriterien formuliert, die mittels JFR-Aufzeichungen gemessen und dann gegenüber erwarteten oder vorher gemessenen Werten validiert werden.
+
+Das können Speicherallokationen, Threadwechsel, Anzahl von Datenbankstatements u.ä. sein, deren aktuelle Messwerte als Basis für eine Regression dienen.
+
+Wenn diese Messungen sich in Zukunft deutlich erhöhen, kann das eine Verschlechterung des Verhaltens des Systems zur Folge haben, besonders wenn auch andere Resourcen stärker beansprucht werden.
+
+Die Aufzeichung und Messung dieser Metriken ist nicht von Umgebungseigenschaften wie verfügbare CPUs, Speicher und JIT abhängig, kann also auch lokal während der Entwicklung erfolgen.
+Es ist vorteilhaft Kriterien zu wählen die unempfindlicher für Latenzen oder andere Zeitaspekte sind.
+
+JfrUnit erlaubt über eine API solche Zusicherungen in regulären JUnit Tests zu überprüfen, hier ein einfaches Beispiel aus dem Blog Post.
+
+// the idea is to measure and assert metrics that impact the performance characteristics
+
+[source,java]
+----
+@JfrEventTest // JUnit Erweiterung aktivieren
+public class JfrUnitTest {
+
+  public JfrEvents jfrEvents = new JfrEvents();
+
+  @Test
+  @EnableEvent("jdk.GarbageCollection") // welche Events erwartet
+  // @EnableConfiguration("profile") Bei Bedarf Settings nutzen
+  public void shouldHaveSingleGcEvent() throws Exception {
+    System.gc();
+
+    jfrEvents.awaitEvents(); // Aufsammeln der Events bisher
+
+    // DSL für Eventspezifikation (AssertJ Matcher)
+    ExpectedEvent event = event("jdk.GarbageCollection") 
+        .with("cause", "System.gc()"));
+    assertThat(jfrEvents).contains(event);
+
+    // Filter auf Eventliste
+    assertThat(jfrEvents.ofType("jdk.GarbageCollection")).hasSize(1); 
+  }
+}
+----
+
+Neben einfachen Checks können die Events und deren Attribute auch inspiziert werden, das erlaubt die Aggregation und Überprüfung von Metriken über einen längeren bzw. wiederholten Ablauf unseres Programmcodes.
+
+JfrUnit speichert die aufgezeichneten Ereignisse in einer Datei pro Test, die später mit JMC untersucht werden kann.
+
+Damit können dann kritische Überschreitungen der erwarteten Metriken in Tests festgestellt werden und ermöglichen die detaillierte Ursachenforschung.
+
+==== JmFrX
+
+JmFrx liest regelmäßig Werte von JMX Beans und stellt sie als JFR Ereignisse bereit.
+Das ist besonders interessant für JMX Beans von Java basierten Infrastrukturkomponenten, wie Datenbanken (Neo4j), Streaming (Kafka, Camel)- und Processing Frameworks (Spark, Flink).
+
+Damit können diese Daten in die JFR Aufzeichnungen integriert und korreliert werden. 
+JMX Informationen stehen ja nur zur Verfügung solange die JVM noch läuft, JFR Aufzeichnungen sind dagegen persistent.
+
+Mittels JMC kann man eine Settings-Datei konfigurieren, die die Namen der relevanten JMX-Beans und Häufigkeit der Aufzeichnung festlegt.
+
+Attribute der JMX Beans können über eine API auf JFR Felder und dedizierte Datentypen gemappt werden.
+
+Die Implementierung benutzt die erwähnte `EventFactory` für dynamische Events und mit `@Period` annotierte Events registriert mit `FlightRecorder.addPeriodicEvent` für periodische Eventaufzeichnung.
+
+=== Fazit
+
+JFR und JMC sind eine mächtige Kombination von Werkzeugen, die mit wenig Aufwand einen detaillierten Blick in die Interna der JVM erlauben, so dass Problemen mit eigenen Anwendungen leichter auf die Spur zu kommen ist.
+
+In den letzten Monaten gab es einige interessante Entwicklungen besonders das Event-Streaming zum Monitoring, JFR-Unit und JMC Version 8.
+Zudem wurden eine ganze Menge Artikel, Videos und Tutorials veröffentlicht.
+Es lohnt sich also, in diesem Bereich auf dem Laufenden zu bleiben.
+Besonders herzlichen Dank an Gunnar Morling für seine fantastischen Artikel zum Thema!
+
+Markus Hirt, der Hauptentwickler von JMC hat eine Reihe von [JMCTutorials] veröffentlicht, die demonstrieren wie leicht man mit JFR und JMC u.a. Speicherlecks finden kann [JMCDemoVideo].
+
+Für viele der genannten APIs gibt es einfache Demos [JFRApiDemos] von Eric Gahlin, einem der Autoren von JFR in OpenJDK.
+
+=== Referenzen
+
+* Wikipedia JDK Flight Recorder https://en.wikipedia.org/wiki/JDK_Flight_Recorder
+// * Oracle JFR https://docs.oracle.com/javacomponents/jmc-5-4/jfr-runtime-guide/about.htm#JFRUH170
+* [JDKMissionControl] https://adoptopenjdk.net/jmc.html
+* [HirtBlog] http://hirt.se/blog/
+* [JFRbyVersion] https://bestsolution-at.github.io/jfr-doc/
+* [JFRJava8] https://developers.redhat.com/blog/2020/08/25/get-started-with-jdk-flight-recorder-in-openjdk-8u/
+// https://www.infoq.com/news/2020/02/jfr-coming-to-openjdk-8/
+* https://www.morling.dev/blog/rest-api-monitoring-with-custom-jdk-flight-recorder-events/
+* [JEP-349] https://openjdk.java.net/jeps/349
+* [JMC-Agent] https://github.com/openjdk/jmc/tree/master/agent
+* [JFRJava11] https://dzone.com/articles/using-java-flight-recorder-with-openjdk-11-1
+* JMCTutorials https://github.com/thegreystone/jmc-tutorial
+// * [JFRWeigand] https://jaxenter.de/java-flight-recorder-57537
+* [VideoJFR] https://www.youtube.com/watch?v=7z_R2Aq-Fl8
+// * [VideoJFR] https://www.youtube.com/watch?v=plYESjZ12hM
+* [JMCDemoVideo] https://www.youtube.com/watch?v=plYESjZ12hM
+* [MorlingJmFrX] https://www.morling.dev/blog/introducing-jmfrx-a-bridge-from-jmx-to-jdk-flight-recorder/
+* [MorlingJfrUnit] https://www.morling.dev/blog/towards-continuous-performance-regression-testing/
+// * [BaeldungJfr] https://www.baeldung.com/java-flight-recorder-monitoring
+// * [VideoJFR] https://www.infoq.com/presentations/monitoring-jdk-jfr/
+* [JFRApiDemos] https://github.com/flight-recorder/samples

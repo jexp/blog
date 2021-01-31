@@ -1,0 +1,194 @@
+== Weaving Networks with Neo4j Fabric
+
+There are a number of reasons why you would want to query across multiple databases.
+
+1. You have data already stored in multiple graphs but want to correlate it e.g. for a knowledge graph query
+2. Some of your data is stored in isolated instances for privacy and legal reason and you want add results from it to your query
+3. You have a lot of graph data (tens of billions of nodes) and want to shard it across multiple, smaller graphs which can run on more affordable hardware
+4. You have historical data stored in separte graphs e.g. per year and need to run a report over all of it
+5. You don't want to join data from different sources in your application but
+
+With Neo4j Fabric, released as part of Neo4j 4.0, this becomes a possibility.
+
+A fabric-proxy in front of your multi-database setup does the following:
+
+1. which pre-processes your Cypher query, 
+2. executes subqueries concurrently across the graphs you want to target
+3. computes and streams back results to the client.
+
+TODO picture
+
+How does it work?
+
+=== Example Data
+
+As example data which can be _quite_ easily distributed across databases, I want to use geographical information.
+Cities and countries with their population, neighbours and locations.
+
+TODO datamodel
+
+To import the data we can just load the information from a CSV file and filter it for the continent.
+
+[source, cypher]
+----
+LOAD CSV WITH HEADERS FROM "url" AS row
+WHERE row.continent = "Europe"
+MERGE (c:Country {name:row.country})
+MERGE (ci:City {name:row.city}) ON CREATE SET ci.population = row.population, ci.location = point( row {.latitude, .longitude })
+MERGE (ci)-[:IN]->(c)
+----
+
+=== Setup
+
+// geonames? one continent per graph (5 Europe, Asia, America, Africa, Australia)
+You need
+
+1. Fabric Proxy
+2. One or more databases, either in single instances or causal clusters
+
+You need to make the databases known to the Fabric Proxy, currently that's a manual configuration but there are many ways to possibly automate that in the future.
+
+In your `neo4j.conf` you list the named graphs, which will be important soon.
+
+----
+----
+
+Here is an example using a Docker Compose setup.
+
+TODO Docker Setup
+
+=== Querying the Graph
+
+The simplest way of using fabric is just to tell it which named graph to query by using the `use` keyword.
+
+[source,cypher]
+----
+USE world.australia
+MATCH (c:City)
+RETURN c.name, c.population
+ORDER BY c.population DESC limit 5;
+----
+
+You can also use multiple named databases in the same query, to combine them you use the new `CALL {}` subquery feature that was added to Cypher.
+
+[source,cypher]
+----
+CALL {
+  USE world.asia
+  MATCH (c:City)
+  RETURN c.name as name, c.population as population
+}
+CALL {
+  USE world.europe
+  MATCH (c:City)
+  RETURN c.name as name, c.population as population
+}
+RETURN name, population
+ORDER BY population DESC limit 5
+----
+
+====
+Please note that subqueries that take in information from the other query currently only work in Fabric.
+Subqueries in Cypher statements for a single database cannot yet refer to outside information.
+====
+
+This statement does a little bit too much work.
+It fetches _all_ cities from either database and then the proxy goes ahead and does the sorting and limiting.
+If we wanted to minimize the data returned to the proxy we could pre-filter the information on each database as shown below.
+
+[source,cypher]
+----
+CALL {
+  USE world.asia
+  MATCH (c:City)
+  RETURN c.name as name, c.population as population
+  ORDER BY population DESC limit 5
+}
+CALL {
+  USE world.europe
+  MATCH (c:City)
+  RETURN c.name as name, c.population as population
+  ORDER BY population DESC limit 5
+}
+RETURN name, population
+ORDER BY population DESC limit 5
+----
+
+Then only a total of 10 rows is returned to the proxy of which it returns the top 5.
+Much less data transfer within the setup and less work for our nice little proxy.
+
+How would I run this now across all databases?
+There are two extra functions that Fabric brings along and that are only available within your fabric database.
+
+With `<name>.graphIds()` you get a list of all configured graphs in your setup.
+And `<name>.graph(id)` provides the identifier of a graph with this id.
+
+We can have a look at these by just returning the ids and names:
+
+[source,cypher]
+----
+RETURN world.graphIds() AS ids, [id IN world.graphIds() | world.graph(id)] as names
+----
+
+
+So to use all graphs we run the following statement:
+
+[source,cypher]
+----
+UNWIND world.graphIds() AS graphId
+CALL {
+  USE world.graph(graphId)
+  MATCH (c:City)
+  RETURN c.name as name, c.population as population
+  ORDER BY population DESC limit 5
+}
+RETURN name, population
+ORDER BY population DESC limit 5
+----
+
+=== Updates
+
+With Fabric you can not just query but also update data in your graphs.
+The only limitation is currently that those updating subqueries can only work on a single graph, each of those operations is an independent transaction.
+
+[source,cypher]
+----
+USE world.europe 
+MATCH (c:City {name:"London"}) SET c.population = <new number>
+----
+
+Or to update all databases at once, e.g. to increase the world population by the growth rate.
+
+[source,cypher,linenums]
+----
+UNWIND world.graphIds() AS graphId
+CALL {
+  USE world.graph(graphId)
+  MATCH (c:City)
+  SET c.population = toInteger(c.population * 1.05) // TODO
+}
+RETURN name, population
+ORDER BY population DESC limit 5
+----
+
+
+
+=== Summary
+
+Fabric is a really powerful feature that allows you to interact with multiple databases in a single statement.
+It supports data isolation, sharding and 
+
+=== References
+
+* GitHub Gist with Dockerfile and CSV data for this post
+* https://neo4j.com/docs/operations-manual/4.0/fabric/introduction/[Fabric Reference Docs]
+** https://neo4j.com/docs/operations-manual/4.0/fabric/configuration/[Setup]
+** https://neo4j.com/docs/operations-manual/4.0/fabric/queries/[Queries]
+** https://neo4j.com/docs/operations-manual/4.0/fabric/considerations/[Further Considerations]
+
+====
+Michael Hunger  Can a fabric instance wrap databases it hosts itself? That would be pretty neat. If any Neo4j instance could be  fabric.
+
+Tobias Johansson  Yeah, any neo4j instance with dbms.mode set to SINGLE  can host a fabric virtual database (enabled by setting fabric.database.name)
+Through that you can access any other database in any instance, by configuring it as a graph in the fabric config (including databases hosted in the same instance)
+====

@@ -1,0 +1,171 @@
+== Nature Papers in Neo4j
+
+=== Source
+
+Tonight I came across this impressively narrated video of a colorful co-cited graph of papers since the late 1800s.
+
+.Narrated Youtube video
+++++
+<iframe width="560" height="315" src="https://www.youtube.com/embed/GW4s58u8PZo" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+++++
+image::./nature-papers-video.png[link="https://www.youtube.com/embed/GW4s58u8PZo"]
+
+You can read more about this in the https://www.nature.com/collections/eidahgdici/[Essay series] and thankfully Nature has also made the visualization available to https://www.nature.com/immersive/d41586-019-03165-4/index.html[explore interactively] for everyone.
+
+++++
+<iframe src="https://www.nature.com/immersive/d41586-019-03165-4/index.html" width="800" height="600"></iframe>
+++++
+
+And there is also a https://www.nature.com/immersive/d41586-019-03165-4/dat/data.zip[Download Link for the data], which is a zip-file with two CSVs (nodes and edges).
+
+=== Import
+
+So we can import the co-cited paper data into Neo4j and can have some fun with it.
+
+====
+If you haven't you can either download Neo4j Desktop and create a new "Local Graph" in your default project and start it.
+
+Or you can use a Neo4j Sandbox 
+====
+
+Unzip the file and copy the two CSV files to your Neo4j import folder. 
+E.g. via the drop-down button in Neo4j Desktop.
+
+.cociteNodes.csv
+,===
+x,y,size,PubYear,HierCat,NatureID,Title
+-1247,1345,5.3,1900,1,062366b0,Atmospheric Electricity
+,===
+
+WARNING: There are duplicates in the data, so need to use unique constraint and `MERGE`.
+
+.Load Nodes
+[source,cypher]
+----
+create constraint on (p:Paper) assert p.id is unique;
+
+using periodic commit 
+load csv with headers from "file:///cociteNodes.csv" as row
+merge (p:Paper {id:row.NatureID})
+SET p += {title:row.Title, x:toInteger(row.x), y:toInteger(row.y), size:toFloat(row.size), year:toInteger(row.PubYear), category:toInteger(row.HierCat)};
+// Added 88231 labels, created 88231 nodes, set 529641 properties, completed after 2743 ms.
+----
+
+.cociteEdges.csv
+,===
+source,target,path
+207249a0,200413a0,-1834.0;529.0;66.0|-1663.6;555.5,....
+,===
+
+.Load Relationships
+[source,cypher]
+----
+load csv with headers from "file:///cociteEdges.csv" as row
+match (p1:Paper {id:row.source}),(p2:Paper {id:row.target})
+merge (p1)-[:CO_CITED]->(p2);
+// not storing that path for now
+// Created 239621 relationships, completed after 7275 ms.
+----
+
+It looks like this:
+
+
+
+=== Quick Analysis
+
+
+.Most represented years
+----
+match (p:Paper) 
+return p.year, count(*) as count 
+order by count desc limit 5
+
+╒════════╤═══════╕
+│"p.year"│"count"│
+╞════════╪═══════╡
+│1966    │2620   │
+├────────┼───────┤
+│1963    │2587   │
+├────────┼───────┤
+│1964    │2568   │
+├────────┼───────┤
+│1967    │2518   │
+├────────┼───────┤
+│1965    │2425   │
+└────────┴───────┘
+----
+
+It seems as if the 60s are overproportionally represented, which is odd.
+
+.Paper citing other papers
+----
+MATCH (p:Paper)
+WITH size((p)-->()) as out
+RETURN min(out), max(out), avg(out), 
+percentileDisc(out,0.5) as p50, percentileDisc(out,0.75) as p75 , 
+percentileDisc(out,0.9) as p90, percentileDisc(out,0.99) as p99;
+
+╒══════════╤══════════╤═══════════╤═════╤═════╤═════╤═════╕
+│"min(out)"│"max(out)"│"avg(out)" │"p50"│"p75"│"p90"│"p99"│
+╞══════════╪══════════╪═══════════╪═════╪═════╪═════╪═════╡
+│0         │77        │2.71583683 │2    │4    │6    │17   │
+└──────────┴──────────┴───────────┴─────┴─────┴─────┴─────┘
+----
+
+==== Most cited papers
+
+----
+MATCH (p:Paper)
+RETURN p.title, p.year, size((p)<--()) as citations
+ORDER BY citations DESC LIMIT 5;
+
+╒══════════════════════════════════════════════════════════════════════╤════════╤═══════════╕
+│"p.title"                                                             │"p.year"│"citations"│
+╞══════════════════════════════════════════════════════════════════════╪════════╪═══════════╡
+│"Induced Radioactivity of Fluorine and Calcium"                       │1935    │78         │
+├──────────────────────────────────────────────────────────────────────┼────────┼───────────┤
+│"Radioactivity of Samarium"                                           │1946    │74         │
+├──────────────────────────────────────────────────────────────────────┼────────┼───────────┤
+│"Passage of Helium through Compact Solids"                            │1935    │70         │
+├──────────────────────────────────────────────────────────────────────┼────────┼───────────┤
+│"Convection and the Constant Q-Mechanism"                             │1971    │70         │
+├──────────────────────────────────────────────────────────────────────┼────────┼───────────┤
+│"Immunological Investigation of a Christmas Factor Inhibitor by Means │1962    │69         │
+│of Boyden's Technique"                                                │        │           │
+└──────────────────────────────────────────────────────────────────────┴────────┴───────────┘
+----
+
+==== Examine the network fo the most cited paper of the last 20 years
+
+[source,cypher]
+----
+MATCH (p:Paper) WHERE p.year > date().year - 20
+WITH p 
+ORDER BY size((p)<--()) DESC LIMIT 1
+MATCH path = ()-->(p)-->()
+RETURN path;
+----
+
+
+
+== TODO
+
+- clusters / louvain
+- bloom 1.2
+- degree distribution
+
+Credits:
+Design
+Alice Grishchenko
+Mauro Martino
+
+Data Analysis
+Alexander Gates
+Qing Ke
+Onur Varol
+Albert-László Barabási
+
+Special thanks
+Kelly Krause & the Nature team
+
+BarabasiLab 2019
