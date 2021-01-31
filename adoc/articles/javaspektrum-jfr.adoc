@@ -1,5 +1,5 @@
 == JDK Flight Recorder - Sicher Reisen mit der JVM
-:img: ../../img
+:img: https://github.com/jexp/blog/raw/gh-pages/img
 
 Das Eventsystem von JDK Flight Recorder (JFR) ist seit einiger Zeit in der JVM integriert.
 Wie ein Flugschreiber, daher der Name, ermöglicht es bei interessanten Ereignissen Events zu feuern, zu filtern und aufzuzeichnen, die relevante Informationen erfassen, um beobachtetes Verhalten nachzuvollziehen.
