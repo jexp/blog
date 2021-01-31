@@ -67,7 +67,7 @@ public class JfrProgram {
         System.out.println("result = " + result);
     }
 
-    // let's be a bit wasteful
+    // Absichtliche Verschwendung
     public static Long compute(int start, int count) {
         int[] data = new int[count];
         for (int i=0;i<count;i++) {
@@ -132,14 +132,16 @@ jcmd <pid> JFR.dump name=jfrprogram filename=recording.jfr
 jcmd <pid> JFR.stop name=jfrprogram filename=recording.jfr
 ----
 
-Das jfr Tool erlaubt es, JDK Flight Recorder Dateien zu lesen und anzuzeigen (print, summary und metadata). 
-Das kann in einem lesbaren Textformat oder JSON/XML (--json, --xml) erfolgen.
+Das jfr Tool erlaubt es, JDK Flight Recorder Dateien zu lesen und anzuzeigen (`print, summary, metadata`). 
+Das kann in einem lesbaren Textformat oder JSON/XML (`--json, --xml`) erfolgen.
 
-* print stellt das ganze Event-log dar
-* metadata zeigt welche Events aufgezeichnet wurden (Event-Klassen)
-* summary stellt in einen Histogramm dar, welche Events wie oft aufgezeichnet wurden
+////
+* `print` stellt das ganze Event-log dar
+* `metadata` zeigt welche Events aufgezeichnet wurden (Event-Klassen)
+* `summary` stellt in einen Histogramm dar, welche Events wie oft aufgezeichnet wurden
+////
 
-.jfr Werkzeug zur textuellen Darstellung der Aufzeichungen
+.jfr Werkzeug zur textuellen Darstellung der Aufzeichnungen
 [source,shell]
 ----
 jfr summary recording.jfr | head -15
@@ -187,7 +189,7 @@ image::{img}/jmc-event-browser.png[]
 Die Hauptkategorien und ihre Bereiche sind:
 
 * Java Application (Threads, Speicheroperationen, Methodenprofiling, Exceptions, File und Socket I/O)
-* JVM Internals (Garbage Collection, JIT Compiler, Classloading, TLAB, Locks)
+* JVM Internals (Garbage Collection, JIT Compiler, Classloading, Thread-lokale Allokation (TLAB), Locks)
 * Environment (Umgebungvariablen, Prozesse, Systemproperties, native Bibliotheken)
 
 Im Event Browser von JMC kann man für alle diese Bereiche alle aufgezeichneten Ereignistype im Detail ansehen, filtern und analysieren.
