@@ -32,11 +32,205 @@ Hauptsächlich erfolgt dies durch die Nutzung spezifischer Implementierungen fü
 
 In der API kann man zwischen klassischen imperativen Collections-APIs und moderen funktionalen und Fluent-APIs wählen, die eine Menge von Zusatzfunktionen bieten und Lambdas als erstklassige API-Bestandteile unterstützen.
 
-
 == Einführung
 
 Am besten kann man Eclipse Collections mit einigen Beispielen erkunden, später werden wir dann auf Details eingehen.
 Die Bibliothek selbst bietet eine Reihe von dokumentierten Übungen ([CodeKatas] mit zu korrigierenden Unit-Tests) an, mit denen das erleichtert wird.
+
+Don Raab hat seine API-Favoriten in einem Artikel vorgestellt[Top25API], viele davon finden sich auch in unseren Beispielen.
+
+////
+Rich, fluent, and functional APIs with good symmetry (productivity)
+Multimaps (productivity and type safety)
+Bags (productivity and type safety)
+Mutable and Immutable Collection Factories (productivity)
+////
+
+Hier sind einige Bespiele für die API, für einfache Nachvollziehbarkeit wieder mittels jshell für Java 16.
+
+////
+import org.eclipse.collections.api.*;
+import org.eclipse.collections.api.list.*;
+import org.eclipse.collections.api.set.*;
+import org.eclipse.collections.api.map.*;
+import org.eclipse.collections.api.bag.*;
+import org.eclipse.collections.api.tuple.*;
+////
+
+.JShell für Eclipse Collections
+[source,shell]
+----
+sdk use java 16.0.0-zulu
+
+# API und Implementierungs-Jar für Eclipse Collections herunterladen
+curl -L https://repo1.maven.org/maven2/org/eclipse/collections/eclipse-collections-api/10.4.0/eclipse-collections-api-10.4.0.jar -o ec-api.jar
+curl -L https://repo1.maven.org/maven2/org/eclipse/collections/eclipse-collections/10.4.0/eclipse-collections-10.4.0.jar -o ec.jar
+
+jshell --class-path ec.jar:ec-api.jar
+----
+
+////
+import org.eclipse.collections.impl.list.mutable.*;
+import org.eclipse.collections.impl.map.mutable.*;
+////
+
+.Einige Bespiele für Listen-API
+[source,java]
+----
+import org.eclipse.collections.impl.factory.*;
+
+var list = Lists.immutable.of(1,2,3,4,5,6,7,8,9).collect(i -> i*i);
+// [1, 4, 9, 16, 25, 36, 49, 64, 81]
+
+list.get(0) // 1 
+list.getFirst() // 1
+list.getLast() // 81
+list.min() // 1
+list.max() // 81
+list.sumOfInt(i -> i) // 285
+list.sortThis()
+ist.subList(1,3) // [4,9]
+list.asReversed()
+list.makeString("-") // 1-4-9-...
+----
+
+Mittels Selektion kann man Collections schnell nach Prädikaten filtern, das symmetrische Äquivalent ist `reject`.
+
+.Prädikate und Selektion
+[source,java]
+----
+list.select(i -> i > 30);
+// [36, 49, 64, 81]
+// dasselbe wie
+list.reject(i -> i <= 30);
+// Anzahl mit Prädikat
+list.count(i -> i > 30); // 4
+----
+
+Wie aus der funktionalen Programmierung und aus der `map` Methode von Java Streams bekannt, verarbeitet `collect` mittels einer Transformationsfunktion (Funktionales Interface, Methodenreferenz oder Lambda) jedes Element und erzeugt eine neue Collection mit den Ergebnissen.
+
+Mittels `flatCollect` können geschachtelte Collections zusammengeführt werden.
+
+.Collect als map Äquivalent
+[source,java]
+----
+record Country(String name, int population, String...cities) {
+    List<String> cityNames() { return Arrays.asList(cities); }
+}
+
+var countries = Lists.fixedSize.with(
+    new Country("US",340,"NYC","SFO","DC"), new Country("DE",82, "BER","FRA","DRS"), new Country("CH",8, "ZUR","GVA","BRN"))
+var populations = countries.collect(Country::population)
+// [340, 82, 8]
+
+// collect und flatten
+var cities = countries.flatCollect(Country::cityNames)
+// cities ==> [NYC, SFO, DC, BER, FRA, DRS, ZUR, GVA, BRN]
+
+// collect mit Ziel-Collection als 2. Parameter
+var names = Lists.mutable.empty()
+countries.collect(Country::name, names)
+----
+
+Mittels Quantoren kann man Collections auf bestimmte Bedingungen testen.
+
+.Prädikate und Quantoren
+[source,java]
+----
+// erstes Auftreten
+var answer = list.detect(i -> i > 41 && i < 50) // 49
+// mindestens ein Element
+var hatNull = list.anySatisfy(i-> i == null) // false
+// alle Elemente
+var gerade = list.allSatisfy(i -> i % 2 == 0) // false
+// kein Element
+var hatKeinNull = list.noneSatisfy(i-> i == null) // true
+----
+
+////
+// Eine mögliche Optimierung für anySatisfy
+import org.eclipse.collections.impl.tuple.*;
+pairs.anySatisfy(pair -> pair.getTwo().equals("2"))
+pairs.asLazy().collect(Pair::getTwo).toSet().contains("2")
+
+.Goodies
+notEmpty()
+minOptional(), maxOptional()
+Sets.unionAll(set1, set2, set3)
+MapIterable.flip() -> MultiMap
+Lists.immutable.of(1,1,1,3,3,3).distinct() // [1, 3]
+Lists.immutable.of(1,1,1,3,3,3).distinctBy(i -> i%2==0) // [1]
+////
+
+Partitionierung von Daten in positiv- und negativ-Sätze ist eine häufige Anforderung, in Eclipse Collections erfolgt es mittels `partition`.
+
+.Partition
+[source,java]
+----
+var countriesByPop = countries.partition(c -> c.population() < 10)
+	
+var smallCountries = countriesByPop.getSelected().collect(Country::name)
+// smallCountries ==> [CH]
+var largeCountries = countriesByPop.getRejected().collect(Country::name)
+// largeCountries ==> [US, DE]
+----
+
+Ein nützliches Feature ist die Kombination zweier Listen mittels `zip`, dafür gibt es leider im JDK keine integrierte Entsprechung.
+Mit dieser Methode werden so viele Paare erzeugt, wie die kürzere Liste lang ist.
+
+.Listen zusammenführen mit zip
+----
+var countries = Lists.mutable.of("DE","US")
+var populations = Lists.mutable.of(82, 340)
+
+var pairs = countries.zip(populations)
+// [DE:82, US:340]
+// Map daraus erzeugen
+UnifiedMap.newMapWith(pairs)
+----
+
+Mit diesen Beispiele wird glaube ich schon deutlich, dass die API der Eclipse Collections Bibliothek viel breiter aufgestellt ist als die des JDK.
+Jetzt wollen wir etwas hinter die Kulissen schauen.
+
+== API & Klassenhierarchie
+
+In Eclipse Collections wurde die Separation zwischen veränderlichen und unveränderlichen Strukturen von Anfang an besser gelöst als im JDK.
+
+Die Basis-Interfaces sind alle von `RichIterable` abgeleitet, d.h. sie bieten nur sequentielle Iteration bzw. individuellen Zugriff (List und Map).
+
+Veränderbarkeit, feste Größe, Sortierung und andere Eigenschaften sind dann auf weiter unten liegenden Leveln (`MutableCollection` bzw. `MutableList`) angesiedelt
+Damit werden Eigenschaften basierend auf der API zugesichert und nicht aufgrund der Implementierung (Exceptions bei verbotenen Methoden).
+
+Dabei sind, anders als im JDK, Methoden die nicht nutzbar sind (z.B. Update-Methoden, bei unveränderlichen Typen) einfach nicht vorhanden.
+
+.Eclipse Collections API Struktur
+image::https://miro.medium.com/max/700/1*x7tvAh5_CcaS0TZ1O62sRQ.png[]
+
+Die Basistypen von Collections die angeboten werden sind:
+
+* ListIterable
+* StackIterable
+* SetIterable
+* Bag (unsortierte Sammlung mit Duplikaten)
+* Map
+* Multi-Map (mehrere Werte für einen Schlüssel)
+* BiMap (Zugriff über Schlüssel oder Werte)
+
+Darauf basierend sind dann konkrete Typen wie `FastList`, `UnifiedSet`, `MutableSortedMap`, `HashBag` verfügbar.
+
+Die sehr umfassende API [APIGuide] ist von Hause aus auf Benutzerfreundlichkeit ausgelegt, es gibt fast keine Methode die es nicht gibt.
+Daher ist es wichtig, dass diese leicht von IDEs zu vervollständigen sind, was mit einer Fluent-API leichter möglich ist.
+
+Bei der Umsetzung der API wurde auf Konsistenz und Symmetrie (z.B. `add/remove` oder `getSelection/getRejection`) geachtet.
+
+Die Symmetrie erstreckt sich auch über die Implementierung von Methoden durch die Klassenhierachie, z.B. durch die Nutzung covarianter Return-Typen so dass konkrete Typen wenn möglich sich selbst und keine genrischen Interfaces zurückgeben.
+Ein Beispiel: `select()` gibt immer den aktuellen Typ zurück so dass man auf einer konsistenten API weiterarbeiten kann.
+
+Desweiteren gibt es Symmetrie soweit wie möglich in der API zwischen den Collections für Objekte und denen für primitive Typen.
+
+Typisch für die Eclipse Collections ist auch die Konsistenz der Bedeutung von Präfixen (wie `as`, `to`, `with`) und Suffixen (`By`, `If`, `This`).
+
+=== Erzeugung von Instanzen
 
 Seit Java 9 (JEP269) kann man auch Collections im JDK zwar nicht mittels literaler Syntax aber zumindest via Factory-Methoden erstellen, z.b.
 
@@ -51,8 +245,6 @@ Leere unveränderliche Collections existieren als Singletons nur einmal im Syste
 
 [source,java]
 ----
-import org.eclipse.collections.impl.factory.*;
-
 Bags.mutable.empty();
 Lists.immutable.with(1,2,3);
 Sets.fixedSize.with(4,5,6);
@@ -93,126 +285,6 @@ UnifiedMap<String, Integer> population = new UnifiedMap<>(Tuples.pair("US",340),
 ----
 ////
 
-== API & Klassenhierarchie
-
-
-In Eclipse Collections wurde die Separation zwischen veränderlichen und unveränderlichen Strukturen von Anfang an besser gelöst als im JDK.
-Die Basis-Interfaces sind alle von `RichIterable` abgeleitet, d.h. sie bieten nur sequentielle Iteration bzw. individuellen Zugriff (List und Map).
-
-Veränderbarkeit, feste Größe, Sortierung und andere Eigenschaften sind dann auf weiter unten liegenden Leveln (`MutableCollection` bzw. `MutableList`) angesiedelt
-Damit werden Eigenschaften basierend auf der API zugesichert und nicht aufgrund der Implementierung (Exceptions bei verbotenen Methoden).
-
-Dabei sind, anders als im JDK, Methoden die nicht nutzbar sind (z.B. Update-Methoden, bei unveränderlichen Typen) nicht vorhanden.
-
-.Eclipse Collections API Struktur
-image::https://miro.medium.com/max/700/1*x7tvAh5_CcaS0TZ1O62sRQ.png[]
-
-Die Basistypen von Collections die angeboten werden sind:
-
-* ListIterable
-* StackIterable
-* SetIterable
-* Bag (unsortierte Sammlung mit Duplikaten)
-* Map
-* Multi-Map (mehrere Werte für einen Schlüssel)
-* BiMap (Zugriff über Schlüssel oder Werte)
-
-Darauf basierend sind dann konkrete Typen wie `FastList`, `UnifiedSet`, `MutableSortedMap`, `HashBag` verfügbar.
-
-Die sehr umfassende API [APIGuide] ist von Hause aus auf Benutzerfreundlichkeit ausgelegt, es gibt fast keine Methode die es nicht gibt.
-Daher ist es wichtig, dass diese leicht von IDEs zu vervollständigen sind, was mit einer Fluent-API ja leichter möglich ist.
-
-Bei der Umsetzung der API wurde auf Konsistenz und Symmetrie (z.B. `add/remove` oder `getSelection/getRejection`) geachtet.
-
-Die Symmetrie erstreckt sich auch über die Implementierung von Methoden durch die Klassenhierachie, z.B. durch die Nutzung covarianter Return-Typen so dass konkrete Typen wenn möglich sich selbst und keine genrischen Interfaces zurückgeben.
-Ein Beispiel: `select()` gibt immer den aktuellen Typ zurück so dass man auf einer konsistenten API weiterarbeiten kann.
-
-Desweiteren gibt es Symmetrie soweit wie möglich in der API zwischen den Collections für Objekte und denen für primitive Typen.
-
-Typisch für die Eclipse Collections ist auch die Konsistenz der Bedeutung von Präfixen (wie `as`, `to`, `with`) und Suffixen (`By`, `If`, `This`).
-
-Don Raab hat seine Favoriten in einem Artikel vorgestellt[Top25API], viele davon finden sich auch in unseren Beispielen.
-
-////
-Rich, fluent, and functional APIs with good symmetry (productivity)
-Multimaps (productivity and type safety)
-Bags (productivity and type safety)
-Mutable and Immutable Collection Factories (productivity)
-////
-
-Hier sind einige Bespiele für die API, für einfache Nachvollziehbarkeit wieder in jshell für Java 16.
-
-////
-import org.eclipse.collections.api.*;
-import org.eclipse.collections.api.list.*;
-import org.eclipse.collections.api.set.*;
-import org.eclipse.collections.api.map.*;
-import org.eclipse.collections.api.bag.*;
-import org.eclipse.collections.api.tuple.*;
-////
-
-[source,shell]
-----
-sdk use java 16.0.0-zulu
-curl -L https://repo1.maven.org/maven2/org/eclipse/collections/eclipse-collections-api/10.4.0/eclipse-collections-api-10.4.0.jar -o ec-api.jar
-curl -L https://repo1.maven.org/maven2/org/eclipse/collections/eclipse-collections/10.4.0/eclipse-collections-10.4.0.jar -o ec.jar
-jshell --class-path ec.jar:ec-api.jar
-----
-
-.Zugriff auf Element
-[source,java]
-----
-import org.eclipse.collections.impl.list.mutable.*;
-import org.eclipse.collections.impl.map.mutable.*;
-
-var list = FastList.newListWith(1,2,3,4,5,6,7,8,9).collect(i -> i*i);
-
-list.get(0) // 1 
-list.getFirst() // 1
-list.getLast() // 81
-list.min() // 1
-list.max() // 81
-list.sumOfInt(i -> i) // 285
-list.reverseThis().sortThis()
-list.makeString("-") // 1-4-9-...
-----
-
-Mittels Selektion kann man Collections schnell nach Prädikaten filtern, das symmetrische Äquivalent ist `reject`.
-
-.Prädikate und Selektion
-----
-list.select(i -> i > 30);
-// [36, 49, 64, 81]
-// dasselbe wie
-list.reject(i -> i <= 30);
-// Anzahl mit Prädikat
-list.count(i -> i > 30); // 4
-----
-
-Wie aus der funktionalen Programmierung und aus der `map` Methode von Java Streams bekannt, verarbeitet `collect` mittels einer Transformationsfunktion (Funktionales Interface, Methodenreferenz oder Lambda) jedes Element und erzeugt eine neue Collection mit den Ergebnissen.
-
-Mittels `flatCollect` können geschachtelte Collections zusammengeführt werden.
-
-.Collect als map Äquivalent
-[source,java]
-----
-record Country(String name, int population, String...cities) {
-    List<String> cityNames() { return Arrays.asList(cities); }
-}
-
-var countries = Lists.fixedSize.with(
-    new Country("US",340,"NYC","SFO","DC"), new Country("DE",82, "BER","FRA","DRS"), new Country("CH",8, "ZUR","GVA","BRN"))
-var populations = countries.collect(Country::population)
-// [340, 82, 8]
-
-// collect und flatten
-var cities = countries.flatCollect(Country::cityNames)
-// cities ==> [NYC, SFO, DC, BER, FRA, DRS, ZUR, GVA, BRN]
-
-// collect mit Ziel-Collection als 2. Parameter
-var names = Lists.mutable.empty()
-countries.collect(Country::name, names)
-----
 
 Ein typisches Muster in Eclipse Collections sind die `xxxWith` Methoden.
 
@@ -234,49 +306,7 @@ list.collectWith(Integer::compareTo, 16)
 // [-1, -1, -1, 0, 1, 1, 1, 1, 1]
 ----
 
-.Prädikate und Quantoren
-[source,java]
-----
-// erstes Auftreten
-var answer = list.detect(i -> i > 41 && i < 50) // 49
-// mindestens ein Element
-var hatNull = list.anySatisfy(i-> i == null) // false
-// alle Elemente
-var gerade = list.allSatisfy(i -> i % 2 == 0) // false
-// kein Element
-var hatKeinNull = list.noneSatisfy(i-> i == null) // true
-----
-
-////
-// Eine mögliche Optimierung für anySatisfy
-import org.eclipse.collections.impl.tuple.*;
-pairs.anySatisfy(pair -> pair.getTwo().equals("2"))
-pairs.asLazy().collect(Pair::getTwo).toSet().contains("2")
-////
-
-.Goodies
-////
-notEmpty()
-minOptional(), maxOptional()
-Sets.unionAll(set1, set2, set3)
-MapIterable.flip() -> MultiMap
-Lists.immutable.of(1,1,1,3,3,3).distinct() // [1, 3]
-Lists.immutable.of(1,1,1,3,3,3).distinctBy(i -> i%2==0) // [1]
-////
-
-
-.Partition
-[source,java]
-----
-var countriesByPop = countries.partition(c -> c.population() < 10)
-	
-var smallCountries = countriesByPop.getSelected().collect(Country::name)
-// smallCountries ==> [CH]
-var largeCountries = countriesByPop.getRejected().collect(Country::name)
-// largeCountries ==> [US, DE]
-----
-
-Unveränderlichkeit 
+// Unveränderlichkeit 
 
 // Konstruktion
 ////
@@ -290,22 +320,6 @@ NOTE newWithout removes only the first element in a list
 
 ////
 
-Um gerade bei großen Datenmengen oder komplexen Filter-Operationen die Verarbeitung zu verzögern.
-Mittels `.asLazy()` wird eine Lazy-Collection erstellt die finale Elemente erst bei Bedarf zur Verfügung stellt wenn terminale Methoden sie benötigen.
-
-Eine häufige Anwendung ist die Kombination zweier Listen mittels `zip`, dafür gibt es leider im JDK keine integrierte Entsprechung.
-Damit werden so viele Paare erzeugt, wie die kürzere Liste lang ist.
-
-.Listen zusammenführen mit zip
-----
-var countries = FastList.newListWith("DE","US")
-var populations = FastList.newListWith(84, 340)
-
-var pairs = countries.zip(populations)
-pairs ==> [DE:82, US:340]
-// Map daraus erzeugen
-UnifiedMap.newMapWith(pairs)
-----
 
 ////
 Eclipse Collections distribution includes eclipse-collections-testutils.jar.
@@ -596,6 +610,10 @@ toString() – yes, it counts
 ////
 
 === Parallele Verarbeitung
+
+Um gerade bei großen Datenmengen oder komplexen Filter-Operationen die Verarbeitung zu verzögern.
+Mittels `.asLazy()` wird eine Lazy-Collection erstellt die finale Elemente erst bei Bedarf zur Verfügung stellt wenn terminale Methoden sie benötigen.
+
 
 Als ein Beta Feature (seit Version 5.0) wird die parallele Verabeitung unterstützt.
 Ähnlich zur verzögerten Ausführung mit `asLazy` werden mit `asParallel` spezielle Wrapper für FastList und UnifiedSet erzeugt, die zusammen mit einem optionalen `Executor` diverse Operationen (Filterung, Aggregation, Transformation) parallel ausführen.
