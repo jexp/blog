@@ -491,7 +491,9 @@ Innerhalb von Eclipse Collections gibt es viele Stellen an denen für besseres L
 Durch die Factory-Methoden zur Erzeugung der Collections ist es leicht möglich, diese Alternativen zu wählen.
 Zum Beispiel sind unveränderliche Varianten bis zu einer gewissen Größe mit direkten Instanzvariablen für die Werte ausimplementiert (Bag bis 20, List bis 10, Map und Set bis 4 Elemente), was mit erheblichen Speichereinsparungen einhergeht.
 
-Daher sollte, wenn klar ist, dass keine Veränderung der Datenstrukturen notwendig ist, auf deren unveränderlichen (und primitiven) Varianten und Konstruktion durch Factories gewechselt werden.
+Daher sollte, wenn klar ist dass keine Veränderung der Datenstrukturen notwendig ist, auf deren unveränderlichen (und primitiven) Varianten und Konstruktion durch Factories gewechselt werden.
+
+Da die unveränderlichen Typen auch keiner nachträglichen Anpassung ihrer internen Datestrukturen durch Modifikation Rechnung tragen müssen, können sie leseoptimierte Implementierungen effizient ausnutzen.
 
 Alle veränderlichen Collection-Typen haben eine `toImmutable` Methode, die das optimierte, unveränderliche Äquivalent erzeugt.
 Damit können veränderliche Typen als temporäre "Builder" für die Zieldatenstruktur genutzt werden.
@@ -503,6 +505,9 @@ Damit können veränderliche Typen als temporäre "Builder" für die Zieldatenst
 Primitive Collections aller Art (Set, Bag, List, Map, Stack) sind für alle Basistypen (numerische Typen, `char` und `boolean`) vorhanden, sie existieren in veränderlichen, unveränderlichen, synchronisierten und anderen Varianten.
 Für Maps gibt es eine Vielzahl von Kombinationen von Schlüssel und Werttypen.
 
+Die verschiedenen konkrent Implementierungen werden mittels Generatoren aus Templates erzeugt, daher ist die Eclipse Collections JAR-Datei auch relativ groß.
+
+.Klassenhierarchie für Primitive Collections
 image::https://github.com/eclipse/eclipse-collections-kata/raw/master/docs/shared/primitive-collections2.png[]
 
 Angenehmerweise haben die primitiven Collections ähnlich umfassende Fluent-API wie die regulären Eclipse Collections-Typen.
@@ -523,11 +528,12 @@ ints.summaryStatistics()
 // IntSummaryStatistics{count=9, sum=285, min=1, average=31.666667, max=81}
 ----
 
-Die Flexibilität gilt auch für die Konstruktion: `Typ` + `Lists,Maps,Sets` + `.mutable,immutable,fixedSize` + `.of,with,ofAll,withAll()` z.B. `IntLists.immutable.with(1,10,100)`.
+Die Flexibilität gilt auch für die Konstruktion der Instanzen.
+Mittels `Typ` + `Lists,Maps,Sets` + `.mutable,immutable,fixedSize` + `.of,with,ofAll,withAll()` z.B. `IntLists.immutable.with(1,10,100)`.
 
 Für Zahlenbereiche könnten `Interval` Typen benutzt werden z.B `LongInterval`, sowohl für Konstruktion als auch als Parameter für Mengenoperationen wie `containsAll`. 
 
-.IntList Beispiel
+.Interval Beispiele
 [source,java]
 ----
 import org.eclipse.collections.impl.factory.primitive.*;
@@ -611,9 +617,9 @@ toString() – yes, it counts
 
 === Parallele Verarbeitung
 
-Um gerade bei großen Datenmengen oder komplexen Filter-Operationen die Verarbeitung zu verzögern.
-Mittels `.asLazy()` wird eine Lazy-Collection erstellt die finale Elemente erst bei Bedarf zur Verfügung stellt wenn terminale Methoden sie benötigen.
+Gerade bei großen Datenmengen oder komplexen Filter-Operationen ist es sinnvoll, die Verarbeitung zu verzögern und keine Zwischenergebnisse zu erstellen.
 
+Mittels `.asLazy()` wird eine Lazy-Collection erstellt die finale Elemente erst bei Bedarf zur Verfügung stellt wenn terminale Methoden sie benötigen.
 
 Als ein Beta Feature (seit Version 5.0) wird die parallele Verabeitung unterstützt.
 Ähnlich zur verzögerten Ausführung mit `asLazy` werden mit `asParallel` spezielle Wrapper für FastList und UnifiedSet erzeugt, die zusammen mit einem optionalen `Executor` diverse Operationen (Filterung, Aggregation, Transformation) parallel ausführen.
@@ -630,7 +636,7 @@ par.sumOfLong(i->i)
 par.count(i->i%2==0)
 ----
 
-Gerade bei numerischer Verarbeitung sind aber die primitiven Varianten der Collections sogar mit einem Thread schneller, u.a. weil sie keine Objekt-Verarbeitung und Boxing durchführen müssen.
+Gerade bei numerischer Verarbeitung sind aber die primitiven Varianten der Collections sogar mit einem Thread schneller, u.a. weil sie keine Objekt-Verarbeitung und Boxing durchführen müssen und ihre Implementierung CPU- und Cache-freundlicher ist.
 
 // binarySearch
 // IntInterval.subList(from,to)
@@ -639,7 +645,6 @@ Dirk [Fauth] hat einen ausführlichen Vergleichsartikel für Geschwindigkeit und
 Dabei hat er in allen Fällen entweder eine Laufzeitverbesserung bzw. keine Verschlechterung messen können und der Speicherverbrauch der Anwendung reduzierte sich von 1.5GB auf 250MB bei Beibehaltung der Funktionalität.
 
 // clear() keeps original size, you need to use `trimToSize()` on the concrete implementation
-
 
 == Fazit und Ausblick
 
