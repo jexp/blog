@@ -1,0 +1,674 @@
+== Eclipse Collections - Effiziente Collections Implementierung für Java
+
+Ich habe  mich in der Vergangenheit schon mehrmals über verschiedene Collection Frameworks für Java ausgelassen.
+In den letzten Jahren haben sich aber die [EclipseCollections] (ehemals Goldman Sachs Collections) als eine der weitverbreitetsten Bibliotheken etabliert.
+
+Auch bei uns in Neo4j haben sie die selbst entwickelten "primitive collections" ersetzt. 
+Damit konnten wir zehntausende Zeilen Code löschen, den wir nicht mehr warten müssen bei gleichzeitiger Beibehaltung von Speicher- und Laufzeiteffizient.
+
+Heute will ich daher die Gelegenheit nutzen, die Eclipse Collections kurz vorzustellen und einige interessante Features zu zeigen.
+
+// Auch jüngere Entwicklungen und ein Blick in die nahe Zukunft (Stichwort Valhalla) werden uns begleiten.
+
+== Allgemeines
+
+Die Eclipse Collections [GitHub) sind seit 9 Jahren ein quelloffenes Projekt, ursprünglich als "Goldman-Sachs-(GS)-Collections" und seit 5 Jahren als Eclipse Projekt.
+Mittlerweile ist Version 10.4 verfügbar und Version 11 ist in Entwicklung und wird bei Veröffentlichung der Kolumne verfügbar sein.
+Federführend in der Entwicklung ist seit Anfang an Don Raab, dem auch viele Artikel und Beispiele zu verdanken sind.
+Diverse Features und APIs sind von Smalltalk inspiriert.
+
+Die Bibliothek ist ziemlich beeindruckend in ihrer Leistungsfähigkeit und im Umfang.
+Anders als andere Collections-Bibliotheken, die sich entweder auf speicher- und CPU-effiziente Datenstrukturen oder auf angenehme APIs konzentrieren, sind die Eclipse Collections eher eine eierlegende Wollmilchsau.
+
+TODO: Dass heisst, alle Aspekte werden berücksichtigt und dass ohne widersprüchliche Einschränkungen hinzunehmen.
+
+Zum einen ist die Implementierung der EC sehr speichereffzient, nur durch den Austausch z.B. einer `ArrayList` durch `Xxxx` kann man bei Beibehaltung der Funktionalität, 90%?? Speicher sparen. (siehe Tweet)
+
+Es gibt Implementierungen für primitive Datentypen wie numerische Werte  ...
+
+In der API kann man zwischen klassischen imperativen Collections-APIs und moderen funktionalen und Fluent-APIs wählen, die eine Menge von Zusatzfunktionen bieten und Lambdas als erstklassige API-Bestandteile unterstützen.
+
+
+== Einführung
+
+Am besten kann man Eclipse Collections mit einigen Beispielen erkunden, später werden wir dann auf Details eingehen.
+Die Bibliothek selbst bietet eine Reihe von dokumentierten Übungen ([CodeKatas] mit zu korrigierenden Unit-Tests) an, mit denen das erleichtert wird.
+
+Seit Java 13? kann man auch Collections im JDK zwar nicht mittels Literale aber zumindest Factory-Methoden erstellen, z.b.
+
+`Map.of("antwort",42)` oder `List.of(1,2,3)`.
+
+Dabei werden aber spezielle, unveränderliche Listen erstellt und Nullwerte sind nicht möglich.
+
+In EC erfolgt das mittels statischer Factorymethoden auf den zentralen Factoryklassen: `Lists`,`Maps`,`Sets`,`Bags` mit einem qualifizierten Namensraum für den Subtyp, wie `mutable`, `immutable`, `fixedSize` und dann die konkrete Factory-Methode `with(wert1,wert2)`, `withAll(Iterable)` oder `empty()`.
+Die konkreten Zieltypen wie `FastList` enthalten auch Factory-Methoden.
+
+Leere unveränderliche Collections existieren als Singletons nur einmal im System.
+
+[source,java]
+----
+import org.eclipse.collections.impl.factory.*;
+
+Bags.mutable.empty();
+Lists.immutable.with(1,2,3);
+Sets.fixedSize.with(4,5,6);
+Maps.mutable.with("answer",42);
+
+// oder via Iterables static factory methods
+Iterables.iList(1,2,3);
+Iterables.mBag();
+Iterables.mMap("answer",42);
+
+Iterables.iList() == Lists.immutable.empty()
+// true
+----
+
+////
+ MutableList<String> emptyList = Lists.mutable.empty();
+ MutableList<String> listWith = Lists.mutable.with("a", "b", "c");
+ MutableList<String> listOf = Lists.mutable.of("a", "b", "c");
+ 
+Immutable Examples:
+ ImmutableList<String> emptyList = Lists.immutable.empty();
+ ImmutableList<String> listWith = Lists.immutable.with("a", "b", "c");
+ ImmutableList<String> listOf = Lists.immutable.of("a", "b", "c");
+ 
+FixedSize Examples:
+ FixedSizeList<String> emptyList = Lists.fixedSize.empty();
+ FixedSizeList<String> listWith = Lists.fixedSize.with("a", "b", "c");
+ FixedSizeList<String> listOf = Lists.fixedSize.of("a", "b", "c");
+////
+
+[source,java]
+----
+MutableList<String> baeume = FastList.newListWith("Eiche", "Fichte", "Kastanie", "Gingko");
+// oder
+UnifiedMap<String, Integer> population = new UnifiedMap<>(Tuples.pair("US",340), pair("DE",82));
+----
+
+== API & Klassenhierarchie
+
+
+In EC wurde die Separation zwischen veränderlichen und unveränderlichen Strukturen von Anfang an besser gelöst als im JDK.
+Die Basis-Interfaces sind alle von `RichIterable` abgeleitet, d.h. sie bieten nur sequentielle Iteration bzw. individuellen Zugriff (List und Map).
+
+Veränderbarkeit, feste Größe, Sortierung und andere Eigenschaften sind dann auf weiter unten liegenden Leveln (`MutableCollection` bzw. `MutableList`) angesiedelt
+Damit werden Eigenschaften basierend auf der API zugesichert und nicht aufgrund der Implementierung (Exceptions bei verbotenen Methoden).
+
+Dabei sind, anders als im JDK, Methoden die nicht nutzbar sind (z.B. Update-Methoden, bei unveränderlichen Typen) nicht vorhanden.
+
+image::https://miro.medium.com/max/700/1*x7tvAh5_CcaS0TZ1O62sRQ.png[]
+
+Die Basistypen von Collections die angeboten werden sind:
+
+* ListIterable
+* StackIterable
+* SetIterable
+* Bag (unsortierte Sammlung mit Duplikaten)
+* Map
+* Multi-Map (mehrere Werte für einen Schlüssel)
+* BiMap (Zugriff über Schlüssel oder Werte)
+
+Darauf basierend sind dann konkrete Typen wie `FastList`, `UnifiedSet`, `MutableSortedMap`, `HashBag` verfügbar.
+
+Die sehr umfassende API [APIGuide] ist von Hause aus auf Benutzerfreundlichkeit ausgelegt, es gibt fast keine Methode die es nicht gibt.
+Daher ist es wichtig, dass diese leicht von IDEs zu vervollständigen sind, was mit einer Fluent-API ja leichter möglich ist.
+
+Bei der Umsetzung der API wurde auf Konsistenz und Symmetrie (z.B. `add/remove` oder `getSelection/getRejection`) geachtet.
+
+Die Symmetrie erstreckt sich auch über die Implementierung von Methoden durch die Klassenhierachie, z.B. durch die Nutzung covarianter Return-Typen so dass konkrete Typen wenn möglich sich selbst und keine genrischen Interfaces zurückgeben.
+Ein Beispiel: `select()` gibt immer den aktuellen Typ zurück so dass man auf einer konsistenten API weiterarbeiten kann.
+
+Desweiteren gibt es Symmetrie soweit wie möglich in der API zwischen den Collections für Objekte und denen für primitive Typen.
+
+Typisch für die Eclipse Collections ist auch die Konsistenz der Bedeutung von Präfixen (wie `as`, `to`, `with`) und Suffixen (`By`, `If`, `This`).
+
+/*
+Rich, fluent, and functional APIs with good symmetry (productivity)
+Multimaps (productivity and type safety)
+Bags (productivity and type safety)
+Mutable and Immutable Collection Factories (productivity)
+*/
+
+Hier sind einige Bespiele für die API, für einfache Nachvollziehbarkeit wieder in jshell für Java 16.
+
+////
+import org.eclipse.collections.api.*;
+import org.eclipse.collections.api.list.*;
+import org.eclipse.collections.api.set.*;
+import org.eclipse.collections.api.map.*;
+import org.eclipse.collections.api.bag.*;
+import org.eclipse.collections.api.tuple.*;
+////
+
+[source,shell]
+----
+sdk use java 16.0.0-zulu
+curl -L https://repo1.maven.org/maven2/org/eclipse/collections/eclipse-collections-api/10.4.0/eclipse-collections-api-10.4.0.jar -o ec-api.jar
+curl -L https://repo1.maven.org/maven2/org/eclipse/collections/eclipse-collections/10.4.0/eclipse-collections-10.4.0.jar -o ec.jar
+jshell --class-path ec.jar:ec-api.jar
+----
+
+.Zugriff auf Element
+[source,java]
+----
+import org.eclipse.collections.impl.list.mutable.*;
+import org.eclipse.collections.impl.map.mutable.*;
+
+var list = FastList.newListWith(1,2,3,4,5,6,7,8,9).collect(i -> i*i);
+
+list.get(0) // 1 
+list.getFirst() // 1
+list.getLast() // 81
+list.min() // 1
+list.max() // 81
+list.sumOfInt(i -> i) // 285
+list.reverseThis().sortThis()
+list.makeString("-") // 1-4-9-...
+----
+
+Mittels Selektion kann man Collections schnell nach Prädikaten filtern, das symmetrische Äquivalent ist `reject`.
+
+.Prädikate und Selektion
+----
+list.select(i -> i > 30);
+// [36, 49, 64, 81]
+// dasselbe wie
+list.reject(i -> i <= 30);
+// Anzahl mit Prädikat
+list.count(i -> i > 30); // 4
+----
+
+Wie aus der funktionalen Programmierung und aus der `map` Methode von Java Streams bekannt, verarbeitet `collect` mittels einer Transformationsfunktion (Funktionales Interface, Methodenreferenz oder Lambda) jedes Element und erzeugt eine neue Collection mit den Ergebnissen.
+
+Mittels `flatCollect` können geschachtelte Collections zusammengeführt werden.
+
+.Collect als map Äquivalent
+[source,java]
+----
+record Country(String name, int population, String...cities) {
+    List<String> cityNames() { return Arrays.asList(cities); }
+}
+
+var countries = Lists.fixedSize.with(
+    new Country("US",340,"NYC","SFO","DC"), new Country("DE",82, "BER","FRA","DRS"), new Country("CH",8, "ZUR","GVA","BRN"))
+var populations = countries.collect(Country::population)
+// [340, 82, 8]
+
+// collect und flatten
+var cities = countries.flatCollect(Country::cityNames)
+// cities ==> [NYC, SFO, DC, BER, FRA, DRS, ZUR, GVA, BRN]
+
+// collect mit Ziel-Collection als 2. Parameter
+var names = Lists.mutable.empty()
+countries.collect(Country::name, names)
+----
+
+Ein typisches Muster in Eclipse Collections sind die `xxxWith` Methoden.
+
+Diese nehmen zwei Parameter entgegen, eine Funktion, die neben dem zu verarbeitenden Element auch noch einen zweiten Wert übergeben bekommt, der der aufrufenden Methode mitgegeben wurde.
+
+Damit können wiederverwendbare Methoden benutzt werden, die mit dem zweiten Wert konfiguriert werden.
+Oder auch Methodenreferenzen die selbst einen Parameter erwarten.
+
+[source,java]
+----
+list.collectWith((e, w) -> e * w, 2)
+// [2, 8, 18, 32, 50, 72, 98, 128, 162]
+
+// Transformation mit Index in Liste
+list.collectWithIndex((e,i) -> e*i)
+// [0, 4, 18, 48, 100, 180, 294, 448, 648]
+
+list.collectWith(Integer::compareTo, 16)
+// [-1, -1, -1, 0, 1, 1, 1, 1, 1]
+----
+
+.Prädikate und Quantoren
+[source,java]
+----
+// erstes Auftreten
+var answer = list.detect(i -> i > 41 && i < 50) // 49
+// mindestens ein Element
+var hatNull = list.anySatisfy(i-> i == null) // false
+// alle Elemente
+var gerade = list.allSatisfy(i -> i % 2 == 0) // false
+// kein Element
+var hatKeinNull = list.noneSatisfy(i-> i == null) // true
+----
+
+////
+// Eine mögliche Optimierung für anySatisfy
+import org.eclipse.collections.impl.tuple.*;
+pairs.anySatisfy(pair -> pair.getTwo().equals("2"))
+pairs.asLazy().collect(Pair::getTwo).toSet().contains("2")
+////
+
+.Goodies
+////
+notEmpty()
+minOptional(), maxOptional()
+Sets.unionAll(set1, set2, set3)
+MapIterable.flip() -> MultiMap
+Lists.immutable.of(1,1,1,3,3,3).distinct() // [1, 3]
+Lists.immutable.of(1,1,1,3,3,3).distinctBy(i -> i%2==0) // [1]
+////
+
+
+.Partition
+[source,java]
+----
+var countriesByPop = countries.partition(c -> c.population() < 10)
+	
+var smallCountries = countriesByPop.getSelected().collect(Country::name)
+// smallCountries ==> [CH]
+var largeCountries = countriesByPop.getRejected().collect(Country::name)
+// largeCountries ==> [US, DE]
+----
+
+Unveränderlichkeit 
+
+// Konstruktion
+////
+Wachstum
+This provides what I refer to as contractual immutability in addition to providing structural immutability. There are methods available that allow for safely copying and growing or shrinking immutable collections. There are methods named newWith, newWithAll, newWithout and newWithoutAll for extensions of ImmutableCollection. For ImmutableMap implementations, the methods are named newWithKeyValue, newWithAllKeyValues, newWithoutKey and newWithoutAllKeys.
+
+Ex
+IntLists.immutable.of(1,2,3,5,8).newWithoutAll(IntInterval.zeroTo(10))
+
+NOTE newWithout removes only the first element in a list
+
+////
+
+Um gerade bei großen Datenmengen oder komplexen Filter-Operationen die Verarbeitung zu verzögern.
+Mittels `.asLazy()` wird eine Lazy-Collection erstellt die finale Elemente erst bei Bedarf zur Verfügung stellt wenn terminale Methoden sie benötigen.
+
+Eine häufige Anwendung ist die Kombination zweier Listen mittels `zip`, dafür gibt es leider im JDK keine integrierte Entsprechung.
+Damit werden so viele Paare erzeugt, wie die kürzere Liste lang ist.
+
+.Listen zusammenführen mit zip
+----
+var countries = FastList.newListWith("DE","US")
+var populations = FastList.newListWith(84, 340)
+
+var pairs = countries.zip(populations)
+pairs ==> [DE:82, US:340]
+// Map daraus erzeugen
+UnifiedMap.newMapWith(pairs)
+----
+
+////
+Eclipse Collections distribution includes eclipse-collections-testutils.jar.
+Includes helpful utility for writing unit tests.
+Collection specific.
+Implemented as an extension of JUnit.
+Better error messages.
+Most important class is called Verify.
+
+Verify.assertSize(2, peopleWithCats);
+
+// mixed collections, selectInstancesOf()
+Lists.immutable.of("A",'A',"B").selectInstancesOf(String.class)
+
+////
+
+Ein `Bag` [BagCounter] zählt das Auftreten von Elementen wie ein Histogramm oder Multiset, er entspricht einer `Map` mit Element als Schlüssel zu Anzahl als Wert, die deutlich aufwändiger zu verwalten sind, besonders and der Null-Grenze.
+Bags können aus Listen mittels `toBag` erzeugt werden.
+
+// Map<T,Long> bag = items.stream().collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+
+.Bag Beispiele
+[source,java]
+----
+var farben=Bags.mutable.with("grün","weiß","gelb","weiß","grün","grün");
+farben.occurrencesOf("gün"); // 3
+farben.addOccurrences("weiß",5);
+
+// Unterschied bei der Anzahl der Einträge
+farben.size() // 11
+farben.sizeDistinct() // 3
+
+farben.toMapOfItemToCount();
+farben.forEachWithOccurrences((e,c) -> System.out.printf("%s: %d\t",e,c));
+// weiß: 7 grün: 3 gelb: 1
+farben.selectByOccurrences(c -> c >= 3);
+// [weiß, weiß, weiß, weiß, weiß, weiß, weiß, grün, grün, grün]
+// Mehr als ein Eintrag
+farben.selectDuplicates()
+// [weiß, weiß, weiß, weiß, weiß, weiß, weiß, grün, grün, grün]
+// genau ein Eintrag
+farben.selectUnique()
+// [gelb]
+farben.topOccurrences(2);
+// [weiß:7, grün:3]
+farben.bottomOccurrences(2);
+// [gelb:1, grün:3]
+----
+
+Die Implementierung eines `HashBag` ist auch hier von einer (primitiven) `ObjectIntMap<K>` bereitgestellt, die 25-75% speichereffizienter und etwas schneller als eine vergleichbare Implementierung mittels `HashMap<K,Integer>` ist.
+Für Histogramme ist es effizienter eine primitive Variante wie `IntBag` zu benutzen.
+
+
+Eine `MultiMap` ist ein Datentyp [MultiMap], den ich in der Java Collection API oft vermisst habe.
+Dabei wird ein Schlüssel auf mehrere Werte abgebildet, bei `SetMultiMap` ohne und bei `ListMultiMap` mit Duplikaten und bei `BagMultiMap` mit wiederholten Einträgen mit Zählern.
+Eine MultiMap ist auch das Ergebnis von `groupBy`, abhängig vom Basistyp der Collection (List, Set, Bag) wird der entsprechende MultiMap Typ covariant in der API zurückgegeben.
+
+// items.stream().collect(Collectors.groupingBy(item::getGroup))
+
+Implementiert ist die MultiMap mit einer UnifiedMap, die die entsprechenden Typen von Collections als Werte hat, und sich automatisch um das Erzeugen neuer und Entfernen von leeren Einträgen kümmert, im Vergleich mit einer JDK Collections Implementierung wird ca 55% weniger Speicher benötigt.
+
+MultiMaps haben eine ebenso reichhaltige API für die Iteration, Filterung, Projektion von Schlüsseln *und* Werten wie der Rest von Eclipse Collections.
+
+.Erzeugung von MultiMaps
+[source,java]
+----
+var mm = Multimaps.mutable.set.empty();
+mm.put("antwort",42);
+mm.put("antwort",42);
+mm.put("antwort",0);
+// {antwort=[0, 42]}
+
+// MultiMap(List) ist auch das Ergebnis von groupBy
+list.groupBy(i -> i % 2)
+// {0=[4, 16, 36, 64], 
+//  1=[1, 9, 25, 49, 81]}
+// groupByEach berücksichtigt mehrere Schlüssel pro Eintrag
+
+// MultiMap aus Map via flip()
+var movies = Maps.immutable.of(
+    "Avenger",2019, "Frozen II", 2019)
+movies.flip()
+// {2019=[Avenger, Frozen II]}
+----
+
+////
+.Nutzung von MultiMaps
+----
+
+----
+mm.putAll(key, values)
+
+keyBag(), 
+keySet(), 
+forEachKey(), 
+forEachValue(), 
+forEachKeyValue(), 
+forEachKeyMultiValues(), 
+selectKeysValues(), rejectKeysValues(), selectKeysMultiValues(), rejectKeysMultiValues(), 
+collectKeysValues(), collectValues() 
+////
+
+////
+Sortierung
+
+Sortierung von Collections ist ein Thema für sich, im JDK muss man sich mit Collections.sort, Arrays.sort oder den Sortierungs-Methoden von Stream zufriedenstellen.
+Dabei können entweder Objekte die Comparable<T> implementieren sortiert werden, oder man muss den Sortiermethoden einen Comparator<T> mitgeben der den Vergleich implementiert.
+
+In Eclipse Collections, kann man ebenso nach der natürlichen Ordnung, mit einem Comparator oder einer Projektion sortieren.
+
+// todo test again with 10.3/11.M2
+[source,java]
+----
+var data = IntLists.immutable.with(-3, -1, 0, 2, 4);
+
+// Vergleichsoperation
+// Umgekehrt
+data.sortThis((i, j) -> -Integer.compare(i, j));
+data.sortThis(Comparators.naturalOrder().reversed());
+// zuerst gerade dann ungerade
+data.sortThis((a, b) -> (a & 1) - (b & 1));
+
+// Projektionen
+// nach Absolutwert
+data.sortThisBy(Math::abs);
+// nach Wert in einer anderen Liste
+var lookup=IntInterval.zeroTo(4)
+lookup.sortThisBy(data::get);
+
+// Kombination
+lookup.sortThisBy(list::get, Comparators.naturalOrder().reversed());
+----
+
+////
+== Zusammenarbeit mit JDK Collections
+
+Die veränderlichen Typen erben aber und unterstützen auch die Interfaces der JDK Collections Klassenhierarchie, daher können sie unmittelbar als Ersatz genutzt werden.
+
+image::https://github.com/eclipse/eclipse-collections-kata/raw/master/docs/shared/inheritance-hierarchy-list.png["Klassenhierarchie von Listen"]
+
+* `FastList` ist ein direkter Ersatz für `ArrayList` aus dem JDK.
+* `UnifiedSet` für `HashSet`
+
+Unveränderliche Typen könnten dafür mittels `toList`, `toSet` und `toMap` in ihre veränderlichen und implizit kompatiblen Entsprechungen umgewandelt werden.
+
+Aber besser geht es mit den expliziten Casts mittels `castToCollection,Set,List,Map`, dann bleiben sie unveränderlich.
+
+Eclipse Collections können aus JDK Iterables mit der Factory-Methode `withAll()` erzeugt werden.
+Falls ein Java Stream vorliegt, kommt `fromStream` zum Tragen.
+
+Falls man die Funktionalität der Eclipse Collections API direkt auf JDK Collections nutzen möchte,
+können statische Methoden auf der Hilfsklasse `org.eclipse.collections.impl.utility.Iterate` genutzt werden.
+// Iterate.collect(List.of(1,2,3),i->i*i)
+
+Eine Eclipse Collection kann mittels `toArray()` mit verschiedenen Signaturen in Objekt- oder spezifische Felder transformiert werden.
+
+// Zwischen den Collection Typen gibt es eine Reihe von Konvertierungsfunktionen `toSet`, `toList`, `toSortedMap` usw.
+
+.Konvertierung von Collections
+----
+
+----
+
+== Speichereffizienz und Performance
+
+Innerhalb von Eclipse Collections gibt es viele Stellen an denen für besseres Laufzeitverhalten besondere Implementierungen benutzt werden.
+
+Durch die Factory-Methoden zur Erzeugung der Collections ist es leicht möglich, Alternativen zu wählen.
+Zum Beispiel sind unveränderliche Varianten bis zu einer gewissen Größe mit direkten Instanzvariablen für die Werte ausimplementiert (Bag bis 20, List bis 10, Map und Set bis 4), was mit erheblichen Speichereinsparungen einhergeht.
+
+Daher sollte, wenn klar ist, dass keine Veränderung der Datenstrukturen notwendig ist, auf deren unveränderlichen (und primitiven) Varianten und Konstruktion durch Factories gewechselt werden.
+
+Alle veränderlichen Collection-Typen haben eine `toImmutable` Methode, die das optimierte, unveränderliche Äquivalent erzeugt.
+Damit können veränderliche Typen als temporäre "Builder" für die Zieldatenstruktur genutzt werden.
+
+// Memory Efficiency (performance)
+
+=== Primitive Collections
+
+Primitive Collections aller Art (Set, Bag, List, Map, Stack) sind für alle Basistypen (numerische Typen, `char` und `boolean`) vorhanden, sie existieren in veränderlichen, unveränderlichen, synchronisierten und anderen Varianten.
+Für Maps gibt es eine Vielzahl von Kombinationen von Schlüssel und Werttypen.
+
+image::https://github.com/eclipse/eclipse-collections-kata/raw/master/docs/shared/primitive-collections2.png[]
+
+Angenehmerweise haben die primitiven Collections ähnlich umfassende Fluent-API wie die regulären Eclipse Collections-Typen.
+
+Hier ein Beispiel:
+
+.IntList Beispiel
+[source,java]
+----
+import org.eclipse.collections.impl.factory.primitive.*;
+
+var ints = list.collectInt(Integer::intValue)
+// oder var ints = list.collectInt(i -> i)
+ints.select(i -> i > 25).sortThis().sum()
+// 230
+// SummaryStatistics aus Java Streams wird auch unterstützt
+ints.summaryStatistics()
+// IntSummaryStatistics{count=9, sum=285, min=1, average=31.666667, max=81}
+----
+
+Die Flexibilität gilt auch für die Konstruktion: `Typ` + `Lists,Maps,Sets` + `.mutable,immutable,fixedSize` + `.of,with,ofAll,withAll()` z.B. `IntLists.immutable.with(1,10,100)`.
+
+Für Zahlenbereiche könnten `Interval` Typen benutzt werden z.B `LongInterval`, sowohl für Konstruktion als auch als Parameter für Mengenoperationen wie `containsAll`. 
+
+.IntList Beispiel
+[source,java]
+----
+import org.eclipse.collections.impl.factory.primitive.*;
+import org.eclipse.collections.impl.list.primitive.*;
+
+IntLists.immutable.with(1,10,100)
+
+IntInterval.zeroTo(100).containsAll(ints)
+// true
+
+LongInterval.evensFromTo(0,10)
+// [0, 2, 4, 6, 8, 10]
+
+LongInterval.fromTo(0,5)
+// [0, 1, 2, 3, 4, 5]
+
+LongInterval.fromToBy(42,36,-2)
+// [42, 40, 38, 36]
+
+LongInterval.zeroToBy(25,5).toReversed()
+// [25, 20, 15, 10, 5, 0]
+
+LongInterval.from(12).to(24).by(6).toList()
+// [12, 18, 24]
+
+// Collection aufteilen
+IntInterval.zeroTo(10).chunk(2)
+// [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10]]
+
+// Teile eines Intervals verwenden
+IntInterval.zeroTo(1_000_000).subList(100_000,200_000)
+----
+
+// PrimitiveIterable size, empty/notEmpty append/makeString
+
+=== Speicherbedarf
+
+Bei der Implementierung der Eclipse Collections wurde vor allem auf Speicherbedarf geachtet.
+Anders als in JDK werden auch eher optimierte Implementierungen für Spezialfälle und Typen von Containern bereitgestellt, was zwar mehr Aufwand für die Entwickler der Bibliothek bedeutet aber auch mehr Vorteile für die Nutzer bringt.
+
+Die meisten Implementierungen basieren direkt auf Feldern (Arrays) ohne zusätzliche, indirekte Verwaltungsobjekte.
+Daraus ergibt sich auch eine bessere Cache-Lokalität und Zugriffsmechanismen die leichter von CPU und Compiler optimierbar sind.
+
+In der UnifiedMap sind zum Beispiel keine `Map.Entry` Objekte (wie in `java.util.HashMap`) gespeichert, sondern direkt Schlüssel und Werte alternierend in einem Feld, deren Positionen auf den Hashwert abgebildet sind.
+Bei Kollisionen wird statt des Schlüssels ein Marker eingefügt und statt des Werts ein Link auf ein weiteres Feld derselben Struktur.
+Da der Hashwert von Einträgen nicht vorberechnet und gecached wird, ist diese Implementierung empfindlicher für die Laufzeiteffizienz der Berechnung und profitiert von Schlüsseln, die den Hashcode selbst vorhalten, sofern er teuer zu berechnen ist, wie zum Beispiel `java.lang.String`.
+
+Das `HashSet` im JDK ist nur eine `HashMap` mit einem Platzhalter Objekt als Wert, im `UnifiedSet` wird dagegen nur ein Feld für die Werte mit ggf. einem Überlauf-Feld an Stellen mit Kollisionen genutzt. 
+Das führt zu einer Speicherersparnis von einem Faktor 3-4 mit einer 50%-300% Geschwindigkeit, die in den meisten Fällen aber zumindest äquivalent ist.
+
+////
+== Performance
+
+Optimized Eager APIs (performance)
+Lazy APIs (performance)
+Parallel APIs (performance)
+
+Primitive Collections (productivity & performance)
+Immutable Collections (predictability and performance)
+
+Anhand der Namenspräfixe kann man ableiten, ob eine Methode in "konstanter" Zeit und Aufwand arbeitet, dann ist ihr `as` vorangestellt (wie `asUnmodifiable()`, `asReversed()`).
+In den meisten Fällen wird die Originaldatenstruktur dann nur gekapselt.
+////
+
+////
+as vs to naming convention: In Eclipse Collections, we try to follow common conventions like the ones described in this blog.In Eclipse Collections, methods that start with the word “as” always take constant time and create constant garbage. Usually that means returning a wrapper object. Some examples:
+asUnmodifiable() – returns collection wrappers that throw on mutating methods
+asSynchronized() – returns collection wrappers that grab a lock before delegating
+asLazy() – returns a wrapper that supports lazy evaluation, by deferring evaluation of non-terminating operations and only evaluating when a terminating operation is encountered
+asReversed() – returns a lazy wrapper around a list that iterates in reverse order when computation is forced
+asParallel() (Beta) – returns a lazy wrapper that supports parallel execution
+In Eclipse Collections, methods that start with the word “to” can take more time and create more garbage. Most of the time that means creating a new collection in linear time. In the case of sorted collections, that grows to O(n log n). Some examples:
+
+toList() – always creates a new copy, even when called on lists
+toSet(), toBag(), toStack(), toMap(), toArray() –  O(n) in time and memory
+toSortedList(), toSortedListBy(), toSortedSet(), toSortedSetBy(), toSortedMap() – O(n log n) time
+toImmutable() – O(n) time on mutable collections
+toReversed() – same as asReversed() but will have eager evaluation
+toString() – yes, it counts
+////
+
+=== Parallele Verarbeitung
+
+Als ein Beta Feature (seit Version 5.0) wird die parallele Verabeitung unterstützt.
+Ähnlich zur verzögerten Ausführung mit `asLazy` werden mit `asParallel` spezielle Wrapper für FastList und UnifiedSet erzeugt, die zusammen mit einem optionalen `Executor` diverse Operationen (Filterung, Aggregation, Transformation) parallel ausführen.
+
+[source,java]
+----
+var viele = IntInterval.zeroTo(100_000_000)
+var pool = Executors.newFixedThreadPool(10)
+
+// dauert etwas
+var par=viele.collect(i->i).asParallel(pool, 10_000_000)
+par.max()
+par.sumOfLong(i->i)
+par.count(i->i%2==0)
+----
+
+Gerade bei numerischer Verarbeitung sind aber die primitiven Varianten der Collections sogar mit einem Thread schneller, u.a. weil sie keine Objekt-Verarbeitung und Boxing durchführen müssen.
+
+// binarySearch
+// IntInterval.subList(from,to)
+
+Dirk [Fauth] hat einen ausführlichen Vergleichsartikel für Geschwindigkeit und Speicherverbrauch von Eclipse Collections und JDK Collections, Felder und Streams geschrieben.
+Dabei hat er in allen Fällen entweder eine Laufzeitverbesserung bzw. keine Verschlechterung messen können und der Speicherverbrauch der Anwendung reduzierte sich von 1.5GB auf 250MB bei Beibehaltung der Funktionalität.
+
+// clear() keeps original size, you need to use `trimToSize()` on the concrete implementation
+
+
+== Fazit und Ausblick
+
+Eclipse Collections sind ein sehr mächtiges Werkzeug, für den allgemeinen und speziellen Einsatz, das fast keine Wünsche offenlässt.
+Es benötigt zwar einige Zeit bis man mit den meisten APIs und Möglichkeiten vertraut ist, aber dann möchte man die Bibliothek nicht mehr missen.
+
+In Version 11 sind weitere nützliche Features geplant, zum Beispiel Set-Operationen auf primitiven Sets, wie Differenz, Subset von usw.
+
+// primitive containsAny, containsNone
+// for larger (>32) collections that are not sets there will be an intermediate set created
+// also improved containsAll with a similar optimization
+////
+Set operations that will be available on primitive sets in ‪@EclipseCollect‬ 11.0 release! ✅union ✅intersect ✅difference
+ ✅symmetric difference ✅is subset of ✅is a proper subset of ✅cartesian product
+////
+
+////
+Top Ten Reasons to use Eclipse collections
+Rich, fluent, and functional APIs with good symmetry (productivity)
+Memory Efficiency (performance)
+Optimized Eager APIs (performance)
+Primitive Collections (productivity & performance)
+Immutable Collections (predictability and performance)
+Lazy APIs (performance)
+Parallel APIs (performance)
+Multimaps (productivity and type safety)
+Bags (productivity and type safety)
+Mutable and Immutable Collection Factories (productivity)
+////
+== Referenzen
+
+* [EclipseCollections] https://www.eclipse.org/collections/
+* [ECJavaDoc] https://www.eclipse.org/collections/javadoc/10.2.0/index.html?overview-summary.html
+* [Raab10Gruende] https://medium.com/oracledevs/ten-reasons-to-use-eclipse-collections-91593104af9d
+* [EclipseCollectionsDE] https://www.eclipse.org/collections/de/index.html
+* [CodeKatas] https://github.com/eclipse/eclipse-collections-kata
+* [RaabZukunft] https://donraab.medium.com/the-next-5-years-for-eclipse-collections-a1f3ce896c2c
+* [APIGuide] https://github.com/eclipse/eclipse-collections/blob/master/docs/guide.md
+* [InfoQEC] https://www.infoq.com/articles/eclipse-collections/
+// * [InfoQECRefactor] https://www.infoq.com/articles/Refactoring-to-Eclipse-Collections/
+* [TaleOfTwoKatas] https://donraab.medium.com/a-tale-of-two-katas-ec956410d26d
+* [ECFactories] https://medium.com/javarevisited/as-a-matter-of-factory-part-1-mutable-75cc2c5d72d9
+// * [EC10.3] https://medium.com/oracledevs/eclipse-collections-10-3-released-1ee8ea3cf6e1
+* [Fauth] http://blog.vogella.com/2020/06/25/nattable-eclipse-collections-performance-memory-improvements/
+// * https://medium.com/javarevisited/by-yourself-some-time-e16c0f488847
+// * [Sorting] https://medium.com/javarevisited/eclipse-collections-now-supports-indirect-sorting-of-primitive-lists-e2447ca5dbc3
+// https://medium.com/oracledevs/finding-symmetry-27944c74b6d4
+// * [API-Prepositions] https://medium.com/javarevisited/preposition-preference-1f1c709b098b
+* [UnifiedSetMemory] https://medium.com/oracledevs/unifiedset-the-memory-saver-25b830745959
+* https://medium.com/oracledevs/unifiedset-the-memory-saver-25b830745959
+* [TopAPI] https://medium.com/javarevisited/my-25-favorite-eclipse-collections-apis-a51589ee5c4a
+* [2020Articles] https://pratha-sirisha.medium.com/eclipse-collections-2020-retrospective-1024651350d5
+* [ECGuide] https://github.com/eclipse/eclipse-collections/blob/master/docs/guide.md
+* [BagCounter] https://medium.com/oracledevs/bag-the-counter-2689e901aadb
+* [MultiMap] https://medium.com/oracledevs/multimap-how-it-works-a3430f549d35
+////
+* [PrepositionsAPI]https://medium.com/javarevisited/preposition-preference-1f1c709b098b
+* [Factory Mutable] https://medium.com/javarevisited/as-a-matter-of-factory-part-1-mutable-75cc2c5d72d9
+* [UnifiedSet] https://medium.com/oracledevs/unifiedset-the-memory-saver-25b830745959
+* [FlatCollect] https://medium.com/@goldbal/ec-by-example-flatcollect-into-primitive-collections-43d40c16eb85
+////
