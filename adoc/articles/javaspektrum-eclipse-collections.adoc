@@ -4,7 +4,7 @@ Ich habe  mich in der Vergangenheit schon mehrmals über verschiedene Collection
 In den letzten Jahren haben sich aber die [EclipseCollections] (ehemals Goldman Sachs Collections) als eine der weitverbreitetsten Bibliotheken etabliert.
 
 Auch bei uns in Neo4j haben sie die selbst entwickelten "primitive collections" ersetzt. 
-Damit konnten wir zehntausende Zeilen Code löschen, den wir nicht mehr warten müssen bei gleichzeitiger Beibehaltung von Speicher- und Laufzeiteffizient.
+Damit konnten wir zehntausende Zeilen Code löschen, den wir nicht mehr warten müssen, bei gleichzeitiger Beibehaltung von Speicher- und Laufzeiteffizient.
 
 Heute will ich daher die Gelegenheit nutzen, die Eclipse Collections kurz vorzustellen und einige interessante Features zu zeigen.
 
@@ -12,17 +12,18 @@ Heute will ich daher die Gelegenheit nutzen, die Eclipse Collections kurz vorzus
 
 == Allgemeines
 
-Die Eclipse Collections [GitHub) sind seit 9 Jahren ein quelloffenes Projekt, ursprünglich als "Goldman-Sachs-(GS)-Collections" und seit 5 Jahren als Eclipse Projekt.
-Mittlerweile ist Version 10.4 verfügbar und Version 11 ist in Entwicklung und wird bei Veröffentlichung der Kolumne verfügbar sein.
+Die Eclipse Collections [GitHub] sind seit 9 Jahren ein quelloffenes Projekt, ursprünglich als "Goldman-Sachs-(GS)-Collections" und seit 5 Jahren als Eclipse Projekt.
+Mittlerweile ist Version 10.4 verfügbar und Version 11 ist in Entwicklung und wird nach Veröffentlichung von JDK 17 bereitgestellt werden.
 Federführend in der Entwicklung ist seit Anfang an Don Raab, dem auch viele Artikel und Beispiele zu verdanken sind.
 Diverse Features und APIs sind von Smalltalk inspiriert.
 
 Die Bibliothek ist ziemlich beeindruckend in ihrer Leistungsfähigkeit und im Umfang.
 Anders als andere Collections-Bibliotheken, die sich entweder auf speicher- und CPU-effiziente Datenstrukturen oder auf angenehme APIs konzentrieren, sind die Eclipse Collections eher eine eierlegende Wollmilchsau.
 
-TODO: Dass heisst, alle Aspekte werden berücksichtigt und dass ohne widersprüchliche Einschränkungen hinzunehmen.
+Dass heisst, alle Aspekte werden berücksichtigt und dass ohne widersprüchliche Einschränkungen hinzunehmen.
+Hauptsächlich erfolgt dies durch die Nutzung spezifischer Implementierungen für spezielle Einsatzzwecke, die aber alle eine ähnliche API unterstützen.
 
-Zum einen ist die Implementierung der EC sehr speichereffzient, nur durch den Austausch z.B. einer `ArrayList` durch `Xxxx` kann man bei Beibehaltung der Funktionalität, 90%?? Speicher sparen. (siehe Tweet)
+Zum einen ist die Implementierung der EC sehr speichereffzient, nur durch den Austausch z.B. einer `ArrayList` durch `FastList` kann man bei Beibehaltung der Funktionalität, 90%?? Speicher sparen. (siehe Tweet)
 
 Es gibt Implementierungen für primitive Datentypen wie numerische Werte  ...
 
@@ -34,7 +35,7 @@ In der API kann man zwischen klassischen imperativen Collections-APIs und modere
 Am besten kann man Eclipse Collections mit einigen Beispielen erkunden, später werden wir dann auf Details eingehen.
 Die Bibliothek selbst bietet eine Reihe von dokumentierten Übungen ([CodeKatas] mit zu korrigierenden Unit-Tests) an, mit denen das erleichtert wird.
 
-Seit Java 13? kann man auch Collections im JDK zwar nicht mittels Literale aber zumindest Factory-Methoden erstellen, z.b.
+Seit Java 9 (JEP269) kann man auch Collections im JDK zwar nicht mittels literaler Syntax aber zumindest via Factory-Methoden erstellen, z.b.
 
 `Map.of("antwort",42)` oder `List.of(1,2,3)`.
 
@@ -79,17 +80,20 @@ FixedSize Examples:
  FixedSizeList<String> listOf = Lists.fixedSize.of("a", "b", "c");
 ////
 
+////
+.Erzeugung via Factory Methoden auf konkreten Klassen
 [source,java]
 ----
 MutableList<String> baeume = FastList.newListWith("Eiche", "Fichte", "Kastanie", "Gingko");
 // oder
 UnifiedMap<String, Integer> population = new UnifiedMap<>(Tuples.pair("US",340), pair("DE",82));
 ----
+////
 
 == API & Klassenhierarchie
 
 
-In EC wurde die Separation zwischen veränderlichen und unveränderlichen Strukturen von Anfang an besser gelöst als im JDK.
+In Eclipse Collections wurde die Separation zwischen veränderlichen und unveränderlichen Strukturen von Anfang an besser gelöst als im JDK.
 Die Basis-Interfaces sind alle von `RichIterable` abgeleitet, d.h. sie bieten nur sequentielle Iteration bzw. individuellen Zugriff (List und Map).
 
 Veränderbarkeit, feste Größe, Sortierung und andere Eigenschaften sind dann auf weiter unten liegenden Leveln (`MutableCollection` bzw. `MutableList`) angesiedelt
@@ -97,6 +101,7 @@ Damit werden Eigenschaften basierend auf der API zugesichert und nicht aufgrund 
 
 Dabei sind, anders als im JDK, Methoden die nicht nutzbar sind (z.B. Update-Methoden, bei unveränderlichen Typen) nicht vorhanden.
 
+.Eclipse Collections API Struktur
 image::https://miro.medium.com/max/700/1*x7tvAh5_CcaS0TZ1O62sRQ.png[]
 
 Die Basistypen von Collections die angeboten werden sind:
@@ -123,12 +128,14 @@ Desweiteren gibt es Symmetrie soweit wie möglich in der API zwischen den Collec
 
 Typisch für die Eclipse Collections ist auch die Konsistenz der Bedeutung von Präfixen (wie `as`, `to`, `with`) und Suffixen (`By`, `If`, `This`).
 
-/*
+Don Raab hat seine Favoriten in einem Artikel vorgestellt[Top25API], viele davon finden sich auch in unseren Beispielen.
+
+////
 Rich, fluent, and functional APIs with good symmetry (productivity)
 Multimaps (productivity and type safety)
 Bags (productivity and type safety)
 Mutable and Immutable Collection Factories (productivity)
-*/
+////
 
 Hier sind einige Bespiele für die API, für einfache Nachvollziehbarkeit wieder in jshell für Java 16.
 
@@ -661,7 +668,7 @@ Mutable and Immutable Collection Factories (productivity)
 // * [API-Prepositions] https://medium.com/javarevisited/preposition-preference-1f1c709b098b
 * [UnifiedSetMemory] https://medium.com/oracledevs/unifiedset-the-memory-saver-25b830745959
 * https://medium.com/oracledevs/unifiedset-the-memory-saver-25b830745959
-* [TopAPI] https://medium.com/javarevisited/my-25-favorite-eclipse-collections-apis-a51589ee5c4a
+* [Top25API] https://medium.com/javarevisited/my-25-favorite-eclipse-collections-apis-a51589ee5c4a
 * [2020Articles] https://pratha-sirisha.medium.com/eclipse-collections-2020-retrospective-1024651350d5
 * [ECGuide] https://github.com/eclipse/eclipse-collections/blob/master/docs/guide.md
 * [BagCounter] https://medium.com/oracledevs/bag-the-counter-2689e901aadb
