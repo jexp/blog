@@ -230,6 +230,8 @@ Desweiteren gibt es Symmetrie soweit wie möglich in der API zwischen den Collec
 
 Typisch für die Eclipse Collections ist auch die Konsistenz der Bedeutung von Präfixen (wie `as`, `to`, `with`) und Suffixen (`By`, `If`, `This`).
 
+Alle Typen der Bibliothek können mit überschaubaren Aufwand ineinander konvertiert werden, entweder via `toXxx`, `asXxx` oder mittels Factory-Methoden [ConverterMethods].
+
 === Erzeugung von Instanzen
 
 Seit Java 9 (JEP269) kann man auch Collections im JDK zwar nicht mittels literaler Syntax aber zumindest via Factory-Methoden erstellen, z.b.
@@ -469,6 +471,9 @@ Aber besser geht es mit den expliziten Casts mittels `castToCollection,Set,List,
 
 Eclipse Collections können aus JDK Iterables mit der Factory-Methode `withAll()` erzeugt werden.
 Falls ein Java Stream vorliegt, kommt `fromStream` zum Tragen.
+Alternativ kann mittels `stream.collect(Collectors2.toSet/Bag/List)` der entsprechende Typ erzeugt werden.
+
+Um Elemente aus einer Eclipse Collection zu einer JDK Collection hinzuzufügen kann man `richIterable.into(jdkCollection)` benutzen.
 
 Falls man die Funktionalität der Eclipse Collections API direkt auf JDK Collections nutzen möchte,
 können statische Methoden auf der Hilfsklasse `org.eclipse.collections.impl.utility.Iterate` genutzt werden.
@@ -701,6 +706,7 @@ Mutable and Immutable Collection Factories (productivity)
 * [ECGuide] https://github.com/eclipse/eclipse-collections/blob/master/docs/guide.md
 * [BagCounter] https://medium.com/oracledevs/bag-the-counter-2689e901aadb
 * [MultiMap] https://medium.com/oracledevs/multimap-how-it-works-a3430f549d35
+* [ConverterMethods] https://medium.com/javarevisited/converter-methods-in-eclipse-collections-6b9bfc0f2490
 ////
 * [PrepositionsAPI]https://medium.com/javarevisited/preposition-preference-1f1c709b098b
 * [Factory Mutable] https://medium.com/javarevisited/as-a-matter-of-factory-part-1-mutable-75cc2c5d72d9
