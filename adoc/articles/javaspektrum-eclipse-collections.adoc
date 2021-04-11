@@ -13,8 +13,11 @@ Heute will ich daher die Gelegenheit nutzen, die Eclipse Collections kurz vorzus
 == Allgemeines
 
 Die Eclipse Collections [GitHub] sind seit 9 Jahren ein quelloffenes Projekt, ursprünglich als "Goldman-Sachs-(GS)-Collections" und seit 5 Jahren als Eclipse Projekt.
+Seitdem erfreut sich das Projekt einer wachsenden Beliebtheit und hat mittlerweile viele OpenSource-Contributors um sich versammelt.
+
 Mittlerweile ist Version 10.4 verfügbar und Version 11 ist in Entwicklung und wird nach Veröffentlichung von JDK 17 bereitgestellt werden.
-Federführend in der Entwicklung ist seit Anfang an Don Raab, dem auch viele Artikel und Beispiele zu verdanken sind.
+
+Federführend in der Entwicklung ist seit Anfang an Don Raab, dem auch viele Artikel [2020Retrospective] und Beispiele zu verdanken sind.
 Diverse Features und APIs sind von Smalltalk inspiriert.
 
 Die Bibliothek ist ziemlich beeindruckend in ihrer Leistungsfähigkeit und im Umfang.
@@ -23,9 +26,9 @@ Anders als andere Collections-Bibliotheken, die sich entweder auf speicher- und 
 Dass heisst, alle Aspekte werden berücksichtigt und dass ohne widersprüchliche Einschränkungen hinzunehmen.
 Hauptsächlich erfolgt dies durch die Nutzung spezifischer Implementierungen für spezielle Einsatzzwecke, die aber alle eine ähnliche API unterstützen.
 
-Zum einen ist die Implementierung der EC sehr speichereffzient, nur durch den Austausch z.B. einer `ArrayList` durch `FastList` kann man bei Beibehaltung der Funktionalität, 90%?? Speicher sparen. (siehe Tweet)
+// Zum einen ist die Implementierung der EC sehr speichereffzient, nur durch den Austausch z.B. einer `ArrayList` durch `FastList` kann man bei Beibehaltung der Funktionalität, 90%?? Speicher sparen. (siehe Tweet)
 
-Es gibt Implementierungen für primitive Datentypen wie numerische Werte  ...
+// Es gibt Implementierungen für primitive Datentypen wie numerische Werte  ...
 
 In der API kann man zwischen klassischen imperativen Collections-APIs und moderen funktionalen und Fluent-APIs wählen, die eine Menge von Zusatzfunktionen bieten und Lambdas als erstklassige API-Bestandteile unterstützen.
 
@@ -355,7 +358,6 @@ farben.bottomOccurrences(2);
 Die Implementierung eines `HashBag` ist auch hier von einer (primitiven) `ObjectIntMap<K>` bereitgestellt, die 25-75% speichereffizienter und etwas schneller als eine vergleichbare Implementierung mittels `HashMap<K,Integer>` ist.
 Für Histogramme ist es effizienter eine primitive Variante wie `IntBag` zu benutzen.
 
-
 Eine `MultiMap` ist ein Datentyp [MultiMap], den ich in der Java Collection API oft vermisst habe.
 Dabei wird ein Schlüssel auf mehrere Werte abgebildet, bei `SetMultiMap` ohne und bei `ListMultiMap` mit Duplikaten und bei `BagMultiMap` mit wiederholten Einträgen mit Zählern.
 Eine MultiMap ist auch das Ergebnis von `groupBy`, abhängig vom Basistyp der Collection (List, Set, Bag) wird der entsprechende MultiMap Typ covariant in der API zurückgegeben.
@@ -439,15 +441,16 @@ lookup.sortThisBy(list::get, Comparators.naturalOrder().reversed());
 ////
 == Zusammenarbeit mit JDK Collections
 
-Die veränderlichen Typen erben aber und unterstützen auch die Interfaces der JDK Collections Klassenhierarchie, daher können sie unmittelbar als Ersatz genutzt werden.
+Die veränderlichen Typen erben und unterstützen die Interfaces der JDK Collections Klassenhierarchie, daher können sie unmittelbar als direkter Ersatz genutzt werden.
 
+.Klassenhierarchie von Listen
 image::https://github.com/eclipse/eclipse-collections-kata/raw/master/docs/shared/inheritance-hierarchy-list.png["Klassenhierarchie von Listen"]
 
 * `FastList` ist ein direkter Ersatz für `ArrayList` aus dem JDK.
 * `UnifiedSet` für `HashSet`
+* `UnifiedMap` für `HashMap`
 
-Unveränderliche Typen könnten dafür mittels `toList`, `toSet` und `toMap` in ihre veränderlichen und implizit kompatiblen Entsprechungen umgewandelt werden.
-
+Unveränderliche Typen könnten mittels `toList`, `toSet` und `toMap` in ihre veränderlichen und implizit kompatiblen Entsprechungen umgewandelt werden.
 Aber besser geht es mit den expliziten Casts mittels `castToCollection,Set,List,Map`, dann bleiben sie unveränderlich.
 
 Eclipse Collections können aus JDK Iterables mit der Factory-Methode `withAll()` erzeugt werden.
@@ -461,17 +464,18 @@ Eine Eclipse Collection kann mittels `toArray()` mit verschiedenen Signaturen in
 
 // Zwischen den Collection Typen gibt es eine Reihe von Konvertierungsfunktionen `toSet`, `toList`, `toSortedMap` usw.
 
+////
 .Konvertierung von Collections
 ----
-
 ----
+////
 
 == Speichereffizienz und Performance
 
 Innerhalb von Eclipse Collections gibt es viele Stellen an denen für besseres Laufzeitverhalten besondere Implementierungen benutzt werden.
 
-Durch die Factory-Methoden zur Erzeugung der Collections ist es leicht möglich, Alternativen zu wählen.
-Zum Beispiel sind unveränderliche Varianten bis zu einer gewissen Größe mit direkten Instanzvariablen für die Werte ausimplementiert (Bag bis 20, List bis 10, Map und Set bis 4), was mit erheblichen Speichereinsparungen einhergeht.
+Durch die Factory-Methoden zur Erzeugung der Collections ist es leicht möglich, diese Alternativen zu wählen.
+Zum Beispiel sind unveränderliche Varianten bis zu einer gewissen Größe mit direkten Instanzvariablen für die Werte ausimplementiert (Bag bis 20, List bis 10, Map und Set bis 4 Elemente), was mit erheblichen Speichereinsparungen einhergeht.
 
 Daher sollte, wenn klar ist, dass keine Veränderung der Datenstrukturen notwendig ist, auf deren unveränderlichen (und primitiven) Varianten und Konstruktion durch Factories gewechselt werden.
 
@@ -624,7 +628,8 @@ Dabei hat er in allen Fällen entweder eine Laufzeitverbesserung bzw. keine Vers
 Eclipse Collections sind ein sehr mächtiges Werkzeug, für den allgemeinen und speziellen Einsatz, das fast keine Wünsche offenlässt.
 Es benötigt zwar einige Zeit bis man mit den meisten APIs und Möglichkeiten vertraut ist, aber dann möchte man die Bibliothek nicht mehr missen.
 
-In Version 11 sind weitere nützliche Features geplant, zum Beispiel Set-Operationen auf primitiven Sets, wie Differenz, Subset von usw.
+In Version 11 sind weitere nützliche Features geplant, zum Beispiel Set-Operationen auf primitiven Sets, wie Differenz, Subset usw. es wird nachdem Java 17 als LTS Version erschienen ist, damit getested und veröffentlicht.
+Don Raab hat seine eigenen Wünsche und Gedanken zur Zukunft von Eclipse Collections in [RaabZukunft] niedergeschrieben.
 
 // primitive containsAny, containsNone
 // for larger (>32) collections that are not sets there will be an intermediate set created
@@ -669,7 +674,7 @@ Mutable and Immutable Collection Factories (productivity)
 * [UnifiedSetMemory] https://medium.com/oracledevs/unifiedset-the-memory-saver-25b830745959
 * https://medium.com/oracledevs/unifiedset-the-memory-saver-25b830745959
 * [Top25API] https://medium.com/javarevisited/my-25-favorite-eclipse-collections-apis-a51589ee5c4a
-* [2020Articles] https://pratha-sirisha.medium.com/eclipse-collections-2020-retrospective-1024651350d5
+* [2020Retrospective] https://pratha-sirisha.medium.com/eclipse-collections-2020-retrospective-1024651350d5
 * [ECGuide] https://github.com/eclipse/eclipse-collections/blob/master/docs/guide.md
 * [BagCounter] https://medium.com/oracledevs/bag-the-counter-2689e901aadb
 * [MultiMap] https://medium.com/oracledevs/multimap-how-it-works-a3430f549d35
