@@ -94,7 +94,7 @@ list.asReversed()
 list.makeString("-") // 1-4-9-...
 ----
 
-Mittels Selektion kann man Collections schnell nach Prädikaten filtern, das symmetrische Äquivalent ist `reject`.
+Mittels Selektion kann man Collections schnell nach Prädikaten filtern (wie `filter` in Streams), das symmetrische Äquivalent ist `reject`.
 
 .Prädikate und Selektion
 [source,java]
@@ -506,6 +506,8 @@ Damit können veränderliche Typen als temporäre "Builder" für die Zieldatenst
 // Memory Efficiency (performance)
 
 === Primitive Collections
+
+Wie in früheren Kolumnen schon diskutiert, erlauben primitive Collections es, zum einen auf (Auto)-Boxing von primitiven Typen in Java bei der Benutzung in größenveränderlichen Datenstrukturen zu verzichten, zum anderen erlaubt die Vorkenntnis des enthaltenen Typs eine viel effizientere Implementierungen sowohl für die interne Repräsentation als auch für alle Zugriffs-, Iterations- und Veränderungsoperationen.
 
 Primitive Collections aller Art (Set, Bag, List, Map, Stack) sind für alle Basistypen (numerische Typen, `char` und `boolean`) vorhanden, sie existieren in veränderlichen, unveränderlichen, synchronisierten und anderen Varianten.
 Für Maps gibt es eine Vielzahl von Kombinationen von Schlüssel und Werttypen.
