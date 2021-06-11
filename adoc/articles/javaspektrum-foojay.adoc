@@ -1,0 +1,271 @@
+= Unter Freunden auf Foojay.io 
+
+//:img: ../../img
+:img: https://github.com/jexp/blog/raw/gh-pages/img/
+
+image::https://images.unsplash.com/photo-1579437903194-faf427a99947?ixlib=rb-1.2.1&q=80&fm=jpg&crop=entropy&cs=tinysrgb&dl=dirk-van-wolferen-63c7mEJbfL4-unsplash.jpg[]
+
+Ich habe im Mai 2021 beim Open-Source-Hackathon hack-commit-push [HCP] einen Vortrag von Geertjan Wielenga zum Java-Portal foojay.io [Foojay] gehört, der mich so begeistert hat, dass ich diese Informationen hier gern weitergeben möchte.
+
+Das Java Ökosystem ist in den letzten Jahren massiv gewachsen und vielfältiger geworden.
+Durch die höhere Schlagzahl von Java Releases aller 6 Monate werden zum einen die Neuerungen in der Sprache und JVM immer schneller verfügbar. 
+Zum anderen wird der Review- und Releaseprozess kontinuierlich beschleunigt und verbessert.
+
+Der Java Community Process, Java Enhancement Process (JEP) und Projekte wie GraalVM erfreuen sich einer breiten Beteiligung von vielen Unternehmen, Institutionen und Einzelpersonen.
+
+OpenJDK releases werden nicht mehr nur von Oracle veröffentlicht sondern auch von Azul Amazon, SAP, RedHat, Bellsoft, Alibaba und seit neuestem sogar Microsoft.
+Der Entwicklungsprozess von OpenJDK ist auf GitHub umgezogen, was noch mehr Partizipation führt.
+
+TODO Dukes der OpenJDKS
+
+All das führt zu vielen erfreulichen Verbesserungen, aber bringt auch eine erhebliche Informationsflut in einer Vielzahl von Quellen mit sich.
+
+Wo finde ich die letzten Details zu:
+
+* Features in welcher JDK Version
+* Bugfixes
+* JEP
+* Kommandozeilenflags
+* OpenJDK Builds und deren Versionen
+
+Bisher haben sich individuelle Initiativen einzelner Aspekte angenommen, wie zum Beispiel Dokumentation bei Oracle (u.a. go.java), JEPs bei java.net, Features im Java Almanach, OpenJDK Listings bei SDKman usw.
+Damit hatten alle die sich intensiver mit OpenJDK Versionen und Builds auseinandersetzen müssen (z.b. für Operations oder Integrationstests) eine ziemliche Sysiphos-Aufgabe um mit der Entwicklung Schritt zu halten.
+
+Daher hat im letzten Jahr Azul eine unabhängige Initiative gestartet diese Informationen an einem Ort zu sammeln und diese wenn möglich auch via API zu Verfügung zu stellen.
+
+Mit foojay, eine Abkürzung für **F**riends **o**f **O**pen **J**DK, steht eine offene Plattform für alle Nutzer des OpenJDK zur Verfügung.
+Natürlich stellt es auch eine Anspielung auf `foo`, die Bezeichnung für "Irgendetwas" und `jay`, die englische Bezeichnung für Eichelhäher, die man auch im Logo erkennen kann.
+
+image::https://www.azul.com/wp-content/uploads/2020/04/Screenshot-2020-04-23-at-15.15.13.jpg[]
+
+Es soll ein "Integrated Documentation Environment" darstellen und alle schon genannten Themen abdecken, also so etwas wie Wikipedia für Java Entwickler.
+// curated
+
+Die Seite ist in einen OpenJDK Hub für Informationen und Updates sowie einen Community Hub für Lernen und Kollaboration unterteilt.
+
+OpenJDK Hub
+
+* Java Version Almanac
+* OpenJDK Update Release Details
+* OpenJDK Command Line Arguments
+* OpenJDK Distributionen und Downloads
+* Terminology und Glossar
+
+Community Hub
+
+* Foojay Today - Blog
+* Event Liste
+* Integrierte Suche
+
+
+In Zukunft soll foojay  auf vielfältige Weise erweitert werden, wie zum Bespiel die virtuelle JUG Tour oder Integration von Stackoverflow Fragen über Java.
+
+Neben der Webseite gibt es auch noch einen Slack-Workspace und `@foojayio` auf Twitter.
+
+Im folgenden möchte ich auf die verschiedenen Bereiche näher eingehen.
+
+== "What's new in OpenJDK" - OpenJDK Relase Details
+
+Die aktuellen Informationen und Updates also Issues und deren Fixes zum OpenJDK stehen im Zentrum der Seite und werden direkt auf der Homepage pro Quartal dargestellt.
+Zum Teil gibt es sogar schon vorab Previews der zu erwartenden Informationen für das nächste Quartal.
+
+Welche neuen Features gibt es, welche sicherheitsrelevanten Änderungen, was davon ist wichtig (Highlights), da die komplette Liste doch schon recht lang ist.
+Die Einträge pro JDK Release können auch pro Komponente strukturiert bzw. nach Inhalten sortiert/durchsucht werden.
+
+Jeder der Einträge enthält den Link zum Original-Issue, Komponente, Aktivität und ggf. Kommentare (für die Highlights).
+Mit einem Sternchen kann man indizieren dass man einen bestimmten Eintrag ebenfalls als wichtig erachtet. 
+Diese Abstimmungsergebnisse stehen dann auch für die Sortierung zur Verfügung und sind oft relevanter als die "Priorität" der Issues, die eher aus einer OpenJDK-Entwickler Perspektive vergeben wurde, sie werden auch für die "Highlights" Sektion genutzt.
+
+image::{img}/foojay-release-details.png[]
+
+== Java Version Almanach
+
+Ich habe in der früheren Artikeln schon manchmal auf den Java Version Almanach von Marc Hoffmann und Cay Horstmann hingewiesen, der praktischerweise die Features der Java Versionen seit 1.0 auflistet.
+
+Seit der gemächlichen Entwicklung bis Java 7 hat sich in den letzen Jahren das Volumen der neuen Features deutlich erhöht, so dass es wirklich nötig ist, einen "Almanach" zu pflegen.
+Selbst ich bin immer überrascht, wenn mir neue, spannende Features durch die Lappen gehen.
+
+Dankenswerterweise schaut Sven Ruppert ja in der JDK Kolumne den Java Versionen unter die Haube, so dass zumindest JavasSpektrum Leser im Bilde sein sollten.
+
+Auf foojay ist der Java Almanach als "Distros" (Distributionen) integriert, so dass man bequem nach neuen, entfernten und relevanten Features stöbern kann.
+
+Insgesamt 9 verschiedene Distributionen von OpenJDK werden im Detail aufgelistet, mit jedem einzelnen Build und seinen Modulen und Links zu den Anbietern und den Download-Pages.
+
+Jede Version kann auch mit vorherigen Versionen des JDK verglichen werden, so dass man zum Beispiel bei einem Upgrade weiss, was neu dazukommt.
+Noch wichtiger ist, welche Features die vielleicht im eigenen Projekt genutzt werden verschwunden oder nicht mehr zugreifbar sind bzw. ausgelagert worden sind.
+
+Details stehen pro Package im JDK zur Verfügung, seit Java 9 werden die API Information auch auf die Module des JDK abgebildet.
+
+== OpenJDK Release List
+
+Die Liste der Distributionen von OpenJDK ist auch via API verfügbar, jetzt schon in Version 2.0.
+
+Damit können Tools und IDEs die verfügbaren Distributionen, Versionen und Pakete der JDKs von verschiedenen Anbietern auflisten, bereitstellen und aktualisieren.
+Zur Zeit nutzen IDE Plugins für Eclipse und Netbeans diese Funktionalität, sowie das schon mehrmal von mir gepriesene Kommandozeilentool SDKman.
+
+Man findet die (interaktive) [API] Dokumentation und das API Projekt auf Github [API-Repo] als `discoapi`.
+
+Die API bietet unter `https://api.foojay.io/disco/v2.0/` folgende Endpunkte an:
+
+* distributions
+* packages/{jdks|jres|id}
+* major_versions
+* ephemeral_ids (für Downloads)
+
+Wir können es auch direkt ausprobieren, zum Beispiel in der Swagger Dokumentation oder mittels curl und jq.
+
+.Distributionen, Versionen und Downloadlinks mittels API
+[source,shell]
+----
+curl https://api.foojay.io/disco/v2.0/distributions |\
+  jq -r '.result[] | [.name,.versions[0]]|@csv'
+
+"Zulu","17-ea.24"
+"Trava","11.0.10+b6"
+"Temurin",
+"SAP Machine","17-ea.25"
+"Red Hat","15.0.2"
+"Oracle OpenJDK","17-ea.24"
+"Oracle","16.0.1"
+"OpenLogic","11.0.11+b9"
+"OJDKBuild","15.0.2"
+"Microsoft OpenJDK","16.0.1"
+"Mandrel","21.1"
+"Liberica Native","21.1"
+"Liberica","16.0.1+b9"
+"Graal VM CE 8","21.1"
+"Graal VM CE 16","21.1"
+"Graal VM CE 11","21.1"
+"Dragonwell","11.0.10"
+"Corretto","16.0.1+b9"
+"AOJ OpenJ9","17-ea"
+"AOJ","17-ea"
+----
+
+Oder die Details für ein einzelnes Paket wie hier Azul Zulu Java 16, inklusive dem Download-Namen des Pakets.
+
+[source,json]
+----
+curl https://api.foojay.io/disco/v2.0/packages/43afdc6785055999f3104208d4b9d703 | jq .
+{
+  "result": [
+    {
+      "id": "43afdc6785055999f3104208d4b9d703",
+      "archive_type": "tar.gz",
+      "distribution": "zulu",
+      "major_version": 16,
+      "java_version": "16.0.1",
+      "distribution_version": "16.30.15",
+      "latest_build_available": true,
+      "release_status": "ga",
+      "term_of_support": "sts",
+      "operating_system": "linux",
+      "lib_c_type": "musl",
+      "architecture": "x64",
+      "package_type": "jdk",
+      "javafx_bundled": false,
+      "directly_downloadable": true,
+      "filename": "zulu16.30.15-ca-jdk16.0.1-linux_musl_x64.tar.gz",
+      "ephemeral_id": "a518226a4bf6fa0250cd8ba0f06545bb2ff6ad5c",
+      "links": {
+        "pkg_info_uri": "https://api.foojay.io/disco/v2.0/ephemeral_ids/7daadc6ac1e91e3870f0141fa703ae3ddaaaa35d"
+      },
+      "free_use_in_production": true,
+      "feature": []
+    }
+  ],
+  "message": ""
+}
+----
+
+.Download Informationen
+[source,json]
+----
+curl https://api.foojay.io/disco/v2.0/ephemeral_ids/7daadc6ac1e91e3870f0141fa703ae3ddaaaa35d
+{
+  "result":[
+    {
+    "filename":"zulu16.30.15-ca-jdk16.0.1-linux_musl_x64.tar.gz",
+    "direct_download_uri":"https://cdn.azul.com/zulu/bin/zulu16.30.15-ca-jdk16.0.1-linux_musl_x64.tar.gz",
+    "download_site_uri":"",
+    "signature_uri":""
+  }
+    ],
+  "message":""
+}
+----
+
+////
+== OpenJDK Release Details
+
+* significance of issues that have been fixed
+* details and additional information (comments)
+
+Während die Informationen über OpenJDK Bugfixes, Security Fixes und Verbesserungen den Maintainern regelmäßig (quartalsweise) zur Verfügung gestellt werden, ist es schwieriger für reguläre Nutzer von Java auf dem Laufenden zu bleiben.
+
+Daher ist auf foojay in der "Release Details" Sektion ein stets aktueller Stand der Situation verfügbar.
+
+On a specific Tuesday in January, April, July and October, a set of updates are published covering security-related issues as well as bug fixes and even minor enhancements.  Regular updates have been a long-standing tradition for Java. 
+
+Changes and bug fixes are most often initiated in the upstream, still-in-development or major OpenJDK versions, and then backported through a community effort to the already released OpenJDK versions which most of the world uses in production. In addition, security updates are confidentially coordinated through the OpenJDK Vulnerability Group, such that vulnerabilities, CVEs, and source code for sensitive fixes can all be revealed simultaneously on the coordinated update date across all maintained versions. The specific update projects, for example, OpenJDK 7u, 8u, 11u and 13u, regularly update in this manner.
+////
+
+== OpenJDK Kommandozeilenargumente
+
+Wer schon einmal korrekte JVM-Argumenten für Garbage Kollektoren, Native Memory Limits oder JIT für eine spezifische JDK Version benötigte, weiss dass das eine ziemlich lange Suche nach sich ziehen kann.
+
+Die ausführliche, nach diversen Optionen filterbare und gut erklärte Tabellen von Kommandozeilenargumenten machen das jetzt zu einem Kinderspiel.
+
+Dankenswerterweise hat Chris Newland auf chriswhocodes.com seit Jahren diese Informationen gepflegt und sie jetzt für foojay zur Verfügung gestellt.
+
+Die Liste reicht bis Java 6 zurück und kann nach folgenden Aspekten durchsucht und gefiltert werden.
+
+* JDK Version
+* Komponente
+** Runtime
+** Security
+** Network
+** Compiler
+** Garbage Collection
+** Scripting
+** Concurrence uvm.
+* CPU Architektur
+* Beschreibung
+
+image::{img}/foojay-commandline.png[]
+
+Für jede JDK Version wird herausgestellt, welche Argumente neu dazugekommen und welche deprecated oder entfernt wurden.
+
+== Foojay Today Blog
+
+In der Community Sektion bietet "Foojay Today" Autoren aus dem Java Ökosystem die Möglichkeit Artikel im Blog zu veröffentlichen.
+Dabei Qualität statt Quantität angesagt, es werden maximal 2 Artikel pro Tag publiziert.
+Da die täglichen Blog Artikel von der ganzen Java Community kommen sind sie sehr vielfältig zu den verschiedensten Themen.
+Von Internas wie JVM-Bytecode und JDK Flight Recorder bis zu Themen wie JavaFX, Raspberry PI, Spring Boot und auch Interviews, Use-Cases und Buchreviews sind zu finden, die meisten davon auch als Kategorien.
+Ein interessanter aktueller Artikel ist "Java Predictions for 2021" [Predictions2021] von einer Reihe informierter Insider.
+
+Man kann sich für das Blog bzw. Themen auch RSS Feeds abbonieren, einfach and die URL ein `rss` anhängen, zum Beispiel `https://foojay.io/today/rss`
+
+Ich werde in Zukunft auch versuchen einige meiner Artikel dort zu veröffentlichen.
+
+In diesem Teil der Webseite gibt es auch einen Event Kalender in dem für Java Entwicklerinnen relevante Konferenzen finden kann, auch die OOP war gelistet.
+
+== Fazit
+
+Auch wenn die Informationen auf Foojay an anderen Orten verfügbar sind, ist es schon sehr praktisch alles gesammelt an einer Stelle zu finden und durchsuchen zu können.
+Besonders nützlich finde ich die Kommandozeilenargumente und dass die OpenJDK Build Liste als API verfügbar ist.
+
+Es ist definitiv zu empfehlen, foojay.io einen Besuch abzustatten, und sich ein eigenes Bild zu machen.
+Ich wünsche und hoffe dass die Seite erfolgreich bleibt und noch viele Jahre betrieben wird.
+Einige Kinderkrankheiten hat die Seite aber noch, zum einen die langen Ladezeiten und zum anderen einige Interaktionsbugs in verschiedenen Bereichen.
+
+== Referenzen
+
+* [HCP] https://hack-commit-pu.sh
+* [Foojay] https://foojay.io/about/
+* [Video] Video Foojay Vortrag: https://www.youtube.com/watch?v=Qcb6Ci2bWSM
+* [Ankündigung] https://www.azul.com/blog/foojay-a-place-for-friends-of-openjdk/
+// * https://marxsoftware.blogspot.com/2020/09/foojay-place-for-friends-of-openjdk.html
+* [Predictions2021] https://foojay.io/today/java-predictions-for-2021/
+* [API-Repo] https://github.com/foojay2020/discoapi
+* [API] https://api.foojay.io/swagger-ui

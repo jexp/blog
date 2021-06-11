@@ -1,7 +1,7 @@
 == Eclipse Collections - Effiziente Collections Implementierung für Java
 
 Ich habe  mich in der Vergangenheit schon mehrmals über verschiedene Collection Frameworks für Java ausgelassen.
-In den letzten Jahren haben sich aber die [EclipseCollections] (ehemals Goldman Sachs Collections) als eine der weitverbreitetsten Bibliotheken etabliert.
+In den letzten Jahren haben sich aber die [EclipseCollections] als eine der weitverbreitetsten Bibliotheken etabliert.
 
 Auch bei uns in Neo4j haben sie die selbst entwickelten "primitive collections" ersetzt. 
 Damit konnten wir zehntausende Zeilen Code löschen, den wir nicht mehr warten müssen, bei gleichzeitiger Beibehaltung von Speicher- und Laufzeiteffizient.
@@ -507,7 +507,7 @@ Damit können veränderliche Typen als temporäre "Builder" für die Zieldatenst
 
 === Primitive Collections
 
-Wie in früheren Kolumnen schon diskutiert, erlauben primitive Collections es, zum einen auf (Auto)-Boxing von primitiven Typen in Java bei der Benutzung in größenveränderlichen Datenstrukturen zu verzichten, zum anderen erlaubt die Vorkenntnis des enthaltenen Typs eine viel effizientere Implementierungen sowohl für die interne Repräsentation als auch für alle Zugriffs-, Iterations- und Veränderungsoperationen.
+Wie in früheren Kolumnen schon diskutiert, erlauben primitive Collections es, zum einen auf (Auto)-Boxing von primitiven Typen in Java bei der Benutzung in größenveränderlichen Datenstrukturen zu verzichten, zum anderen erlaubt die Vorkenntnis des enthaltenen Typs viel effizientere Implementierungen sowohl für die interne Repräsentation als auch für alle Zugriffs-, Iterations- und Veränderungsoperationen.
 
 Primitive Collections aller Art (Set, Bag, List, Map, Stack) sind für alle Basistypen (numerische Typen, `char` und `boolean`) vorhanden, sie existieren in veränderlichen, unveränderlichen, synchronisierten und anderen Varianten.
 Für Maps gibt es eine Vielzahl von Kombinationen von Schlüssel und Werttypen.
