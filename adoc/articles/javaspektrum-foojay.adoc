@@ -16,7 +16,7 @@ Der Java Community Process, Java Enhancement Process (JEP) und Projekte wie Graa
 OpenJDK releases werden nicht mehr nur von Oracle veröffentlicht sondern auch von Azul Amazon, SAP, RedHat, Bellsoft, Alibaba und seit neuestem sogar Microsoft.
 Der Entwicklungsprozess von OpenJDK ist auf GitHub umgezogen, was noch mehr Partizipation führt.
 
-TODO Dukes der OpenJDKS
+// TODO Dukes der OpenJDKS
 
 All das führt zu vielen erfreulichen Verbesserungen, aber bringt auch eine erhebliche Informationsflut in einer Vielzahl von Quellen mit sich.
 
