@@ -1,0 +1,678 @@
+== Project Loom - Einfachere Nebenläufigkeit in Java 
+
+.https://unsplash.com/photos/YFXUumP4m5U
+image::https://images.unsplash.com/photo-1569909115134-a0426936c879?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1350&q=80[]
+
+> Ein Thread, ist ein Thread, ist ein (virtueller) Thread.
+
+Heutzutage haben wir für Nebenläufigkeit in Java 2 Optionen:
+
+- einfacher, synchroner, blockierender Code mit begrenzter Skalierbarkeit, der gut linear zur Laufzeit nachzuvollziehen ist, oder
+- komplexe, asynchrone Bibliotheken mit hoher Skalierbarkeit die schwierig zu debuggen und zu profilen sind.
+
+Projekt Loom will die besten Aspekte dieser beiden Ansätze zusammenbringen und den Entwicklern zur Verfügung stellen.
+
+Nebenläufigkeit ist kein einfaches Thema, der Teufel liegt oft im Detail.
+Ich möchte im Artikel kurz auf die Geschichte und Herausforderungen von Nebenläufigkeit in Java eingehen, bevor wir in die Ansätze von Loom eintauchen und etwas hinter die Kulissen schauen.
+
+Project Loom kommt in Java 17 als preview Feature, es ist aber seit Ende 2017 in Arbeit.
+Die Arbeit wird vom ganzen JVM Platform Team unterstützt, die Projektleitung obliegt Ron Pressler, der Erfahrungen zur effizienten Nebenläufigkeit in seinem Startup Quasar sammelte.
+
+// Client Request is a good unit of work
+// completion service, parallelize same tasks
+
+
+// thread is a limited resource
+// millions of network connections but only a few thousand threads per machine
+// exception -> threads stack trace
+
+// synchronous 
+// java platform built on concept of threads
+// 
+
+// Einfachere nebenläufige Programmierung mit virtuellen Threads in Projekt Loom in Java 17
+// synchronous / blocking / not-resource efficient
+// process each incoming rquest transaciton synchronously in one thread
+// whole java ecosystem has been designed around that incl. debuggers, tools
+
+// async / non-blocking / complex / more scalable / dangerous
+// async libraries solve the scaling problem
+// hard to understand, profile, debug
+// lots of idle threads, loose profiling
+// start and end a tx on the same thread
+// make threads cheaper, conceptually simple
+// OS will not see virtual threads
+// 
+
+// fibers simple synchornous blocking code that's easy to read and write
+
+////
+Parallelism - eine Aufgabe in Teilaufgaben aufspalten um diese parallel, mit kürzerer Latenz auszuführen.
+// response time
+
+Concurrency - *verschiedene, unabhängige* Aufgaben auf einer begrenzten Anzahl von Ausführungseinheiten ausführen -> Durchsatz.
+
+
+Little's law: Latency = number of tasks * average latency
+
+Threads mit Context (wenn thread auf CPUs wechselt - context switch / register/caches)
+- task switch requires call to kernel, also expensive (> 1 microsecond)
+
+threads large objects, RAM heavy, megabytes -> for context, 
+OS scheduling von Threads ist ein Kompromiss oft schlecht für Caches usw. 
+
+
+- single thread at at time, sync, simple, blocking, limited by number of threads, low concurrency, easy for tools (debugger, profiler, exceptions)
+- wasteful
+
+- reuse via threadpools
+- leak of thread-locals, complex cancellation (interruption needs to be handled by the tasks)
+- still one execution per threads / cores
+
+- should have different pools for cpu bound tasks (close to the number of cores)
+- to io bound tasks (blocking) - much higher as most of them will be blocked
+
+- "return at wait" - reuse the thread while waiting
+- no API, lost context (no thread anymore)
+- 
+
+=> async style (rx, futures), more scalable
+- hard, to write / read / debug
+
+
+- loom: "rethink threads"
+- simple to write/maintain but scalable
+- opportunity to simplify and lightweight version of thread
+
+new:
+- resizable stack (jvm heap)
+- context switch in user mode without kernel call
+- pluggable schedulers with optimizations
+
+- when virtual threads starts blocking operation
+-> suspend virtual thread
+-> start non-blocking I/O (select)
+-> on return re-submit thread to scheduler
+////
+
+=== Eine kurze Geschichte Java Concurrency
+
+Eine Neuerung die Java einführte war dass statt Prozessen als grobgranularer Mechanismus für Nebenläufigkeit, Threads innerhalb eines Prozesses als explizite Konstrukte etabliert wurden.
+Jeder Thread hat seinen eigenen Stack und Instructionpointer, teilt sich aber den Heap mit anderen Threads.
+Die Erzeugung und Wechsel ist effizienter für Threads als für Prozesse, aber immer noch aufwändig.
+
+In den Anfängen von Java 1.1 bis 1.3 wurden [GreenThreads] als virtuelle Threads propagiert, die auf einen einzigen Betriebssystem Thread (M:1) gescheduled wurden.
+Damit sollte Java Entwicklern die Bequemlichkeit eines Thread-basierten Nebenläufigkeitsansatzes zur Verfügung gestellt werden. 
+Mit dem Erzeugen und Starten eines Threads sollten langlaufende Aufgaben in den Hintergrund verlagert werden.
+
+// Sie waren als langsam und aufwändig verschrien, zumindest auf nicht-Solaris Systemen.
+
+Threads als einziger Concurrency Mechanismus in Java - werden seit Java 1.4 von nativen OS Kernel Threads (1:1) repräsentiert.
+Obwohl damit eine effizientere Abbildung auf Hardware-Resourcen erfolgt ist ein Thread als Konstrukt für Nebenläufigkeit ziemlich schwergewichtig, sowohl was den Speicherverbrauch (weil der komplette Zustand der Berechnung, inklusive Stack gehalten werden muss) als auch den Aufwand beim Wechsel zwischen Threads auf einer CPU betrifft.
+
+Ein Hardware Thread muss ganz vielen Anforderungen gerecht werden - verschiedenen Programmiersprachen mit unterschiedlichen Stack-Größen, und Aufgaben von Video Streaming, Nutzerinteraktion bis Datenbank-Anfragen bearbeiten.
+Daher ist ihr Design generisch, überdimensioniert und grobgranular.
+
+Damals war es noch verbreitet, an vielen Stellen des Systems einfach Threads zu erzeugen und starten, was eine ungezügelte Nutzung von CPU Resourcen zur Folge hatte. 
+
+Man erinnere nur an die AWT- und Swing-Threading Handstände die damals gemacht werden mussten. (`SwingUtilities.isEventDispatchThread` und `SwingUtilities.invokeLater`).
+
+Mit `ThreadPools` und den verschiedenen `Executors` in Java 1.5 wurden dem Wildwuchs an Thread-Erzeugung und Ausführung in verschiedenen Teilen eines Systems etwas Einhalt geboten. Jetzt konnte wenigstens die Ausführung und Resourcenverwaltung zentralisiert und auch nach Bedarf zeitlich gescheduled und ihre Ergebnisse mittels `Future` gemanaged werden.
+Keine Notwendigkeit für `java.util.Timer` mehr.
+
+Seit Java 8 ist `CompletableFuture` als asynchrone, nebenläufige API verfügbar, sie ist meiner Meinung nach aber nicht wirklich anwenderfreundlich.
+
+Ansätze wie RxJava, die 2014 Portierung von Reactive Extension (.Net) und darauffolgend reactive-streams und Project Reactor nahmen sich dieses Themas etwas besser an, aber mit immer noch viel Komplexität.
+
+Nicht nur bei der Entwicklung und Wartung von Programmcode sondern auch beim Debugging und Profiling ist man ziemlich verloren zwischen komplexer, umfangreicher API und der Unmöglichkeit Zuordnungen von Systemzustand und -abläufen zum eigenem Code herzustellen.
+
+// async - complex, non-blocking
+// sync - simple, blocking
+
+In Java 7 wurde mit dem (automatischen) Fork-Join-Pool [FJP], den auch die "parallel Streams" benutzen, eine weitere Vereinfachung geschaffen, welches mit Lambda-Closures in Java 11 noch einmal vereinfacht wurde.
+
+Im Fork-Join-Ansatz wird aufteilbare Arbeit effizient mittels "Teile und Herrsche" in kleine (genug) Batches [DougLea] gestückelt und diese dann auf eine Anzahl Worker-Threads (Anzahl CPU Cores) verteilt, wobei sichergestellt wird, dass die Warteschlangen der Worker ausbalanciert sind.
+
+In Java 9 wurde die `Flow` Reactive-Streams Implementierung im JDK bereitgestellt.
+
+In einigen Scala und Clojure Bibliotheken wurden alternative Ansätze zur Nebeläufigkeit umgesetzt und in Sprachen wie Scala und Kotlin wurden Co-Routinen verfügbar gemacht, die auf dem Continuations-Ansatz basieren, aber ohne Hilfe der JVM auf der Compiler-Seite realisiert werden mussten.
+
+Jetzt kommt mit virtuellen Threads in Loom ein neuer Mitspieler auf das Feld, der zwar auch auf den unterbrechbaren Abläufen von [Continuations] basiert, diese aber nicht zum Entwickler exponiert.
+
+.Listing 1: Einige Ansätze für Nebenläufigkeit in Java
+[source,java]
+----
+// manueller thread start
+new Thread(() -> System.out.println("Hello JS")).start();
+
+// thread pool
+var pool = Executors.newFixedThreadPool(5);
+
+IntStream.range(1,10)
+  .mapToObj( nr -> "Hello "+nr)
+  .forEach(msg -> pool.submit(() -> System.out.println(msg)))
+
+// parallel stream
+IntStream.range(1,10).parallel()
+ .mapToObj( nr -> "Hello "+nr)
+ .forEach(System.out::println);
+
+// Completable Future
+var cf = CompletableFuture.completedFuture("complex")
+            .thenApplyAsync(String::toUpperCase)
+            .thenCombine(
+               CompletableFuture.completedFuture("CODE")
+               .thenApplyAsync(String::toLowerCase),
+                    (s1, s2) -> s1 + s2);
+cf.join()
+----
+
+// FJP
+// reactive streams
+// rxjava https://www.baeldung.com/rx-java
+// java 9 flow https://www.baeldung.com/java-9-reactive-streams
+// completable future https://www.baeldung.com/java-completablefuture
+// kotlin co-routines
+
+=== Java Concurrency wird unterschätzt
+
+Java Concurrency sieht von außen oft viel einfacher aus, als sie im Detail ist.
+Daher kann ich immer noch allen die sich damit beschäftigen Brian Goetz's "Java Concurency in Practice" [JCP] empfehlen, das Standardwerk, um die Hintergründe zu verstehen.
+Oder für den ganz tiefen Einstieg Heinz Kabutz [JSP] Concurrency Kurse.
+
+Zum einen ist der parallele Nutzung von geteilte Datenstrukturen immer problematisch, da wegen des nicht-deterministischen Ausführungsreihenfolge der Threads partielle Lese- und Schreibzugiffe stattfinden, die in korrupten Daten resultieren können.
+
+Wegen des Java-Memory-Modells [HungerXx] und der Nicht-Sichbarkeit von Caches anderer CPUs gibt es keine Garantien für einen Thread, Änderungen von anderen Threads zu sehen, wenn nicht mit Schlüsselworten wie `volatile` oder `synchronized` künstlich Lese- bzw. Synchronisationsbarrieren eingerichtet werden, die für die (teuren) Angleich von Informationen (Flush + Neu Laden) von CPU Caches genutzt werden.
+
+Viel besser ist es, Algorithmen zu bevorzugen, die nicht parallel auf diesselben Strukturen schreiben (Single Writer) z.B. LMAX Disruptor ([HungerXX]). 
+
+Oder unveränderliche Datenstrukturen zu nutzen (immutable, data classes), und sich das "Mehr an Sicherheit" mit einem höheren Speicherverbrauch zu erkaufen.
+Performance-technisch kann die zusätzliche Objekt-Erzeugung und Garbage Collection ggf. durch den Verzicht auf Barrieren ausgeglichen werden.
+
+Mit Valhalla-Datenstrukturen wird das noch einmal effizienter.
+
+Ein weiterer Aspekt der unterschätzt wird ist, die richtige Dimensionierung von ThreadPools für CPU-intensive Aufgaben (z.B. Parallelisierung von Datenverarbeitung), die der Core-Anzahl entsprechen sollte, während Pools für blockierende IO viel größer gewählt werden müssen, oder sogar wie der Cached-Executor oder Fork-Join-Pool mit Neuerzeugung von Threads.
+
+// user mode threads (erlang/go) -> can run everywhere except where explicitely forbidden (critical sections / synchronized / locks)
+// better for correctness -> as you can explicitely declare if it has to be atomic or not
+// needs access to backend/runtime
+// recursion -> needs large (OS) or resizable stacks (user mode)
+
+// async-await (c#, kotlin, rust, JS) - syntactic coroutines - can run only where allowed 
+// can be done in the compiler
+// can be excluded
+
+== Projekt Loom
+
+In den vergangenen 4 Jahren hat das Projekt Loom mit verschiedenen Ansätzen und Denkmodellen experimentiert um Nebenläufigkeit auf der JVM wieder einfacher zu machen, sowohl für die Entwicklung und Wartung aber auch Debugging und Profiling.
+
+Bis vor 2 Jahren war die Idee mittels Fibers (virtuellen Threads) und expliziten Continuations wie auch in Kotlin und anderen Sprachen zu Werke zu gehen.
+
+Jetzt ist der Ansatz wieder an den Anfangspunkt der Java Geschichte zurückgekehrt.
+Indem Threads als Nebenläufigkeits-Konstrukt eine virtuelle und leichtgewichtige Variante bekommen (nur 200-300 Bytes overhead), die von der JVM gemanaged und erst bei Ausführung von einem regulären Scheduler (z.B. Fork-Join-Pool) an einem CPU-Thread (Carrier Thread) gebunden wird [SOL1] [SOL2]. 
+
+Die Anzahl der Threads in diesem Scheduler ist standardmäßig die Anzahl der Prozessoren, kann aber mit dem Kommandozeilenflag `-Djdk.defaultScheduler.parallelism=N` gesetzt werden.
+
+Desweiteren werden in Zukunft alle blockierenden Operationen durch Implementierungen ersetzt die innerhalb von virtuellen Threads stattdessen eine asynchrone Operation starten bei deren Beendigung der Thread wieder fortgeführt wird, ohne zwischendurch CPU Ressourcen zu blockieren.
+
+Da Threads jetzt wie Runnables nur Aufgaben darstellen, die ausgeführt werden, kann man problemlos Millionen davon erzeugen und starten. 
+
+Die `Thread` Klasse wurde beibehalten, einige ihrer schon lange unnützen Methoden werden in der Zukunft dank der neuen Deprecation-Policy im JDK Release entfernt.
+Es gibt einige neue APIs die die Erzeugung von virtuellen Threads erlauben.
+
+Damit erreicht man dass bisheriger Code welcher Threads scheduled und durchreicht wenig oder nicht angepasst werden muss, ggf. reicht ein Austausch der Thread-Factory. 
+Die Arbeit, um virtuelle Threads funktionsfähig zu machen, passiert in den Tiefen des JDK.
+
+Das neue Feature ist somit vorwärts-kompatibel und existierender Code profitiert oft ohne Änderung.
+
+Virtuelle Theads benutzen immer noch Continuations unter der Haube, diese werden aber nicht an Nutzer exponiert.
+
+=== Virtuelle Threads
+
+Nachdem wir ein Java 17 Early Access mit Loom (`17.ea.7.lm-open`) z.B. mittels sdkman installiert haben, kann es losgehen, indem wir `jshell --enable-preview` starten.
+
+Dann können wir mit der neuen Thread API virtuelle Threads starten und auf ihre Rückkehr warten.
+
+.Listing 2: Unser erster virtueller Thread
+[source,java]
+----
+Thread thread = Thread.ofVirtual()
+  .start(() -> System.out.println("Hello JS"));
+thread.join();
+
+// oder 
+Thread.startVirtualThread(
+    () -> System.out.println("Hello Loom")).join()
+----
+
+Wie in Listing 3 zu sehen, kann man virtuelle Threads in großer Anzahl erzeugen, mit regulären Threads `ofPlatform()` stirbt die JVM an Speicher- oder Ressourcenmangel.
+
+.Listing 3: Eine Million virtueller Threads
+[source,java]
+----
+var threads = new Random().doubles(1_000_000)
+.mapToObj(r -> Thread.ofVirtual()
+.start(() -> {try { Thread.sleep((long)1000*r); } catch(InterruptedException ie) {}}))
+.toList()
+// threads ==> [VirtualThread[#126,<terminated>], VirtualThread[ ... tualThread[#705,
+threads.forEach(t -> {try { t.join();} catch(InterruptedException ie) {}});
+----
+
+////
+.Thread Builder API
+[source,java]
+----
+Thread t = Thread.builder().virtual().task(() -> { ... }).start();
+Thread t2 = Thread.builder().virtual().task(() -> { ... }).build();
+t2.start();
+ThreadFactory tf = Thread.builder().virtual().factory();
+----
+////
+
+Was man auch in Listing 3 sieht, wird das "Starten" von Threads schnell umständlich.
+Daher sollte wie bisher auf die Hilfe von `Executor` Infrastruktur zurückgegriffen werden.
+
+.Listing 4: Mehrere virtuelle Threads Starten
+[source,java]
+----
+try (ExecutorService e = Executors.newVirtualThreadExecutor()) {
+    IntStream.range(1,4).forEach(i ->
+        e.submit(
+         () -> System.out.println(
+         LongStream.range(1,(long)(10000*Math.random()))
+                   .mapToDouble(Math::sin).sum())));
+    IntStream.rangeClosed(1,6).forEach(i -> 
+        e.submit(
+         () -> System.out.printf("JS Ausgabe %d/2021%n",i)));
+}
+/* Ausgabe
+JS Ausgabe 1/2021
+1.9581490851021774
+JS Ausgabe 3/2021
+JS Ausgabe 2/2021
+0.4352547785276697
+0.09689764218735367
+JS Ausgabe 4/2021
+JS Ausgabe 5/2021
+JS Ausgabe 6/2021
+*/
+----
+
+Dafür gibt es einen neuen `newVirtualThreadExecutor` bzw. einen unbegrenzten Executor der für *jede* Ausführung einen neuen (virtuellen) Thread startet.
+Es wäre nicht so clever diesen Executor mit einer regulären Thread-Factory einzusetzen, dann käme das System schnell an seine Grenzen.
+
+// 
+.Listing 5: Thread Executor mit Virtual-Thread Factory
+[source,java]
+----
+ThreadFactory tf = Thread.ofVirtual().factory();
+try (ExecutorService e = Executors.newUnboundedExecutor(tf)) {
+   ...
+}
+----
+
+Bei der Nutzung von virtuellen Threads sind viele der bisherigen Erfahrungen nicht mehr zutreffend.
+Zum Beispiel ist Wiederverwendung oder Pooling von Threads nicht nur unnötig sondern sogar schädlich.
+Die neue Devise ist - für jeden, noch so kleinen nebenläufigen Task - einfach einen neuen virtuellen Thread starten.
+
+// 1s LongStream.range(1,10000000).mapToDouble(Math::sin).sum();
+
+Das kann man besonders gut bei Server-Anwendungen testen [KabutzLoomVideo]. 
+Für jeden Client-Request started neuer virtueller Thread im Executor, der dann später auf die CPU-Threads gescheduled wird.
+
+Im Echo Server in Listing 6 wird das demonstriert, pro Client-Socket wird ein virtueller Thread gestartet der alle empfangenen Bytes werden um eins erhöht zurückgibt.
+
+// 
+.Listing 6: Beispiel Echo Server in Loom
+[source,java]
+----
+// java --enable-preview --source 17 LoomServer.java
+// echo -n 'Hello Loom' | nc -n localhost 2000
+import java.io.*;
+import java.net.*;
+import java.util.concurrent.*;
+
+public class LoomServer {
+    public static void main(String...args) throws IOException {
+        try (var ss = new ServerSocket(2000);
+             var pool = Executors.newVirtualThreadExecutor()) {
+             while (true) {
+                var socket = ss.accept();
+                pool.execute(() -> {
+                    try (var s = socket; 
+                        var in = s.getInputStream(); 
+                        var out = s.getOutputStream()) {
+                            byte b = -1;
+                            while ((b = (byte)in.read()) != -1) {
+                                out.write(b+1);
+                            }
+                        } catch(IOException ioe) {}
+                });
+             }
+        }
+    }
+}
+----
+
+In den üblichen Backend- und Service-Frameworks (Spring, Micronaut, Quarkus, Helidon usw.) wird das nach dem Erscheinen von Loom dann unter der Haube integriert, so dass man sich als Entwickler nicht umstellen muss.
+
+=== Blockierende Operationen
+
+Das JVM/Loom Team musste sich für den neuen Ansatz aller Operationen annehmen [LoomNetworking], die normalerweise einen Thread blockieren könnten:
+
+* File I/O
+* Netzwerkzugriffe (inkl. DNS)
+* synchronized Blöcke
+* Locks, Semaphoren und blockierende Datenstrukturen
+* native Code (JNI)
+* LockSupport.parkNanos()
+
+Davon wurde bisher die Netzwerkschicht (ausser DNS) in JEP-353 für Sockets und JEP-373 für Datagram und die Primitiven wie Locks aus `java.util.concurrent` überarbeitet.
+
+Statt den aktuell gebundenen CPU Thread zu blockieren, wird stattdessen der virtuelle Thread pausiert und eine asynchrone Netzwerkoperation mit NIO genutzt, bei deren Ende der virtuelle Thread fortgesetzt wird [LoomNetworking].
+
+In einem separaten Poller Thread (getrennt für Lese- und Schreiboperationen) wird überprüft ob die Sockets für die Operation bereit sind und dann der virtuelle Thread wieder aktiv gesetzt, so dass er wieder gescheduled werden kann und die eigentliche Netzwerkoperation stattfindet.
+
+Für Dateioperationen und DNS ist das nicht so einfach, da es dort zum Teil (Windows) keine asynchronen/nicht-blockierenden APIs gibt, so dass ggf. ein Carrier Thread geblockt werden muss. 
+Dann wird ein sofort ein zusätzlicher Thread dem Pool hinzugefügt (via `ManagedBlocker`).
+
+// Für blockierende Operationen ist der Fork-Join-Pool auch nicht ideal, so dass dafür wahrscheinlich ein neuer Scheduler zur Verfügung gestellt wird.
+
+// Die alten IO-Streams (java.io.InputStream/Reader) funktionieren besser mit virtuellen Threads, da sie nicht mehr blockieren, aber sie benutzen viel Speicher.
+
+////
+- scheduler - fjp not ideal scheduler for networked io
+- separte poller threads for reads / writes
+
+- interaction with garbage collection
+-> implementing threads in user mode is easier due to gc
+-> gc roots threads -> 
+-> allocating memory is cheap
+-> thread stack scans are more expensive
+-> backwards compatibility
+-> most important in java
+-> new features -> forward compatibility -> old code will be able to use new features
+-> Thread API cleanup
+-> most people don't interact with Threads directly anymore
+-> no async/await
+-> 
+////
+
+=== Structured Concurrency
+
+Ein interessanter Ansatz der auch von Erlang und anderen Aktor Systemen für die Verwaltung von Millionen von aktiven Einheiten genutzt wird, ist die Einführung einer Management-Hierarchie.
+
+Unter der Bezeichnung [Structured Concurrency] wird ermöglicht dass virtuelle Threads, die von dem aktuellen Thread gestartet wurden, diesem "Elternthread" zugeordnet werden.
+
+Im eigenen Quelltext wird es durch das gezeigte try-with-resources von `AutoCloseable` Executors erreicht, also ähnlich wie ein Variablen-Scope ein Lebenszeit-Scope von Tasks.
+
+Alle Kind-Threads die in diesem Executor submitted werden werden garantiert beended sein, wenn die `close` Methode am Ende des Blocks ausgeführt wurde, ggf. wird die aktuelle Ausführung solange blockiert.
+
+Wird der Elternthread beendet oder unterbrochen, werden auch die Kindthreads beendet.
+Ggf. kann man damit auch Überwachungshierarchien etablieren in denen Elternthreads beim Misslingen von Kindthreads informiert werden und darauf reagieren können.
+
+////
+// todo timeout/delay
+
+TODO parent -child for tools representation
+
+-> TODO invokeAll / invokeAny -> try-with-resources calls invokeAll
+aka first result / all results
+-> cheaper / new executorservice
+-> 
+////
+
+=== Scope Variables
+
+Während aktuell oft mittels `ThreadLocal`s Informationen an den aktuellen Thread gebunden werden, um später verfügbar zu sein (z.B. in Code der dann indirekt von Frameworks aufgerufen wird), ist das sowohl fehleranfällig (falls die Werte nicht aufgeräumt wurden) als auch teuer.
+
+Besonders für die Vielzahl von virtuellen Threads ist das nicht praktikabel, und da virtuelle Threads nicht wiederverwendet werden, sind die ThreadLocals nicht mehr nutzbar.
+
+Daher wird zur Zeit mit "Scope Variables" als Alternative experimentiert, die als  `ScopeLocal` unveränderliche Werte bereitstellen können wie in Listing 7 zu sehen.
+
+// Listing 7
+.Scope Local als Thread Local Ersatz
+[source,java]
+----
+var sv = ScopeLocal.forType(Integer.class);
+var carrier =  ScopeLocal.where(sv, 42);
+carrier.get(sv); // -> 42
+carrier.run(() -> System.out.println(sv.get())); // -> 42
+----
+
+// also need a network and IO stack that is fiber-friendly
+// -> rewrite of java socket api
+
+// actors -> fibry is an actor system
+// actor single threaded, only alter their state and send messages
+// long running tasks / digital twins for IoT
+// 
+
+// === Channels
+
+////
+== Managed Blocker
+
+
+FJP has desired parallelism
+if you block in a managed way, it creates more threads, so that the same 
+
+Falls Carrier Threads geblockt werden, weil es nicht möglich ist die blockierende Operation in eine nichtblockierende/asynchrone Operation umzuschreiben, dann werden
+
+bisher genutzt in
+
+* J7 Phaser
+* J8 CompletableFuture
+* J9 Process, SubmissionPublisher
+* J14 AbstractQueuedSynchronizer -> , ReentrantLock, CountDownLatch, Semaphore
+
+* Loom: LinkedTransferQueue, SynchronousQueue, SelectorImpl, Object.wait
+
+
+-> PlainSocketImpl->NioSocketImpl now Threads can be interrupted 
+
+Need to wrap native code that 
+
+Synchronized/wait not fully compatible with Loom
+
+----
+var monitor = new Object();
+for (int i=0;i<10_000;i++) {
+  Thread.startVirtualThread( () -> {
+    synchronized(monitor) {
+       try {
+         monitor.wait();
+       } catch(InterruptedException ie) {}
+    }
+  });
+}
+Thread.startVirtualThread(() -> System.out.println("Done")).join();
+----
+
+
+rewrite synchronized to ReentrantLock, StampedLock (HunXxx)
+more complicated but compatible with loom
+
+biased locking turned off by default
+CHM uses synchronized, earlier versions used ReentrantLocks
+uncontented CHM in Java 15 is slower
+enable biased locking again to revert that
+////
+
+== Debugging und Profiling
+
+Da virtuelle Threads von aussen wie normale Threads mit synchronem Code aussehen sollen, erscheinen sie auch im Debugger mit Stack-Traces wie gehabt. 
+
+Das war auch eines der Ziele des Projektes - hohe Skalierbarkeit bei Beibehaltung des guten Monitoring und Debugging Verhaltens der klassischen synchronen Programmierng.
+
+Dazu wurden das Java Debug Wire Protocol (JWDP) und Java Debugger Interface (JDI) angepasst.
+
+Laut Aussage des Loom Teams kommen die Debugger von IntelliJ, Netbeans und Eclipse schon mit Stacktraces von virtuellen Threads zurecht.
+
+Die Herausforderung ist, Millionen von ihnen sinnvoll darzustellen und zu gruppieren. 
+
+Da kommt wieder die "Structured Concurrency" ins Spiel, die es erlaubt Kind-Threads unter in Hierarchie ihrer Aufrufer zusammenzufassen.
+
+Auch fürs Profiling vor allem mit JFR [HunXX] sind Vorkehrungen für Projekt Loom getroffen worden, so dass die Zuordnung von Operationen, wie Allokationen, Methodenaufrufe, Sampling usw. zu einem virtuellen Thread erfolgen kann.
+
+In der API gibt es aber aktuell keine Möglichkeit alle aktuell laufenden virtuellen Threads aufzulisten, oder vom Carrier Thread auf den aktuellen virtuellen Thread zuzugreifen und vice-versa.
+
+////
+== Virtuelle Threads unter der Haube
+-> continuations
+-> java.lang.Continuation
+
+== Was ist eine Continuation?
+
+
+====
+In computer science, a continuation is an abstract representation of the control state of a computer program. A continuation implements (reifies) the program control state, i.e. the continuation is a data structure that represents the computational process at a given point in the process's execution; the created data structure can be accessed by the programming language, instead of being hidden in the runtime environment. Continuations are useful for encoding other control mechanisms in programming languages such as exceptions, generators, coroutines, and so on.
+
+The "current continuation" or "continuation of the computation step" is the continuation that, from the perspective of running code, would be derived from the current point in a program's execution. The term continuations can also be used to refer to first-class continuations, which are constructs that give a programming language the ability to save the execution state at any point and return to that point at a later point in the program, possibly multiple times.
+====
+
+Wenn wir traditionelle Datenverarbeitung betrachten, so wechseln sich Berechnungen in der CPU mit I/O Aufgaben ab, dh. es müssen Werte von und zum Speicher, Netzwerk, Storage oder Datenbanken transferiert werden.
+Und da dass vergleichsweise viel Zeit benötigt, blockiert die Ausführung bis die Ergebnisse zur Verfügung stehen. 
+
+Und an dieser Stelle wird die Repräsentation von Threads als Hardware-Threads zum Verhängnis, da so eine komplette Ausführungseinheit der CPU geblockt wird und für nichts anderes zur Verfügung steht.
+
+Ein Vorreiter in der Lösung dieses Problems war Node.js das alle Aufgaben in einem einzigen Event-Loop ausführt, aber blockierende Aufrufe immer mit Callback-Funktionen versieht.
+So kann der teure Aufruf erfolgen, es wird aber nicht blockiert sondern der SELECT Mechanismus des Betriebssystems genutzt um bei Fertigstellung der Operation benachrichtigt zu werden und dann den Aufrufer mittels Ausführung des Callbacks fortzuführen.
+
+Oder die Kontrolle kann wie früher in kooperativem Multi-tasking explizit abgegeben werden, und das wird durch Continuations deutlich einfacher gemacht.
+
+
+// A fiber is made of two components — a continuation and a scheduler. As Java already has an excellent scheduler in the form of ForkJoinPool, fibers will be implemented by adding continuations to the JVM.
+
+TODO
+
+Vs. Blocking
+
+Continuations betrachten den Zustand einer Berechnung als jederzeit speicherbar.
+
+In der Realität würde man die Stellen in einer Funktion wo das sinnvoll möglich sein würde, markieren, z.B. 
+
+====
+Eine Continuation ist eine explizite, abstrakte Repräsentation des Zustandes eines Programmablaufs, also nicht nur dessen implizite Form innerhalb des Laufzeitsystems (CPU, Register, Speicher).
+
+Wenn dieser erfasst und gespeichert werden kann, ist die spätere Weiterführung des Ablaufs möglich.
+====
+
+// Arrays.asList(java.lang.Continuation.class.getMethods()).forEach(m -> System.out.println(m))
+
+----
+public final void java.lang.Continuation.run()
+public java.lang.String java.lang.Continuation.toString()
+public java.lang.StackTraceElement[] java.lang.Continuation.getStackTrace()
+public static boolean java.lang.Continuation.yield(java.lang.ContinuationScope)
+public boolean java.lang.Continuation.isDone()
+public java.lang.StackWalker java.lang.Continuation.stackWalker(java.lang.StackWalker$Option)
+public java.lang.StackWalker java.lang.Continuation.stackWalker(java.util.Set)
+public java.lang.StackWalker java.lang.Continuation.stackWalker()
+public java.lang.StackWalker java.lang.Continuation.stackWalker(java.util.Set,java.lang.ContinuationScope)
+public static java.lang.Continuation java.lang.Continuation.getCurrentContinuation(java.lang.ContinuationScope)
+public boolean java.lang.Continuation.isPreempted()
+public static void java.lang.Continuation.pin()
+public static void java.lang.Continuation.unpin()
+public static boolean java.lang.Continuation.isPinned(java.lang.ContinuationScope)
+public void java.lang.Continuation.something_something_1()
+public void java.lang.Continuation.something_something_2()
+public void java.lang.Continuation.something_something_3()
+public java.lang.Continuation$PreemptStatus java.lang.Continuation.tryPreempt(java.lang.Thread)
+----
+
+.Continuation Klasse - wichtigste Methoden
+[source,java]
+----
+class Continuation {
+    Continuation(ContinuationScope scope, Runnable target);
+    static void yield(ContinuationScope scope);
+    void run();
+    boolean isDone();
+}
+----
+
+.Manuelle Anwendung einer Continuation
+[source,java]
+----
+var scope = new ContinuationScope("Test");
+
+var cont = new Continuation(scope, () -> {
+    System.out.println("Hello");
+    Continuation.yield(scope);
+    System.out.println("World");
+});
+while (!cont.isDone()) {
+   System.out.println("Running Continutation");
+   cont.run();
+}
+----
+
+// something that suspends and resumes
+// scheduler
+
+// low level API for people to implement their own generators
+
+// Fiber lightweight, virtual thread, scheduled by the JVM not the OS
+// low footprint, millions of them low task switching costs
+// simple concurrency
+// esp. for interleaved compute + io
+
+fiber wraps continuation
+yields when task needs to block, continues when block has returned
+
+tasks scheduled on _carrier threads_ currently FJP
+
+
+[Continuations] sind schon seit den 60'er Jahren ein Gegenstand der Forschung und in verschiedenen Programmiersprachen implementiert.
+
+Es gibt Continuations/Co-Routinges z.B. für Kotlin, Scala, Clojure aber nicht für Java selbst. Und andere Ansätze wie Aktor-Modelle z.B. in Akka.
+
+Wie ein Runnable das pausiert werden kann.
+// A fiber is made of two components — a continuation and a scheduler
+
+
+// Kevlin Henney Sleepsort
+https://kevlinhenney.medium.com/need-something-sorted-sleep-on-it-11fdf8453914
+
+== Kritisch
+-> Heinz
+////
+
+== Nächste Schritte
+
+Die aktuell wichtigste Aufgabe ist es alle losen Enden für das Preview in Java 17 vorzubereiten das im September 2021 herauskommt.
+
+Danach wird vor allem das Feedback der Nutzer, Bibliotheks- und Frameworkentwickler wichtig für die nächsten Schritte sein.
+
+Auf jeden Fall werden weitere blockierende Methoden im JDK umgestellt und die Toolunterstützung verbessert.
+Auch die Mechanismen für structured concurrency, scoped variables und ggf. Thread-Kommunikation über Kanäle (Channels) müssen noch ausgereifter in der Umsetzung werden.
+
+Das finale Release von virtuellen Threads wird voraussichtlich in Java 19 im September 2022 erfolgen, bisher gab es mindestens zwei Preview-Releases von neuen großen Features.
+
+Ich wünsche Ihnen viel Spass beim Ausprobieren der neuen Funktionalitäten und würde mich über Feedback freuen.
+
+== Referenzen
+
+* [JCP] Java Concurrency in Practice (Brian Goetz)
+* [GreenThreads] https://en.wikipedia.org/wiki/Green_threads
+* [Continuations] https://en.wikipedia.org/wiki/Continuation
+* [FJP] https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/ForkJoinPool.html
+// * [FibersVideo] https://www.youtube.com/watch?v=vbGbXUjlRyQ
+* [SOL1] https://cr.openjdk.java.net/~rpressler/loom/loom/sol1_part1.html
+* [SOL2] https://cr.openjdk.java.net/~rpressler/loom/loom/sol1_part2.html
+* [LoomNetworking] https://inside.java/2021/05/10/networking-io-with-virtual-threads/
+* [InfoQ] https://www.infoq.com/podcasts/java-project-loom/
+* [InsideJavaLoom] https://inside.java/tag/loom
+* [LoomWiki] https://wiki.openjdk.java.net/display/loom
+* [StructuredConcurrency] https://wiki.openjdk.java.net/display/loom/Structured+Concurrency
+// * https://wiki.openjdk.java.net/display/loom/Getting+started
+// * [Fibry] https://github.com/lucav76/Fibry
+* [VideoSOLJune21] https://www.youtube.com/watch?v=KG24inClY2M
+* [VideoLoomAug21] https://www.youtube.com/watch?v=EO9oMiL1fFo
+* [VideoLoomNov20] https://www.youtube.com/watch?v=7GLVROqgQJY
+* [KabutzLoomVideo] https://www.youtube.com/watch?v=N9BQuO5HEMc
+////
+https://dzone.com/articles/a-new-java-with-a-stronger-fiber
+
+////
