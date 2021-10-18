@@ -1,0 +1,44 @@
+= SIMD
+
+Mats @Lasse I wanted to take the opportunity to develop a bit on what you raised in Paper Reading around SIMD registers and all that. This is very new to me, so I think it was very useful that you mentioned it, and it is far from a ‘stupid’ question. After reasoning a bit about it, the way I now understand that it works is like this:
+
+In a SIMD operation the CPU will use two (at least for a binary operation, I guess there may be unary ops as well?) registers. These are 16-byte wide as an industry standard, although I guess other sizes also exist sometimes. 16 bytes is enough space for 4 32-bit (or 4-byte, Java int , float ) numbers, or 2 64-bit numbers (Java long, double). So with two registers we can add together 4 ints with 4 other ints, like (1, 2, 3, 4) + (5, 6, 7, 9) in a single CPU cycle. With scalar operators that would take 4 cycles (I think?). For larger sequences the gains are larger, as far as I understand it.
+
+So when we decode data in the Stream VByte format, we know that each control byte is controlling exactly four integers of 32 bits (or two integers of 64 bits; the paper doesn’t mention it but I think the model extends naturally). This is exactly 16 bytes of memory in uncompressed format. But in our compressed data stream they could use less data, as little as 4 bytes (1 byte per number is the minimum in this compression scheme; theoretically some numbers could require even less but this is intentionally omitted). So we read 16 bytes and we fit it all perfectly into a SIMD register. Simultaneously, we fit another SIMD register with a 16-byte mask, which has a shape determined by the control byte.
+
+The mask will have a shape such that when used with a particular SIMD operation (in this case something called pshufb) the 16 data bytes will be interpreted/masked correctly to identify only the bits that correspond to the current control byte and none of the “extra” which is data that belongs to the next control byte. The “extra” will be the empty set/nothing in case the four numbers we’ve compressed were so large that they occupy the full 16 bytes, but it could also be as much as 12 bytes, if the numbers we’ve compressed only take up 1 byte each. The masks are precomputed in a table and we know from the control byte exactly how many all-zero bytes to add to each of the numbers. For example, the numbers 0, 1e9, 1e9, 1e9 would take 1+4+4+4 = 13 bytes, where we need to fill the first number with three zero-bytes on the “left” side to make it a complete 4-byte number, whereas we take the full 4 bytes for the other three numbers. The 3 bytes “extra” that we also read from memory are masked out and not used.
+
+With these two 16-byte data pieces in our two SIMD registers the pshufb operation can turn our compressed data of 16 bytes into uncompressed data of 16 bytes which are located in some result register (possibly in the same one as our input? I dunno how registers work exactly). So we used two registers of 16 bytes to produce a result of 16 bytes, and we have recovered our 4 32-bit numbers.
+
+
+
+
+
+09:10
+Lasse Westh-Nielsen was added to team-analytics-eng by Mats.
+09:12
+Mats The paper also notes that if differential coding was used, the four numbers that are now recovered (or decoded) are now conveniently located in a SIMD register for the prefix sum operation that I also covered in the session.
+09:13
+Ie, shift1+add+shift2+add = done. This extra computation is extra time spent of course, but the idea is that differential coding would help reduce memory even further due to minimising numbers and increasing compressibility.
+09:13
+Which then also leads into their non-detailed “special optimisation”.
+09:15
+Ie, when we have four all-zero control bytes in sequence, our 16 byte data block that we read actually covers 16 numbers. This is a special case where we can make special things happen and decode 16 numbers at once. I don’t know exactly how though :slightly_smiling_face:
+16:56
+Paul Horn To add some note to what @mats has written
+These are 16-byte wide as an industry standard, although I guess other sizes also exist sometimes.
+There isn't just one SIMD, there are many different instruction sets that all do SIMD. A modern CPU usually got SSE (128bit) and AVX (256bit) support, that offer multiple registers of that length. Some newer CPUs can also have AVX-512 support which offers a 512bit wide register, or 64 bytes.
+16 bytes is a safe bet, where you have to search in dark corners to find a CPU that doesn't support it. SSE* stuff is also very cheap for the CPU todo. AVX is more complex and especially with AVX-512 and some Intel CPUs, they cannot do SIMD on full speed and have to throttle their core speed lest they overheat.
+(or two integers of 64 bits; the paper doesn’t mention it but I think the model extends naturally)
+unfortunately, it does not. 2 64 bit longs would actually require only 6 control bits, not 8. You need 3 bits to encode the length of a long in bytes, compared to the 2 bits you need for the int. Encoding longs this way is a interesting challenge for us and one of the reasons I haven't pushed harder on getting this in on the first HugeGraph iteration. Freki also has to deal with that propblem and, AFAIK, they use only 2 bit to encode the lengths {1, 3, 5, 7}. Every long that would only need 2 bytes needs to be stored in 3 bytes instead.
+the 16 data bytes will be interpreted/masked correctly to identify only the bits that correspond to the current control byte and none of the “extra” which is data that belongs to the next control byte
+The shuf in PSHUFB stands for shuffle and this is what technically happens, rather that straight forward masking. So you load 16 bytes into the first register and a mask into the second register. If your control bytes say that your data is 2,1,1,3 bytes long, the data would look like [1, 1, 2, 3, 4, 4, 4, x, x, x, x, x, x, x, x, x], so you load "wrong" data (x) into the register. PSHUFB would reorder the data ("shuffle") according to the mask, so that the register looks like [x, x, 1, 1, x, x, x, 2, x, x, x, 3, x, 4, 4, 4] instead. All the x are replaced with 0 and then you're done with the decoding/unpacking. This register is copied to the output stream. Note that we're not manipulating the bytes in memory, we only shuffle the data that is in the register.
+which are located in some result register (possibly in the same one as our input?
+for pshufb specifially, it is the same register as the source one. It depends on the operation, some take 3 register in the form of A+B=C. Some mutate the source register. The particular docs for pshufb on Intel is https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_shuffle_epi8&expand=5153 where it specifies how the registers are used.
+software.intel.comsoftware.intel.com
+Intel® Intrinsics Guide
+The Intel Intrinsics Guide is an interactive reference tool for Intel intrinsic instructions, which are C style functions that provide access to many Intel instructions - including Intel® SSE, AVX, AVX-512, and more - without the need to write assembly code.
+18:31
+Mats Thanks for the details, very interesting! The long business especially, since there is extra opportunity for optimization. Normally I would assume we would have to pay twice as much for twice as large numbers, but the optimum is potentially better, like a logarithmic scale or smth.
+18:33
+On another note, I risk being slightly late tomorrow as Sasha has her first day at Extreme Zone Summer Camp which starts at 9. I hope it will go all smoothly but can't guarantee it.

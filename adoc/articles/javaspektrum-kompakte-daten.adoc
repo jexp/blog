@@ -1,0 +1,684 @@
+= Kaffeestampfer - Kompakte Datenstrukturen in Java
+
+Bild:
+
+image::https://previews.123rf.com/images/dinabelenko/dinabelenko1802/dinabelenko180200248/95829442-siebtr%C3%A4ger-mit-gemahlenem-kaffee-stampfer-und-kaffeebohnen-auf-einem-konkreten-hintergrund-mit-kopienr.jpg[]
+
+Ich habe in der Kolumne immer mal wieder ueber Valhalla (JEP-169), die Value-Type (Inline Objects) Erweiterung fuer Java geschrieben.
+// Dieses ist jetzt fuer Java 16? als Preview geplant, 
+Es gab vor kurzen eine interessante Abhandlung von Brian Goetz [Goetz20] zum aktuellen Stand der Dinge.
+Bis dieses Feature in Java landet wird aber noch einige Zeit vergehen.
+
+Daher wollte ich gern ein paar Ansätze erläutern, die John Davies [Davies], dem CTO von C24, einer Firma die hochperformante Trading-Projekte umsetzt, vor einiger Zeit sehr schön in einem Vortrag [DaviesVJUG] vorgestellt hat.
+Darin detaillierte er die Nutzung von kompakten Datenstrukturen für leistungshungrige Java Anwendungen.
+
+John erinnert uns daran, dass unter den bequemen Sprachkonstrukten wie Objekten, Collections, Vererbung und Streams Bits und Bytes liegen, die man auch in Java mit Bordmitteln effizient bearbeiten, lesen und schreiben kann.
+
+Mit Valhalla wird man mehr dieser Vorteile automatisch bekommen, aber bis dahin hilft eine Auffrischung der Grundlagen.
+Primitive Datentypen sind dabei hilfreich, ebenso wie Bit-Operatoren und Byte-Arrays und ByteBuffers, die den Zugriff darauf erlauben.
+John zeigt in seinem Vortrag die Speicher- und auch Durchsatzvorteile, die man durch Nutzung primitiver Datentypen und kompakter Repräsentation erhält.
+
+Ein paar "fun-facts" aus dem Vortrag 
+
+- Java Objekte benötigen für diesselben Daten mehr Platz als XML Strings.
+- die reinen Binärdaten brauchen 10x weniger Speicher als Objektstrukturen
+- Lesen und Schreiben von Binärdaten ist 20x schneller verglichen mit Objektserialisierung
+- Binärdaten direkt binär schreiben ist sogar noch einmal 20x schneller
+- Objekte temporär im Methodenscope für Rückgabe zu erzeugen hat keinen großen Effekt auf Laufzeit und GC
+- Garbage Collection im Binärfall ist fast nicht existent, da keine längerlebigen Objekte erzeugt werden
+// - viel geringerer Resourcenverbrauch der Anwendung
+
+Also ist es definitiv wert, sich die Techniken einmal näher anzuschauen.
+
+Die Entscheidung fuer diesen Aufwand und Verkomplizierung sollte man natürlich nur treffen, wenn man den Leistungsfaktor benötigt.
+Für die Bearbeitung von nur ein paar Objekten ist es definitiv Overkill.
+Die Notwendigkeit kann man am besten durch Messen und Profiling der Anwendung feststellen, z.B. mit Java Microbenchmark Harness (JMH) der einem hilft, die Flaschenhälse zu finden.
+
+
+////
+Ab Java 15 tragen "sealed classes" (JEP 360) dazu bei einen Schritt weiter in die Richtung zu gehen.
+Mit diesem Feature kann man beschränken, welche Typen von Superklassen ableiten können.
+Das ist auch sehr praktisch für algebraische Datentypen die Computation durch Struktur ausdrücken und Pattern Matching (JEP 305).
+
+.Beispiel für Sealed Classes
+[source,java]
+----
+public sealed class Shape
+    permits Circle, Rectangle, Square {...}
+----
+////
+
+== Probleme
+
+=== Objektlayout
+
+Wie ich schon in den Kolumnen zu Valhalla [HungerXX] ausgeführt habe, ist das Objektlayout in Java der Hauptgrund für ineffiziente Speicher und Cache-Nutzung.
+
+Objekte enthalten neben ihrem Feldern einen Header mit Link zur Klassendefinition. Da dieser im Speicher an 8-Byte Grenzen ausgerichtet werden muss ist, der Header immer 16 Bytes gross und enthält also Verschnitt.
+Der Compiler versucht, wenn es geht, ein primitives Feld in diesem Verschnitt unterzubekommen. 
+
+Mit Java Object Layout [JOL] von Aleksey Shiplëv kann man sich die Struktur von Java Objekten anzeigen lassen (siehe Listing 1).
+Das geht sowohl als Bibliothek für konkrete Objekte im Speicher als auch auf der Kommandozeile für deren Klassen.
+
+.JOL Ausgabe java.lang.String
+----
+java -jar ~/Downloads/jol-cli-0.12-full.jar internals java.lang.String
+
+Instantiated the sample instance via default constructor.
+
+java.lang.String object internals:
+ OFFSET  SIZE     TYPE DESCRIPTION        VALUE
+      0     4          (object header)    01 00 00 00 (00000001 00000000 00000000 00000000) (1)
+      4     4          (object header)    00 00 00 00 (00000000 00000000 00000000 00000000) (0)
+      8     4          (object header)    c2 02 00 f8 (11000010 00000010 00000000 11111000) (-134217022)
+     12     4   char[] String.value       []
+     16     4      int String.hash        0
+     20     4   (loss due to the next object alignment)
+Instance size: 24 bytes
+Space losses: 0 bytes internal + 4 bytes external = 4 bytes total
+----
+
+Für Instanzvariablen werden primitive Datentypen direkt im Objekt gespeichert auf andere Objekte wird per Pointer verlinkt.
+Da Objekte auf dem Heap angelegt werden, und nicht kompakt auf dem Stack, ergibt für deren Benutzung und Navigation eine große Anzahl von unkoordinierten (zufälligen) Speicherzugriffen.
+
+Arrays sind auch Objekte, dh. neben ihrem Header haben sie noch ein int-Feld für die Größe und dann die eigentlichen Einträge.
+Bei primitiven Arrays sind diese direkt gespeichert, bei Objekt-Arrays ist das wieder eine Liste von Pointern.
+
+Damit können besonders beim Verarbeiten großer Datenmengen oft ein *Vielfaches* (2 bis 32-fach) der benötigten wenigen Gigabyte anfallen, die alle alloziert, initialisiert, verwalted, iteriert, gelesen und schlussendlich wieder garbage-collected (gescannt) und freigegeben werden.
+Bei diesen Datenmengen werden Flaschenhälse im Netzwerk-, IO- und Speicherdurchsatz und im Speichermanagement schnell sichtbar.
+
+Wir werden das gleich im konkreten Beispiel sehen.
+
+In einer optimalen Situation wären Objekte kompakt ohne Verschnitt gespeichert.
+
+// Neben dem zufälligen Speicherzugriff von Objekt-Pointern, TODO??
+
+Alle Sprachen auf der JVM sind davon gleichermassen betroffen, wenn sie Objekte benutzen.
+
+// store as string 1:1 from CSV
+// getDate() -> read long * 86400000 -> ms new Date(xx)
+// setDate(d) -> d.getTime() / 86400000L
+// temporary objects on Eden Space (just to return from method) -> cheap
+// serialize binary to  object output stream on top of BAOS 
+// 
+
+=== Speicherlayout und Ausrichtung
+
+Speicherlayouts sind so eine Sache.
+Auf der einen Seite verbrauchen kompakte Speicherlayouts weniger Platz, auf der anderen ist die Hardware auf den Zugriff von Adressen optimiert, die auf einer Basisbreite ausgerichtet sind (meist 8 Bytes).
+Daher kann es notwendig sein, Speicher mit dem Ausrichtungs-Verschnitt zu "verschwenden", um den schon begrenzen Durchsatz des Speichercontrollers nicht noch mehr zu reduzieren.
+
+In Java kann mittels Compressed Oops (ordinary object pointer) [OOPS] (auch im 32-bit modus auf Speicherbereiche von mehr als 4GB zugegriffen werden, indem die letzten 3 Bits ungenutzt bleiben und so auf 8*4GB=32GB zugegriffen werden kann.
+Dabei wird auch eine Ausrichtung auf 8 Byte Grenzen erzwungen, was wie schon erwähnt ja eher von Vorteil ist.
+
+Dasselbe ist für Cache-Effizienz zu sagen. 
+Cache-Lines sind oft 256 Bytes gross, sie werden beim Speicherzugriff auf einmal geladen, und beim Schreiben auch komplett synchronisiert.
+Wenn die eigenen Speicherstrukturen aber keine aufeinanderfolgenden Bereiche dieser Größe darstellen, wie z.B. wegen der Objekt-Pointer, kann man zusammenhängende Daten eines Objekts nicht effizient lesen oder schreiben.
+
+Bei nebenläufigem Zugriff haben dagegen "gemeinsame" Cache-Lines den Nachteil, dass zusätzliche Synchronization notwendig ist, um Race-Conditions zu verhindern.
+Das wird mittels zusätzlichen Platzhaltern in den Datenstrukturen erreicht, die die Cacheline auffüllen (padding).
+
+=== Primititive Datentypen
+
+Effizienz ist auch nicht bei allen primitiven Datentypen gegeben.
+Leider kennt Java keine vorzeichenlosen Datentypen, was den Umgang mit Bytes (0..255) erschwert, diese werden oft während der Verarbeitung temporär in Integers umgewandelt, um den Wertebereich abzudecken.
+
+Das ist aus CPU-Sicht nicht so problematisch, da die Register sowieso 32 oder 64 Bit groß sind (oder größer), aber im Speicher macht es sich schon bemerkbar, ob man 1 oder 4 Bytes belegt.
+Auch für Speicherzugriffe mittels Addressoperationen wären vorzeichenlose ganzzahlige Werte nützlich.
+
+Noch extremer ist das bei `boolean`, das intern zwischen 1 Byte und 8 Byte (CPU-word) belegt.
+Laut Java Language Specification (JLS) ist die Implementierung des Boolean Wertes nicht spezifiziert.
+
+Bei starker Nutuzung von boolean Flags (Bits), sollte man auf ein Bitset ausweichen, entweder das im JDK enthaltene `java.util.Bitset` oder besser [RoaringBitmaps].
+
+Durch die Nutzung primitiver Datentypen oder einer Binärrepräsentation müssen keine Objekte erzeugt und wieder aufgeräumt werden, was einen massiven Einfluss auf die Garbage Collection des Heaps hat.
+
+Durch den stark reduzierten Speicherverbrauch und die kompakte Repräsentation wird auch das Lesen und Schreiben der Binärdaten auf Netzwerk bzw. Festplatte über mehrere Größenordnungen im Vergleich zur Objektrepräesentation beschleunigt.
+
+Im Beispiel wird das an konkreten Messwerten deutlich.
+
+=== Java Streams
+
+Java Streams sind sehr bequem, man kann mit ihnen auf Abfolgen (Streams) von primitiven (`IntStream`) und nichtprimitiven Objekten (`Stream<T>`) operieren.
+Viele Operationen können Werte modifiziert (`map`) oder nicht (`filter`) durchreichen, andere Operationen `collect, sort` müssen intern temporäre Datenstrukturen nutzen.
+
+Besonders die nichtprimitiven Streams sind teilweise intern nicht sehr effzient, weil sie ständig Objekte erzeugen, ggf. Zwischenergebnisse ablegen und dynamisch wachsende Datenstrukturen handhaben.
+Bei den primitiven Streams sind Operationen wie `distinct()` darauf angewiesen ein dynamisch wachsendes check-set aufzubauen.
+
+Wenn man genau weiss was man tut, sind in performance-kritischen Bereichen for-loops effizienter, oder Bulk-Operationen auf einem Speicherbereich.
+Diese können vom Compiler ggf. auch in Single-Instruction-Multiple-Data Operationen (SIMD) umgewandelt werden.
+
+Mittels operationen wie `mapToInt` oder `mapToObj` kann man zwischen den genutzten Stream-Typen wechseln.
+
+////
+== Datenformate
+
+- CSV
+- XML
+- Fixed Size
+- Objekt
+- Compact
+
+- CSV  -> openscsv. vs. manual reader
+// - 70 byes in CSV -> 450 bytes in java 
+////
+
+== Ansatz
+
+Komprimierung kann teilweise helfen, da CPU-Cyclen heutzutage günstiger sind, als Speicherdurchsatz.
+Es kann sich also ggf. schon lohnen, Daten im Rahmen einer Verwaltungsstruktur (Pages) zu komprimieren.
+Ein Problem bei Komprimierung ist oft, dass die Ergebnisse dynamische Größen haben, was wieder dynamische Speicherverwaltung nach sich zieht.
+
+Der Ansatz von John Davies beruht dagegen darauf, komplexere Objekte nicht dynamisch zu verwalten sondern als Datenstrukturen mit Einträgen fester Größe abzulegen (Compaction statt Compression).
+Das benötigt natürlich Vorabinformationen über die Art der Daten, ihre Wertebereiche, Stabilität und Gültigkeitskriterien.
+
+Dies Einträge (primitiver Werte) werden dann z.B. in Byte-Arrays oder `ByteBuffer` abgelegt und mittels Zugriffs-Methoden (Accessors) für Lesen und ggf. Schreiben (Nebeläufigkeit!) bereitgestellt.
+
+Für bestimmte Datenbreiten, kann man auch mittels des dualen Logarithmus berechnen wieviele Bits benötigt werden, um noch kompakter abzuspeichern.
+Durch die Nutzung von Bitmasken können diese Daten in größeren Strukturen kompakt abgelegt und gelesen werden.
+
+Zum Beispiel könnten Jahreszahlen mit 4 Dezimalstellen mit `ln(9999)/ln(2) = 13.3 bit = 14 bit also 2 bytes` abspeichern.
+
+Klassisch dynamische Strukturen wie Strings können entweder auch auf eine feste Größe (z.B. Aktien-Bezeichner, Flughäfen, Länderkürzel o.ä.) fixiert oder vorher mittels einer Auflösung (z.b. Index in einem sortieren String-Array) auf einen numerischen Wert abgebildet werden.
+
+.Index, um Kundennummer auf fortlaufenden Index Wert abzubilden
+[source,java]
+----
+String[] custNos=customers.map(Customer::custNo).sort()
+       .toArray(size -> String[]:new);
+
+int customerIndex = Arrays.binarySearch(custNo);
+----
+
+Es ist auch möglich Zeichen mit einem reduzierten Code-Sytem z.B. 26 Buchstaben, mit Leerzeichen und ein paar Sonderzeichen in `4 bit = 0..31` unterzubekommen.
+Das wird in Neo4j z.b. auch für komprimierte Speicherung bestimmter Informationen wie Zahlen in Strings, UUIDs, Datumsangaben, oder IP-Adressen genutzt, die nur eines begrenzten Zeichensets bedürfen.
+
+Für ein Datumswert wird in Java oft ein long mit 8 Bytes für die Millisekunden seit Jan 1, 1970 genutzt.
+Wenn ich aber nur an Tag-Monat-Jahr interessiert bin, reichen ggf. 0..31 (5 bit), 0..11 (4 bit), 0..99 (7 bit) oder 0..9999 (14 bit), also 16 bit oder 23 bit.
+Man kann aber auch wie John, einfach den Millisekundenwert auf Stunden oder Tage reduzieren und diesen direkt speichern, das benötigt dann auch nur 26 bit für Sekundenauflösung.
+
+image::https://www.jrebel.com/wp-content/uploads/2015/11/compacting-data-gives-java-performance-boost-640x328.png[]
+
+Felder können mittels Angabe von Größe und dann ihren Einträgen dargestellt werden, sollten aber möglichst auch eine feste Größe haben.
+
+Wenn sich der Ansatz bewährt, kann man für verschiedene Formate / Entitäten einen Code-Generator schreiben, der die Zugriffsmethoden und Encoding/Decoding automatisch erzeugt.
+
+Ein Vorteil dieses Ansatzes ist, dass Daten(typen) und Wertebereiche nicht dynamisch analysiert und behandelt werden müssen, sondern mit dem Wissen um die Domäne spezifisch gehandhabt werden können.
+Das ergibt auch einen Vorteil gegenüber anderen "binären" Serialisierungsbibliotheken.
+
+Es gibt auch Bibliotheken und in der Richtung, wie [CBOR], BSON, Chronicle-Wire und für Serialisierung Avro, Kryo (HungerXX), ProtoBuf, Captn'Proto.
+
+== APIs
+
+Hier sollen noch einmal kurz einige der APIs und Operatoren genannt, werden, die man in Java für die Handhabung primitiver Binärwerte nutzen kann.
+
+Zuerst die numerischen primitiven Datentypen.
+
+.Primitive Datentypen in Java
+[%autowidth,opts=header, cols="m,a,a,a"]
+|===
+| Name | Typ | Größe (Bit) | Wertebereich
+| boolean | Bit | 8..16 | false, true
+| byte | Ganzzahl | 8 | -128 ... 128
+| short |Ganzzahl | 16 | -32768 ... 32767
+| int  | GZ | 32 | -2^31 ... 2^31-1
+| long | GZ | 64 | -2^64 ... 2^64-1
+| float | Gleitkomma | 32 | 1.4*10^-45 .. 3.4*10^38
+| double | Gleitkomma | 64 | 4.9*10^-324 .. 1.8*10^308
+|===
+
+Wie allgemein bekannt ist die Repräsentation von Zahlen im Speicher und CPU binär.
+So wird z.b. die Zahl 42 durch `0010 1010` dargestellt, in dem jede Stelle eine Zweierpotenz `2^n` (n=0..8) darstellt.
+Nur zur besseren Lesbarkeit für uns Menschen wird hexadezimale Darstellung genutzt wo pro Ziffer (Nibble) mit 0..9..A..F 16 Zustände dargestellt werden, zwei dieser Nibbles sind 1 Byte (0..255), vier ein Integers und 8 ein Long-Wert.
+Für 42 ist das `2A = 2*16 + 10`.
+
+Auf Binärbasis wird in der CPU gerechnet, und Bit-Operationen (siehe Tabelle) ausgeführt.
+
+.Bitoperationen in Java
+[%autowidth,opts=header, cols="a,m"]
+|===
+| Name | Operator
+| AND | &
+| OR | \|
+| XOR | ^
+| NOT | ~
+| SHIFT LEFT | <<
+| SHIFT RIGHT +
+(Vorzeichen-padded) | >>
+| SHIFT RIGHT (0-padded)  | >>>
+|===
+
+Bitoperationen können genutzt werden, um einzelne Bits in einem Int zu setzen und zu lesen (testen).
+Sie sind auch nützlich um mit einer Bitmaske nur einen Teil der Daten zuzugreifen.
+
+Wenn man die unteren 4 Bit eines Bytes lesen will, kann man das mittels der Maske in der die unteren 4 Bits `(0b00001111 / 0x0F)` gesetzt sind und einer binären-AND Operation erreichen, die oberen Bits werden dann auf 0 gesetzt.
+Für höherwertige Bereiche muss man ggf. den Wert noch um die jeweiligen Stellen nach rechts verschieben.
+
+Zum Testen eines Bits kann man eine Bit-Maske mit dieser Stelle nutzen, und überprüfen ob das Ergebnis nicht 0 ist.
+
+.Beispiel für Bit-Operationen in `jshell`.
+[source,java]
+----
+var a = 0x2a
+a ==> 42
+
+Integer.toHexString(a)
+$7 ==> "2a"
+
+Integer.toBinaryString(a)
+$9 ==> "101010"
+
+// untere 4 Bit
+a & 0x0F
+$2 ==> 10
+// oder binär
+a & 0b00001111
+$3 ==> 10
+
+// obere 4 bit
+(a & 0xF0) >>> 4
+$8 ==> 2
+
+// Klammern beachten, Shift hat Vorrang
+a & 0xF0 >> 4 // 0b11110000 >> 4 = 0b00001111
+$4 ==> 10
+
+// Bit test von Bit 0 und 1
+jshell> (a & 0b0001) != 0
+$12 ==> false
+
+(a & 0b0010) != 0
+$11 ==> true
+
+// Bit 1 setzen
+a = a | 0b0001
+a ==> 43
+Integer.toBinaryString(a)
+$14 ==> "101011"
+
+// Bit 1 löschen, AND mit negierter Bit-Maske
+// 0b11111110 (0xFE) oder ~0b0001 (~0x01)
+a = a & ~0b0001
+a ==> 42
+----
+
+Hier ist eine Hilfsklasse, die ich geschrieben habe, um Daten mit einer gewissen Breite an Bytes an einem bestimmten Offset in einem Bytearray zu verwalten.
+Die Anzahl der Daten muss vorbestimmt und fix sein.
+
+.Data.java
+[source,java]
+----
+package de.jexp;
+
+public class Data {
+    private final byte[] data;
+    public Data(int size) {
+        this.data = new byte[size];
+    }
+    long read(int offset, int len) {
+        long result = 0;
+        for (int idx = 0; idx < len; idx++) {
+            result = result << 8 | (0xFF & data[offset+idx]);
+        }
+        return result;
+    }
+    // schreiben der niedrigstwertigen Bits von hinten
+    void write(long value, int offset, int len) {
+        for (int idx = offset + len - 1; idx >= offset; idx--) {
+            data[idx] = (byte) (0xFF & value);
+            value >>>= 8;
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "Data["+data.length+"]";
+    }
+}
+----
+
+Genauso könnte man einen ByteBuffer nehmen und mittels `readInt, readByte, readLong` hantieren und dann die entsprechenden überzähligen Bytes mittels Maske wegfiltern.
+Dann muss man aber ggf. aufpassen dass nicht bei einem ByteBuffer der Größe 3 ein `readInt()` wegen Verletzung der Feldlänge fehlschlägt.
+
+.Anwendung für eine JavaSpektrum Klasse, um eine Seite einer Ausgabe zu referenzieren
+----
+class JavaSpektrum {
+    final static int 
+    JAHR=1,  /* 00..99 7bit */
+    ISSUE=1, /* 1..6   3bit */
+    PAGE=1;  /* 1..62  6bit */
+
+    // Offsets im Byte-Array
+    final static int JAHR_OFF=0, ISSUE_OFF=JAHR_OFF+JAHR, 
+                     PAGE_OFF=ISSUE_OFF+ISSUE;
+    Data data = new Data(JAHR+ISSUE+PAGE);    
+    public int getJahr() { return data.read(JAHR_OFF, JAHR); }
+    public void setJahr(int jahr) { data.write(JAHR_OFF, JAHR); }
+    ...
+}
+----
+
+// TODO CSV example instead like John, e.g. my transaction writer
+// e.g. one CSV per store store
+// generate csv on disk, load into full and compressed memory structure
+// compute average sales per product on nested an flat objects and compressed structure
+
+=== Beispiel
+
+Hier ein Beispiel für die Umsatzauswertung eines Händlers bei dem Transaktionen jeder Filiale täglich als CSV abgeliefert werden. [GitHubCompact]
+
+Wer denkt, das heutzutage nicht mehr realistisch ist und alles direkt online gemeldet wird, hat noch keinen Spass mit XML-basierten Kassensystemen gehabt.
+
+Unser Beispielhändler hat 10000 Filialen mit 10000 Kunden pro Tag, die durchschnittlich 10 Dinge kaufen, also ca 100 Millionen Produktumsätze.
+
+Die Grundstruktur eines (vereinfachten) Umsatzes sieht so aus:
+
+[opts=header, cols="a,m,m,m,m"]
+|===
+| Attribut | Wertebereich | regulärer Datentyp | Bits benötigt | Bytes
+| Zeitpunkt | yyyy-MM-dd HH:mm | Date | 25 | 4
+| Filiale | 0..10000 | String | 14 | 2
+| Produkt | 0..5000 | String | 13 | 2
+| Kunde | 0..50000 | String | 16 | 2
+| Bon (pro filiale) | 0..10000 | String | 16 | 2
+| Anzahl | 0..250 | int | 8 | 1
+| Preis | 0..250000 | BigDecimal | 18 | 3
+|===
+
+Um die reguläre und binäre Variante zusammen testen zu können führen wir 2 Interfaces ein
+.Interfaces für Bon und BonItem
+[source,java]
+----
+interface Bon {
+    LocalDateTime getTime();
+    String getStore();
+    String getBon();
+    BigDecimal getTotal();
+}
+
+interface BonItem {
+    String getProduct();
+    BigDecimal getTotal();
+    int getQuantity();
+}
+----
+
+.Implementierung mittels Objekten (POJOs)
+[source,java]
+----
+class BonObject implements Bon {
+    private final LocalDateTime time;
+    private final Store store;
+    private final String bon;
+    private final List<BonItem> items = new ArrayList<>(25);
+
+    public BigDecimal getTotal() {
+        return items.stream().map(BonItem::getTotal).reduce( BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public BonObject(Store store, String bon, LocalDateTime time) {
+        this.bon = bon;
+        this.store = store;
+        this.time = time;
+    }
+    public void addItem(int quantity, Product product) {
+        this.items.add(new LineItem(quantity,product));
+    }
+    // getter weggelassen
+}
+
+class LineItem implements BonItem {
+    private final int quantity;
+    private final Product product;
+
+    public BigDecimal getTotal() {
+        return product.getPrice()
+           .multiply(BigDecimal.valueOf(quantity));
+    }
+
+    public LineItem(int quantity, Product product) {
+        this.quantity = quantity;
+        this.product = product;
+    }
+    public int getQuantity() {
+        return quantity;
+    }
+    public String getProduct() {
+        return product.getProduct();
+    }
+}
+
+class Product {
+    private final String product;
+    private final BigDecimal price;
+
+    public Product(String product, BigDecimal price) {
+        this.product = product;
+        this.price = price;
+    }
+    // getter
+}
+----
+
+Und hier ist die Variante der kompakten Speicherung der Daten im Binärformat.
+
+.Binärrepresentation der Daten
+[source,java]
+----
+public class BonBinary implements Bon {
+    final static int TIME=4, STORE=2, BON = 2, 
+      CUSTOMER=2, PRODUCT=2, QUANTITY = 1, PRICE=3;
+    private static final int SIZE = TIME+STORE+BON+CUSTOMER;
+    private static final int ITEM_SIZE = 
+      PRODUCT+ QUANTITY +PRICE;
+
+    final static int TIME_OFF = 0, 
+      STORE_OFF = TIME_OFF + TIME, BON_OFF = STORE_OFF+STORE,
+      CUSTOMER_OFF = BON_OFF + BON;
+    final static int  PRODUCT_OFF = 0, 
+      QUANTITY_OFF = PRODUCT_OFF + PRODUCT, 
+      PRICE_OFF = QUANTITY_OFF + QUANTITY;
+
+    private final int count;
+    private final Data data;
+
+    public BonBinary(LocalDateTime time, String store, String bon, int count) {
+        data = new Data(SIZE + count * ITEM_SIZE);
+        this.count = count;
+        long minutes = time.toEpochSecond(ZoneOffset.UTC) / 60;
+        data.write(minutes, TIME_OFF,TIME);
+        data.write(Long.parseLong(store), STORE_OFF,STORE);
+        data.write(Long.parseLong(bon), BON_OFF,BON);
+    }
+
+    public LocalDateTime getTime() {
+        long minutes = data.read(TIME_OFF, TIME);
+        return LocalDateTime.ofEpochSecond(minutes*60,0,ZoneOffset.UTC);
+    }
+
+    public String getStore() {
+        return String.valueOf(data.read(STORE_OFF,STORE));
+    }
+
+    @Override
+    public BigDecimal getTotal() {
+        long result = 0;
+        for (int item=0;item<count;item++) {
+             int off = SIZE + item*ITEM_SIZE;
+             result += 
+                 data.read(off + QUANTITY_OFF, QUANTITY) *
+                 data.read(off + PRICE_OFF, PRICE);
+        }
+        return BigDecimal.valueOf(result, 2);
+    }
+
+    public void addItem(int item, int quantity, String product, BigDecimal price) {
+        int off = SIZE + item * ITEM_SIZE;
+        data.write(quantity, off + QUANTITY_OFF, QUANTITY);
+        data.write(Long.parseLong(product),off + PRODUCT_OFF, PRODUCT);
+        data.write(price.unscaledValue().longValue(),off + PRICE_OFF, PRICE);
+    }
+}
+----
+
+Zur Zeit werden Bons noch als Objektliste im Store gehalten, das könnte man durch ein großes ByteArray ersetzen, dass alle Umsätze des Stores enthält. 
+
+Hier der Umsatz pro Produkt als ein Beispiel für die Nutzung der Daten in unserer Struktur.
+
+.Berechnung des Umsatzes pro Produkt in Objekten
+[source,java]
+----
+Map<String, BigDecimal> totals =
+    stores.stream()
+    .flatMap(s -> s.getBons().stream())
+    .flatMap(b -> b.getItems().stream())
+    .collect(Collectors.groupingBy(BonItem::getProduct,
+    Collectors.reducing(BigDecimal.ZERO, BonItem::getTotal, BigDecimal::add)));
+----
+
+.Berechnung des Umsatzes pro Produkt in Binärrepräsentation
+[source,java]
+----
+long[] totals = new long[PRODUCTS];
+
+// neue Methode in BonBinary
+public void addProductSales(long[] products) {
+    for (int item=0;item<count;item++) {
+        int off = SIZE + item*ITEM_SIZE;
+        products[(int)data.read(off + PRODUCT_OFF, PRODUCT)]
+            += data.read(off + QUANTITY_OFF, QUANTITY)
+            * data.read(off + PRICE_OFF, PRICE);
+    }
+}
+----
+
+Eine Optimierung die ich aufgrund der Datenbreiten nicht verfolgt habe, ist mehrere kleine Werte (1..4 bits) in ein einziges Byte zu packen oder Werte über Bytegrenzen hinweg zu hantieren. 
+Obwohl man noch ein paar extra Bits spart, ist letzeres oft zuviel Verwaltungsaufwand und sollte nur in Ausnahmefällen notwendig sein.
+
+== Daten generieren, Laden und Speichern
+
+Um schnell CSV Dateien mit Testdaten für Neo4j erzeugen zu können, habe ich vor einiger Zeit folgenden Ansatz [HungerGitHubCSV] gewählt:
+
+Es gibt nur ein Byte-Array als CSV-Zeile fixer Breite, in der alle statischen Informationen, inklusive Kommas vorbelegt sind.
+
+Zum Erzeugen der Daten pro Zeile werden nur die Bytes angepasst, deren Werte sich ändern müssen, dabei können Leerstellen mit Leerzeichen oder führenden Nullen aufgefüllt werden (oder man nutzt einen Wertebereich, dessen Minimalwert schon die volle Breite hat).
+Nachdem die Zeile aktualisiert wurde, wird sie mittels `outputStream.write(bytes)` in die CSV-Datei geschrieben.
+Damit muss kein einziges Objekt zusätzlich erzeugt werden.
+ 
+Zum Parallelisieren erzeugt man so viele Threads wie CPUs und lässt jeden Thread seine eigene "Byte-Zeile" modifizieren und in eine eigene CSV Datei schreiben (mit GZip-Komprimierung).
+Mit diesem Ansatz konnte ich mehre Terabytes an Testdaten in wenigen Minuten auf einem System mit 144 CPUs und NVMe Disks mit 2GB/Sekunde erzeugen.
+Das hat wirklich Spass gemacht.
+
+Die Byte-Arrays unserer binären Repräsentation kann man direkt in Dateien schreiben und lesen, was besonders mit NIO [HungerXX] sehr effektiv ist. 
+Falls sie variable Größen haben, wird die Länge als Int-Wert vor dem Byte-Array vermerkt.
+
+Um CSV-Dateien ohne Sonderbehandlungen sehr schnell einzulesen, kann man die Datei blockweise (z.b. in Blöcken von 1MB) einlesen, selbst Zeichen für Zeichen nach Komma und Zeilenumbruch suchen. 
+Das Einlesen der Blöcke kann auch asynchron im Hintergrund geschehen. [HungerGitHubCSV]
+
+Sonst empfehle ich [OpenCSV] zum Lesen und Schreiben von CSV Dateien - insbesondere mit allen Eigenheiten des Formats, wenn man die Quelle nicht kontrolliert.
+
+== Vorgehen für die Optimierung
+
+Das Vorgehen ist recht unkompliziert.
+Man modelliert seine Daten regulär als Objekte (oder Records) und implementiert die Operationen die man benötigt um die Anforderungen an die Anwendung zu erfüllen und zu testen.
+Wenn diese Grundlagen gegeben sind, und festgestellt wird, dass bestimmte Performanceanforderungen nicht erfüllt werden, kann man spezifische Bereiche der Anwendung in ein kompaktes Binärformat überführen.
+
+Wenn man die Änderungen an der darunterliegenden Datenrepräsentation verstecken will, kann man Zugriffs-Interfaces benutzen, die sowohl von den regulären POJOs als auch von unserer kompakten Repräsentation genutzt werden können.
+Das erlaubt es nur die kritischen Aspekte der Verarbeitung mit einer komplexeren Struktur zu versehen und im Allgemeinen Java Objekte zu belassen.
+
+// line as compact representation
+// system unixtime / seconds per day -> date -> 2 bytes -> 2^16/365 -> 179 years
+// TODO Beispiel
+
+// TODO binary storage, fixed size
+
+== Benchmarks
+
+Wie zuvor wollen wir JMH benutzen, um den Unterschied in den 2 Implementierungen zu messen.
+
+Zum einen testen wir das Generieren der Daten und Erzeugen der Objekte, zum anderen die Berechnung des Gesamtumsatzes pro Produkt.
+
+.JMH Test Ausgaben
+[source]
+----
+Benchmark                                Mode  Cnt    Score   Error  Units
+ComputeBenchmark.totalPerProductBinary  thrpt   10  303.106 ± 1.298  ops/s
+ComputeBenchmark.totalPerProductObject  thrpt   10   17.154 ± 0.220  ops/s
+GenerateBenchmark.generateBinary        thrpt   10   44.676 ± 0.520  ops/s
+GenerateBenchmark.generateObjects       thrpt   10  105.691 ± 3.054  ops/s
+----
+
+TODO
+Sowohl die Generierung der Daten als auch die Berechnung der Gesamtumsätze zeigt, dass die Binärvariante deutlich schneller ist.
+
+// Ich habe das auch noch einmal mit mehr Speicher (16GB) und alle 10000 Filialen durchexerziert, hier sind die Ergebnisse.
+
+Der Speicherverbrauch unserer Strukturen ist im Fall unserer "festen" Datenstruktur einfach zu berechnen.
+Für jeden Umsatz benötigen wir 10+X*6 Bytes, dh. für den Gesamtumsatz bei 10 Artikel pro Kunden: 
+
+* 10000 Filialen * 10000 Einkäufe * 10 Bytes = 0,9GB
+* 10000 Filialen * 10000 Einkäufe * 10 Artikel * 6 = 5,6GB
+
+Für die Objekt-Variante benutzen wir die Java Object Layout als Bibliothek, um es für eine Filiale zu berechnen und dann hochzurechnen:
+
+.Berechnung des Speicherverbrauch für die Objekt-Variante
+[source,java]
+----
+Store store = new Generator().generateObjects(1).get(0);
+System.out.println("store.getBons().size() = " + store.getBons().size());
+int items = store.getBons().stream().mapToInt( b -> b.getItems().size() ).sum();
+System.out.println("items = " + items);
+String footprint = GraphLayout.parseInstance(store).toFootprint();
+System.out.println("footprint = " + footprint);
+----
+
+[source]
+----
+bons = 10000
+items = 506050
+
+footprint =  footprint:
+     COUNT       AVG       SUM   DESCRIPTION
+     20001        24    480024   [B
+     10001       282   2822176   [Ljava.lang.Object;
+     10000        32    320000   de.jexp.BonObject
+    506050        24  12145200   de.jexp.LineItem
+     10000        24    240000   de.jexp.Product
+         1        24        24   de.jexp.Store
+     20001        24    480024   java.lang.String
+     10000        40    400000   java.math.BigDecimal
+         1        24        24   java.time.LocalDate
+         1        24        24   java.time.LocalDateTime
+         1        24        24   java.time.LocalTime
+     10001        24    240024   java.util.ArrayList
+    596058            17127544   (total) 
+----
+
+Eine Filiale hat also 16.3MB das macht für alle 100000 => 1.6 TB
+
+* Filiale:
+* Gesamt:
+
+== Fazit
+
+Für leistungshungrige Bereiche einer Anwendung, die an ihre Grenzen kommt, lohnt es sich auf jeden Fall kompakte Datenstrukturen anzuschauen.
+Und wenn es nur ist, um die Differenz zum technisch Möglichen aufzuzeigen.
+Wer an dem Thema weiter Interesse hat, dem ist das Buch [HackersDelight] empfohlen. 
+
+== Referenzen
+
+// * [Davies2015] Binary instead of Objects https://vimeo.com/138956045 / https://www.slideshare.net/c24tech/john-davies-high-performance-java-binary-from-javazone-2015
+* [RoaringBitmaps] https://roaringbitmap.org/
+* [Goetz20] http://cr.openjdk.java.net/~briangoetz/valhalla/sov/01-background.html
+* [OOPS] https://wiki.openjdk.java.net/display/HotSpot/CompressedOops
+* https://www.slideshare.net/c24tech/john-davies-high-performance-java-binary-from-javazone-2015
+* https://dzone.com/articles/project-valhalla-fast-and-furious-java
+* https://vimeo.com/138956045
+* [JOL] https://openjdk.java.net/projects/code-tools/jol/
+* [DaviesVJUG] https://www.jrebel.com/blog/java-performance-vs-c-performance-by-john-davies
+* Slides: https://www.slideshare.net/c24tech/vjug-getting-c-c-performance-out-of-java
+* [CBOR] https://en.wikipedia.org/wiki/CBOR
+* [HungerGithubCSVReader] https://github.com/jexp/batch-import/blob/3.0/src/main/java/org/neo4j/batchimport/utils/Chunker.java
+* [HungerGithubCSVGenerator] https://github.com/jexp/neo4j-large-datagen/blob/master/src/main/java/TransactionFileGenerator.java
+* [HackersDelight] Hacker's Delight, Henry S Warren, 2015, Addison Wesley;
+* [OpenCSV] http://opencsv.sourceforge.net/

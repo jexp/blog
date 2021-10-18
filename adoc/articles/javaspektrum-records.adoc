@@ -1,0 +1,358 @@
+== Zweiklassengesellschaft - Records in Java 14
+
+Wie die Zeit vergeht!
+Wenn Sie diesen Artikel lesen, wird Java 14 schon als finale Version verfügbar sein (Releasedatum 17. März 2020).
+Jetzt ist gerade der erste Release Candidate erschienen.
+
+Ein interessantes [PreviewFeature] in dieser neuen Version, das ich hier vorstellen möchte, sind Records. [GoetzRecords] [Evans]
+Preview Features müssen explizit aktiviert werden, sie sind vor allem zum Sammeln von Feedback gedacht und können in Syntax und Semantik noch Veränderungen erfahren, wie z.B. bei Textblöcken für Strings passiert.
+
+=== Hintergrund
+
+Spezifiziert im [JEP359] von Brian Goetz sind sie aus Überlegungungen aus dem "Projekt Amber" (Bernstein) hervorgegangen.
+
+Wie schon in der Vergangenheit als "data classes" oder "case classes" bei anderen Sprachen diskutiert, sind kompakte Formate für typische DTO Klassen ein Segen.
+Diese sind auch für mehrelementige Schlüssel von Maps, Tupels und mehrwertige Rückggabewerte von Methoden nutzbar.
+
+.Aufmacher: google image search: vinyl record java augustus pablo o.ae.
+image::https://img.cdandlp.com/2017/11/imgL/118997139.jpg[]
+
+Und das nicht nur wegen des Codes, den man sich spart, korrekt zu implementieren und zu warten sondern auch besonders für die semantische Klarheit - "das hier ist ein Datencontainer".
+In Domain Driven Design entsprechen diese Art Klassen den "Value Types", d.h. Datencontainern ohne Identität oder Lebenszyklus.
+
+Diese bieten unveränderliche (immutable) Felder, kompakte Konstruktoren, korrekte Implementierungen von `equals`, `hashCode` und `toString` sowie ggf. copy-Methoden und andere Interaktionen wie Tupel-Erzeugung.
+
+Für Records wurde aus vielen Gründen die Designentscheidung (siehe [GoetzAmber]) getroffen sie als "benannte Tupel" umzusetzen und nicht als POJO, Java Bean, oder rein strukturelle Typen wie Tupel.
+Ihr Zustand wird durch die Namen und Werte ihrer Attribute bestimmt.
+
+
+////
+A good rule of thumb is this: The more tempting it is to add additional methods to the basic data carrier (or to make it implement an interface), the more likely it is that a full class should be used rather than a record.
+
+
+TODO
+One advantage that Java records have over the anonymous tuples found in other languages is that the constructor body of a record allows for code to be run when records are created. This allows for validation to occur (and exceptions to be thrown if an invalid state is passed). This would not be possible in purely structural tuples.
+////
+
+=== Codeersparnis
+
+Für die Nutzung als Elements einer Collection, Set oder Map ist es wichtig, sowohl `equals` also auch `hashCode` korrekt zu implementieren, so dass alle relevanten Felder erfasst werden, der Hashcode genug streut und auch potentielle Null-Werte behandelt werden.
+
+Ich erspare Ihnen und mir, ein volles Quellcodebeispiel einer unveränderlichen Datenklasse mit den relevanten Konstruktoren, Feldern und Methoden zu präsentieren.
+Sie haben das sicher schon oft genug selbst geschrieben, hoffentlich mit korrektem `equals` und `hashCode` - seit Java 7 mit Hilfe von `Objects.hash()` bzw. `Objects.equals`.
+Auch wenn eine IDE dabei hilft, den Code zu generieren, sind Code-Generierungs-Frameworks vorzuziehen, da diese die Implementierung auch bei Änderung von Anzahl oder Typen von Feldern aktuell halten.
+
+In Java wurde das bisher oft mittels Annotations-Prozessoren wie [Lombok] und deren vielseitigen Annotationen wie `@Data` (kombiniert `@ToString, @EqualsAndHashCode, @Getter, @Setter, @RequiredArgsConstructor`) realisiert [LombokData].
+Alternative Projekte wie [Immutables] nutzen Code-Generierung für die Bereitstellung der Funktionalität.
+
+=== Erster Test in Java 14
+
+In Java 14 soll das nun alles "out-of-the-box" funktionieren?
+Mal sehen ob das so stimmt.
+
+Wir können die aktuelle Version von Java 14 mittels [sdkman] installieren und gleich loslegen.
+Dank `jshell --enable-preview` können wir viele unserer Beispiele direkt auf der Kommandozeile ausprobieren.
+
+Hier ein erstes Beispiel einer Person mit Namen und Geburtstag.
+
+Man definiert die Attribute (Record-Komponenten) als Teil des "Konstruktors" mittels Namen und Typ, diese allein bestimmen die Form (API) und das Standardverhalten eines Records das der Compiler bereitstellt, ähnlich wie bei Enums.
+
+Damit können sowohl Entwickler, zukünftige Sprachfeatures wie Pattern-Matching aber auch Tools wie Compiler, IDEs usw. von einem festen Kontrakt von Records bezüglich ihrer Attribute und ihres Verhaltens ausgehen.
+
+NOTE: Das bedeutet aber auch, dass die Namen und Typen von Komponenten die API des Records definieren, dh man sollte sie mit Umsicht und Bedacht wählen.
+
+.Definition eines Person Records
+[source,java]
+----
+import java.time.*;
+public record Person(String name, LocalDate geburtstag) {}
+----
+
+.Erzeugung und Nutzung des Person Records
+[source,java]
+----
+var me = new Person("Michael Hunger",LocalDate.of(1975,1,13))
+me ==> Person[name=Michael Hunger, geburtstag=1975-01-13]
+
+me.toString()
+// "Person[name=Michael Hunger, geburtstag=1975-01-13]"
+
+jshell> me.hashCode() // 190250689
+
+me.name
+|  Error: name has private access in Person
+
+me.name() // "Michael Hunger"
+me.geburtstag() // 1975-01-13
+
+new Person(null,null) // Nulls werden nicht verhindert
+----
+
+=== Interna
+
+.Interna eines Records und Reflection APIs
+[source,java]
+----
+Person.class.isRecord(); // true
+
+Person.class.getRecordComponents()
+// RecordComponent[2] { java.lang.String name,
+                        java.time.LocalDate geburtstag }
+
+Person.class.getSuperclass() // java.lang.Record
+
+Arrays.stream(Person.class.getDeclaredFields())
+      .forEach(System.out::println);
+/*
+private final java.lang.String Person.name
+private final java.time.LocalDate Person.geburtstag
+*/
+
+Arrays.stream(Person.class.getMethods())
+      .forEach(System.out::println);
+/*
+... automatisch generiert ...
+public java.lang.StringPerson.name()
+public java.time.LocalDate Person.geburtstag()
+public java.lang.String Person.toString()
+public final int Person.hashCode()
+public final boolean Person.equals(java.lang.Object)
+... Standardmethoden ..
+public final void java.lang.Object.wait(long,int) ...
+public final native java.lang.Class java.lang.Object.getClass()
+....
+*/
+----
+
+Die Felder für die Komponenten werden privat und `final` und damit oberflächlich unveränderlich realisiert.
+Es werden Nur-Lese Zugriffsmethoden mit dem Namen der Komponente und auch die üblichen Verdächtigen generiert, wie im Listing 1 gezeigt, dabei sind `equals` und `hashCode` auch final, können also nicht überschrieben werden.
+Somit wird der Kontrakt der Klasse garantiert.
+Falls man wirklich unveränderliche Felder benötigt, muss man veränderliche Werte doch mittels Kopien im Konstruktor und ggf. den Zugriffsmethoden kapseln.
+
+////
+You are making a much stronger, semantic statement: that the FXOrder type is just the state provided and any instance is just a transparent aggregate of the field values.
+
+One consequence of this is the field names become your API, so it becomes even more important to pick good names. (For example, Pair is not a good name for a type because it could refer to a pair of shoes.)
+//// 
+
+In der Reflection-API erhält `Class` 2 neue Methoden für Records, um sie zu identifizieren `Class.isRecord` und Informationen (Name, Typ, Zugriffsmethode, Annotationen, Typparameter) über ihre Komponenten `Class.getRecordComponents` zugreifbar zu machen.
+
+////
+The following public methods will be added to java.lang.Class:
+
+RecordComponent[] getRecordComponents()
+boolean isRecord()
+////
+
+=== Validierung und Konstruktoren
+
+Eine Validierung von Records kann mittels der Bean Validation API erfolgen und `javax.validation` Constraint-Annotationen erfolgen.
+Gunnar [Morling] zeigt das an einem Beispiel mit dem Hibernate Validator.
+Es wäre natürlich viel schöner, wenn das JDK Validierungs-Support enthielte.
+
+Alternativ kann man den Standard-Konstruktor überschreiben oder auch zusätzliche eigene Konstrukturen definieren, wie in Listing 3 gezeigt.
+Dabei muss man die Signatur nicht wiederholen und kann auf die Parameter zugreifen.
+Alle noch nicht gefüllten Felder, werden automatisch am Ende des Konstruktors zugewiesen.
+
+////
+Special consideration is provided for explicitly declaring the canonical constructor (the one whose signature matches the record's state description). The constructor may be declared without a formal parameter list (in this case, it is assumed identical to the state description), and any record fields which are definitely unassigned when the constructor body completes normally are implicitly initialized from their corresponding formal parameters (this.x = x) on exit. This allows an explicit canonical constructor to perform only validation and normalization of its parameters, and omit the obvious field initialization. For example:
+
+record Range(int lo, int hi) {
+  public Range {
+    if (lo > hi)  /* referring here to the implicit constructor parameters */
+      throw new IllegalArgumentException(String.format("(%d,%d)", lo, hi));
+  }
+}
+////
+
+.Validierung von Records
+[source,java]
+----
+import javax.validation.constraints.*;
+
+public record Person(@NotBlank String name,
+       @NotNull LocalDate geburtstag) {}
+
+public record Person(String name, LocalDate geburtstag) {
+   public Person {
+      Objects.requireNonNull(name,"Eine Person braucht einen Namen");
+      Objects.requireNonNull(geburtstag,"Personen sollten Geburtstag feiern können");
+   }
+   public Person(User user) {
+      this(user.getName(), user.getBirthday())
+   }
+}
+----
+
+=== Eigene Erweiterungen und Einschränkungen
+
+Natürlich kann man Records auch eigene Methoden hinzufügen, um zusätzliches Verhalten basierend auf den Werten der Komponenten zu realisieren.
+
+.Hinzufügen eigener Methoden
+[source,java]
+----
+import java.time.*;
+public record Person(String name,LocalDate geburtstag) implements Serializable {
+  public Period alter() { return geburtstag.until(LocalDate.now()); } 
+}
+
+me.alter() // P45Y1M
+----
+
+Ansonsten ist ein Record eine "fast normale" Klasse, mit einigen Einschränkungen.
+Es kann Interfaces implementieren, ist aber final (also nicht erweiterbar).
+Records können selbst von keinen Klassen ableiten, da sie schon von `java.lang.Record` erben, ähnlich wie Enums deren Superklasse `java.lang.Enum` ist.
+All diese Eigenschaften helfen dabei, den Kontrakt als Datenklasse einzuhalten.
+
+Records können als innere Klassen definiert werden (dann sind sie automatisch `static` und halten keine Referenz auf die umschliessende Instanz) und auch solche enthalten.
+Das ist praktisch wenn man kommunizieren will, dass bestimmte Typen nur innerhalb meines Recordtyps sinnvoll sind.
+
+Neben den deklarierten Komponenten sind keine weiteren Instanzvariablen erlaubt, nur Klassenvariablen (`static`) oder Konstanten.
+
+////
+Records are a new kind of type declaration in the Java language. Like an enum, a record is a restricted form of class. It declares its representation, and commits to an API that matches that representation. Records give up a freedom that classes usually enjoy: the ability to decouple API from representation. In return, records gain a significant degree of concision.
+////
+
+Da sie parametrisierbar sind, könnte man sie sogar für die Bereitstellung von Tupels und ähnlichen generischen Containern nutzen (siehe Listing).
+
+Aber mit Records ist der Bedarf für Tupel schon gedeckt.
+Ausserdem können sie vernünftige Namen, explizite Typen und zusätzliches Verhalten und Validierungen bereitstellen.
+
+.Tupeldefinition über ein generifiziertes Record
+[source,java]
+----
+public record Tupel3<T1,T2,T3>(T1 a, T2 b, T3 c) {}
+
+enum NobelPrize { Physics, Chemistry }
+var t = new Tupel3<>("Marie Curie", LocalDate.of(1867,11,7),
+        EnumSet.of(NobelPrize.Chemistry, NobelPrize.Physics));
+----
+
+Auch an anderen Stellen, wie Streamverarbeitung, Collections usw. verhalten sich Records wie erwartet als kompakte DTOs.
+Es ist interessant dass die Zugriffsmethoden keine Java-Bean Methoden, wie `getName` sind, daher kann man Records nicht ohne weiteres als Java Beans nutzen, man müsste die Getter selbst hinzufügen.
+
+Oliver Drotbohm hat in ersten Experimenten Spring Data für Records fit gemacht.
+In Datenintegrations-Frameworks (wie Hibernate, Spring Data, Jackson-JSON, Kafka uvm) ist das Record-Konzept sehr nützlich und wir werden es noch in vielen Anwendungen sehen.
+
+Die Unterstützung für Records wird auch in anderen Frameworks verfügbar sein, wie zum Beispiel in Apache [Johnzon] ([JsonB] Processing) mittels `@JsonbProperty` Annotationen auf Komponenten.
+
+=== Interna
+
+Für `equals`, `hashCode` und `toString` wird ein ungewöhnlicher Ansatz genutzt, wie man sehen kann wenn man die Klasse mittels `javap` disassembliert.
+Mittels `ObjectMethods.bootstrap` werden CallSites oder MethodenHandles erzeugt, die in der Record-Klasse als Klassenvariablen gespeichert und dann via der JVM Operation `invokedynamic` aufgerufen werden.
+
+Aufrufparameter sind: der Methodenname, die Record-Klasse, die Komponentennamen (als Semikolon-getrennter String!?!) und die MethodenHandles für die Getter.
+
+////
+Three other methods are generated: toString(), hashCode() and equals() They all rely on invokedynamic to dynamically invoke the appropriate method containing the implicit implementation. There is a bootstrap method ObjectMethods.bootstrap that takes the component names of the record and its getter methods, and generates the methods. Their behaviors is consistent with what we would expect to have:
+
+java.lang.runtime.ObjectMethods.bootstrap(
+Object java.lang.runtime.ObjectMethods.bootstrap(java.lang.invoke.MethodHandles.Lookup lookup, String methodName, java.lang.invoke.TypeDescriptor type, Class<?> recordClass, String names, java.lang.invoke.MethodHandle... getters) throws Throwable
+Bootstrap method to generate the Object#equals(Object) , Object#hashCode() , and
+Object#toString() methods, based on a description of the component names and accessor methods,
+for either invokedynamic call sites or dynamic constant pool entries.For more detail on the
+semantics of the generated methods see the specification of java.lang.Record#equals(Object) ,
+java.lang.Record#hashCode() and java.lang.Record#toString() .
+
+Parameters:
+lookup - Every bootstrap method is expected to have a lookup which usually represents a lookup
+         context with the accessibility privileges of the caller. This is because invokedynamic
+         call sites always provide a lookup to the corresponding bootstrap method, but this
+         method just ignores the lookup parameter
+methodName - the name of the method to generate, which must be one of "equals" , "hashCode" ,
+             or "toString" 
+type - a MethodType corresponding the descriptor type for the method, which must correspond to
+       the descriptor for the corresponding Object method, if linking an invokedynamic call
+       site, or the constant MethodHandle.class , if linking a dynamic constant
+recordClass - the record class hosting the record components
+names - the list of component names, joined into a string separated by ";", or the empty string
+        if there are no components. Maybe be null, if the methodName is "equals" or "hashCode"
+        .
+getters - method handles for the accessor methods for the components
+
+Returns:
+a call site if invoked by indy, or a method handle if invoked by a condy
+
+Thrown Exceptions:
+IllegalArgumentException - if the bootstrap arguments are invalid or inconsistent
+Throwable - if any exception is thrown during call site construction
+
+////
+
+----
+javac --enable-preview -source 14 Person.java
+javap -p Person
+
+Compiled from "Person.java"
+public final class Person extends java.lang.Record {
+  private final java.lang.String name;
+  private final java.time.LocalDate geburtstag;
+  public Person(java.lang.String, java.time.LocalDate);
+  public java.lang.String toString();
+  public final int hashCode();
+  public final boolean equals(java.lang.Object);
+  public java.lang.String name();
+  public java.time.LocalDate geburtstag();
+}
+
+
+javap -c -v -p Person
+...
+  public java.lang.String toString();
+    Code:
+       0: aload_0
+       // InvokeDynamic #0:toString:(LPerson;)Ljava/lang/String;
+       1: invokedynamic #19,  0
+       6: areturn
+...
+----
+
+////
+Then it must be the case that r.equals(copy) is true. Note that this invariant is in addition to the usual familiar contract regarding equals() and hashCode(); it does not replace it.
+
+Secondly, Java serialization of records is different than it is for regular classes. This is a good thing because, as is now widely recognized, the Java serialization mechanism is deeply flawed in the general case. As Brian Goetz, Java language architect, puts it: “Serialization constitutes an invisible but public constructor, and an invisible but public set of accessors for your internal state.”
+
+Fortunately, records are designed to be very simple: They are just transparent carriers for their fields, so there is no need to invoke the weirdness in the detail of the serialization mechanism. Instead, you can always use the public API and canonical constructor to serialize and deserialize records.
+
+In addition, the serialVersionUID of a record class is 0L unless it is explicitly declared. The requirement for matching serialVersionUID values is also waived for record classes.
+
+Before going on to the next section, I want to emphasize that there is a new programming pattern and there also is new syntax for a low-boilerplate class declaration, and they are not related to the inline classes feature being developed in Project Valhalla.
+
+// Todo nullability
+
+Records sind auch Klassen
+
+Records
+
+DDD
+
+Vorboten für Value types?
+
+Gunnar Morling zeigt hier, wie Records mit JSR-133 Bean Valdiation genutzt werden können.
+////
+
+=== Fazit
+
+Records sind wirklich praktisch, um kompakte Repräsentation und Nutzung von typischen Datenklassen (DTO) zu bewerkstelligen.
+Damit holt Java in diesem Bezug mit anderen JVM-Sprachen auf.
+Richtig spannend wird es jedoch, wenn mit Projekt Valhalla solche Objekte kompakt im Speicher repräsentiert werden können und wenn mittels Pattern-Matching ein Record dekomponiert werden kann.
+Mit "sealed types" (JEP-360) können sie als algebraische Datentypen genutzt werden.
+Für alle von Ihnen denen Java 14 noch zu brandneu ist, werden meine Kollegen Paul Horn und Martin Junghanns in der nächsten Kolumne das "Immutables" Projekt vorstellen.
+
+=== Referenzen
+
+* [PreviewFeature] https://openjdk.java.net/jeps/12
+* [JEP359] https://openjdk.java.net/jeps/359
+* [GoetzAmber| https://cr.openjdk.java.net/~briangoetz/amber/datum.html
+* [GoetzInfoQ] https://www.infoq.com/articles/java-14-feature-spotlight/
+* [Evans] Evans https://blogs.oracle.com/javamagazine/records-come-to-java
+* [Morling] https://github.com/gunnarmorling/records-bean-validation & https://www.morling.dev/blog/enforcing-java-record-invariants-with-bean-validation/
+* [LombokData] https://projectlombok.org/features/Data
+* [Immutables] https://immutables.github.io/
+// * [Aboullaite] https://aboullaite.me/java-14-records/
+// * [Records] https://www.vojtechruzicka.com/java-records/
+* [JsonB] https://rmannibucau.metawerx.net/post/java-14-record-class-type-and-json-b
+* [Johnzon] https://johnzon.apache.org/
+//* https://www.jrebel.com/blog/jep-359-records-preview
+//* https://www.vojtechruzicka.com/java-records/
+//* https://dzone.com/articles/a-first-look-at-records-in-java-14

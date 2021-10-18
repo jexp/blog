@@ -1,0 +1,492 @@
+= Kaffee handgemahlen
+== Kommandozeilentools für Java
+
+image::https://www.dieckmann-aroma-kaffee.de/images/blog/kaffeemuehle.jpg[]
+
+Im Buch "97 Things every Java Programmer should know" (ich habe 2 der 97 Tips beigetragen) gibt es ein Kapitel zu einigen Kommandozeilentools im JDK.
+
+Da ich selbst regen Gebrauch solcher Helfer mache, wollte ich diese im heutigen Artikel kurz vorstellen.
+
+Persönlich ziehe ich die Kommandozeile für meine tägliche Arbeit vor, mittels der Kombination von `git`, `sed`, `grep`, `bash`-Kommandos usw. lassen sich wiederkehrende Aufgaben erleichtern.
+
+Schon im "Pragmatic Programmer" [PragProg], gab es hierzu einen klaren Hinweis in Abschnitt 21:
+
+____
+Use the Power of Command Shells+
+Use the shell when graphical user interfaces don't cut it.
+____
+
+Ich möchte hierzu auch auf das Buch "Productive Programmer" [NealFord] hinweisen.
+
+Vor der Kommandozeile braucht man keine Angst zu haben, es ist wie bei jeder Programmiersprache, man führt Kommandos oder Scripte aus und kann deren Ein- und Ausgaben zu komplexeren Abläufen kombinieren.
+Unter Linux und OSX ist man mit der integrierten bash oder zsh gut bedient, unter Linux kann entweder auf dem `cmd` Prompt oder seit neuestem mit dem Linux Subsystem für Windows (WLS) glücklich werden.
+
+Die meisten der Tools bringen eine eingebaute Hilfe mit dem `-h` Parameter mit, oder stellen Hilfeseiten mittels `man <kommandoname>` bereit.
+Diese findet man auch auf der Oracle Webseite [ManPages].
+
+== Installationen mit SDKman managen
+
+Wie schon in vorherigen Artikeln erwähnt, ist für mich sdkman das Verwaltungsgenie schlechthin, um Java, Groovy, Maven, Gradle, Micronaut und viele andere Tools zu installieren und verschiedene Versionen zu aktivieren.
+
+Dazu installiert man sdkman z.B. mittels: `curl -s "https://get.sdkman.io" | bash`.
+
+Danach zeigt `sdk list` die installierbaren Tools and und mit `sdk list java` kann man sich verfügbare und installierte Versionen von JDKs anzeigen.
+Dabei hat man eine breite Auswahl von OpenJDK über Azul Zuulu, GraalVM bis zu Amazon und SAP JDKs.
+
+Mittels z.B. `sdk install java 14.0.1-zulu` kann man neue Versionen (bis zu den letzten EAP) installieren und mit `sdk use java 15.ea.27-open` für die aktuelle Shell oder global umschalten.
+
+== Einfache Helfer
+
+In jedem JRE und JDK sind im `bin` Verzeichnis der Distribution neben den `javac` Compiler und der `java` Laufzeitumgebung noch eine Menge nützlicher Helfer zu finden.
+Einige davon, wie jarsigner oder keytool sind sehr speziell und ich werde hier nicht auf sie eingehen.
+Wir beginnen mit einigen nützlichen Tools und gewähren dann den komplexeren jeweils einen eigenen Abschnitt.
+
+=== jps
+
+Wer einen hängenden Java Prozess loswerden will kann ihn entweder im TaskManager suchen und dort schliessen, oder sich die PID (Process ID) mittels `ps auxww | grep java` heraussuchen und dann mit `kill <pid>` terminieren.
+
+Stattdessen kann das eingebaute `jps` denselben Dienst leisten.
+Zusatzoptionen sind `-l`  für FQN der Main-Klasse oder Pfad zum Start-JAR, `-v` für die JVM Argumente und `-m` für die Kommandozeilenargumente für die `main` Methode.
+
+=== jstack
+
+Um einen Threaddump einer JVM zu erhalten, besonders wenn sie an einer Stelle festhängt, die man genauer untersuchen will, gibt es 2 Möglichkeiten.
+Entweder ein `kill -3 <pid>` produziert die Ausgabe direkt vom Prozess, oder besser mit `jstack <pid>`.
+
+Dabei kann jstack auch festgefahrene Prozesse mit dem "force" `-F` flag zur Ausgabe zwingen, die man dann zum Beispiel in eine Datei umleiten kann.
+Mit `jstack -l <pid>` bekommt man zusätzliche Ausgaben über Locks, Deadlocks werden auch angezeigt.
+
+Der Status der Threads unterscheidet sich zwischen `kill -3` und `jstack`
+
+[opts=header,cols="m,m"]
+|===
+| kill -3         |  Jstack
+| RUNNABLE        |  IN_NATIVE
+| TIMED_WAITING   |  BLOCKED
+| WAITING         |  BLOCKED (PARK)
+|===
+
+=== jinfo
+
+Mittels `jinfo` kann man schnell Zugriff auf Systemproperties, JVM-Flags, und JVM-Argumente eines Java Prozesses.
+
+Ein `jinfo <pid>` gibt einen Komplettüberblick, der beim Feststellen von seltsamen Effekten helfen kann.
+Mittels `jinfo <pid> -flag name=value` bzw. `-flag [+|-]name` kann man dynamische JVM Flags ändern.
+// todo, example
+
+=== jshell
+
+In Java 9 eingeführt, war `jshell` die erste offzielle REPL (read eval print loop) Konsole für das interaktive Ausführen von Javacode.
+Es können nicht nur Ausdrücke berechnet und Variablen zugewiesen werden, sondern auch Klassen mit Methoden dynamisch angelegt und überschrieben werden.
+
+Man kann jshell Klassenpfade übergeben, deren Inhalt dann für Import und Benutzung zur Verfügung stellen.
+
+`jshell` hat eine Menge von Kommandozeilenoptionen und auch eingebauten Kommandos, die mittels `/?` erklärt werden.
+Besonders nützlich sind `/help`, `/save`, `/history` und die List-Kommandos `/vars`, `/types`, `/methods`,`/imports`.
+
+Für das Bearbeiten größerer Codefragmente kann man `/edit <name>` benutzen, dabei wird ein eigener Editor mittels Umgebungsvariablen `JSHELLEDITOR, VISUAL, EDITOR` oder `set editor /pfad/to/editor`.
+
+Wichtige Pakete wie `java.util.(*,streams,concurrent)`, `java.math` und einige andere sind schon standardmässig importiert.
+
+Ausdrücke werden Platzhaltern `$5` zugewiesen, die später wieder genutzt werden könenn.
+Besser lesbar ist, wenn man ab Java 11 `var` benutzt, dann können Variablen ohne Typdeklaration angelegt werden.
+Neue Sprachefeatures, die noch im Preview Modus verfügbar sind, kann `--enable-preview` aktiviert werden.
+
+Ein sehr praktisches Feature von `jshell` ist die Auto-completion. 
+Jeder Klasse-, Methoden- und Variablenname kann mittels mehrfachem Drücken von <Tab> kontextual vervollständigt werden.
+
+Hier ist ein Beispiel um, Game of Life (Ruhe in Frieden - John Conway) in der `jshell` laufen zu lassen.
+
+
+[source,java]
+----
+// GOL Regeln: Zelle lebt, wenn am Leben + 2,3 Nachbarn oder 3 Nachbarn
+import static java.util.stream.IntStream.range;
+import static java.util.stream.Collectors.*;
+import static java.util.function.Predicate.*;
+
+record Cell(int x, int y) {
+   Stream<Cell> nb() {
+       return range(x()-1,x()+2)
+         .mapToObj(i -> i)
+         .flatMap(x -> range(y()-1,y()+2)
+         .mapToObj(y -> new Cell(x,y)))
+         .filter(c -> !this.equals(c));
+   }
+   boolean alive(Set<Cell> cells) {
+       var count = nb().filter(cells::contains).count();
+       return (cells.contains(this) && count == 2) || count == 3;
+   }
+}
+Set<Cell> evolve(Set<Cell> cells) {
+    return cells.stream().flatMap(c -> c.nb()).distinct()
+    .filter(c -> c.alive(cells))
+    .collect(toSet());
+}
+void print(Set<Cell> cells) {
+    var min=new Cell(cells.stream().mapToInt(Cell::x).min().getAsInt(), 
+                     cells.stream().mapToInt(Cell::y).min().getAsInt());
+    var max=new Cell(cells.stream().mapToInt(Cell::x).max().getAsInt(), 
+                     cells.stream().mapToInt(Cell::y).max().getAsInt());
+
+    range(min.y(), max.y()+1)
+    .mapToObj(y -> range(min.x(), max.x()+1)
+    .mapToObj(x -> cells.contains(new Cell(x,y)) ? "X" : " ")
+    .collect(joining(""))).forEach(System.out::println);
+}
+"""
+ #
+  #
+###
+"""
+var cells = Set.of(new Cell(1,0), new Cell(2,1), new Cell(0,2),new Cell(1,2),new Cell(2,2))  
+
+void gen(Set<Cell> cells, int steps) { 
+    print(cells); 
+    if (steps>0) gen(evolve(cells),steps-1);
+}
+
+Set<Cell> parse(String s) {
+    Arrays.stream(s.split("\n")).mapIndexed((x,l) -> 
+    Arrays.stream(l.split("")).mapIndexed(y,c) -> )
+}
+----
+
+== jar
+
+Um mit jar Dateien (Java ARchive) umzugehen, gibt es das gleichnamige Kommando.
+Die Kommandozeilensyntax ist an den `tar` Befehl angelehnt.
+Währen `tar` aber Dateien nur in einem Archiv speichert, komprimiert `jar` diese auch was zu einer deutlichen Verkleinerung führt.
+
+Hier ein paar nützliche Anwendungen:
+
+* `jar tf datei.jar` - Anzeigen des Inhalts
+* `jar xvf datei.jar` - Dekomprimieren der Datei im aktuellen Verzeichnis (mit Anzeige durch `v`)
+* `jar uvf datei.jar -C pfad test.txt` - Hinzufügen einer Datei aus dem angegebenen Verzeichnis
+
+Seit Java 9 kann `jar` auch multi-release Archive erzeugen, diese sind dann mit mehreren JDKs kompatibel und können optimierte Klassendateien für die jeweilige Java Version enthalten.
+
+== java
+
+Das Java Kommando started die Java Virtual Machine, mit dem angegebenen Klassenpfad (Verzeichnisse, Dateien und URLs von Jar und Klassen) und einer Hauptklasse deren Main Methode ausgeführt wird.
+
+Mittles `java -jar datei.jar` wird stattdessen die Hauptklasse aus den Meta-Informationen der Jar-Datei bestimmt.
+
+Seit Java 11 ist JEP 330 verfügbar, damit können auch Quelldateien direkt ausgeführt werden.
+
+[source,java]
+----
+cat > Hello.java <<EOF
+public class Hello {
+    public static void main(String...args) {
+        System.out.println("Hello "+String.join(" ",args)+"!");
+    }
+}
+EOF
+java Hello.java JEP 330
+----
+
+Wenn in der ersten Zeile der Datei `#!/usr/bin/java --source 10` steht, kann sie sogar direkt ausgeführt werden. 
+
+[source,java]
+----
+cat > hello <<EOF
+#!/usr/bin/java --source 10
+public class Hello {
+    public static void main(String...args) {
+        System.out.println("Hello "+String.join(" ",args)+"!");
+    }
+}
+EOF
+chmod +x hello
+./hello JEP 330
+----
+
+Die JVM kann mit Hunderten von Flags [JVMFlags] gesteuert werden, von Speicherzuweisung mit `-Xmx` und `-Xms` über Garbage-Collector auswahl mit `-XG1GC` bis zu Log-Einstellungen ist alles möglich.
+
+Ein paar nützliche Flags folgen, die Liste stellt nur einen Bruchteil der JVM-Optionen dar.
+
+- `HeapDumpOnOutOfMemory`
+- ...
+
+== Javac
+
+Der `javac` Compiler übersetzt Java Quellcode in ein oder mehrere Class-Dateien, den Bytecode der Klassen enthalten und führt dabei erste Optimierungen durch und löst die Verarbeitung von Annotationen durch "Annotation-Processors" aus.
+Um alle Klassen, von denen der aktuelle Code abhängt anzugeben, müssen diese oder ihre Archive im Klassenpfad gelistet sein.
+
+== JavaP
+
+Immer dann, wenn man das Ergebnis von Javac untersuchen möchte, kommt `javap` ins Spiel.
+Dieses Tool erlaubt es die Signatur einer Klasse anzuzeigen, ihr Speicherlayout mit `-l -v -constants` und mittels `-c` die Bytecode Instruktionen der JVM Stack-Sprache.
+Das kann hilfreich sein, wenn man die Auswirkung bestimmter Compiler-Optionen oder Java-Versionen sehen möchte, oder sich das Verhalten von Optimierungen geändert hat (Inlining-Größe).
+
+Als Parameter erhält sie den voll qualifizierten Klassennamen, Dateinamen oder Jar-URL.
+
+Hier ist ein Beispiel für unsere `Hello.java` Klasse, an dem man zum Beispiel erkennen kann, dass Java 14 für String-Verkettung jetzt eine "invokedynamic" Operation nutzt.
+
+----
+javap -c Hello
+
+Compiled from "Hello.java"
+public class Hello {
+  // Konstruktor mit Super-Konstruktor Aufruf
+  public Hello();
+    Code:
+       // lade "this" auf Stack
+       0: aload_0
+       4: return
+
+  public static void main(java.lang.String...);
+    Code:
+       0: getstatic     #7                  // Field java/lang/System.out:Ljava/io/PrintStream;
+       3: ldc           #13                 // String
+       // lade 1. Parameter auf den Stack, also "args"
+       5: aload_0
+       6: invokestatic  #15                 // Method java/lang/String.join:(Ljava/lang/CharSequence;[Ljava/lang/CharSequence;)Ljava/lang/String;
+       // Stringverkettung
+       9: invokedynamic #21,  0             // InvokeDynamic #0:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+      14: invokevirtual #25                 // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+      17: return
+}
+----
+
+=== JMAP
+
+Um Heapdumps zu erzeugen bzw. Histogramme von (referenzierten) Objekten zu Erzeugen war `jmap` hilfreich.
+Aktuell wird empfohlen dafür eher `jcmd` zu benutzen.
+
+* `jmap -clstats <pid>` Classloader Statistiken ausgeben
+* `jmap --histo <pid>` oder `-histo:live` Histogramm der 
+* `jmap -dump:live,format=b,file=heap.hprof <pid>` Heapdump erzeugen
+
+=== JCMD
+
+Mittels `jcmd` können Java Prozesse ferngesteuert werden, es gibt eine ganze Menge Aktionen, die in der JVM ausgelöst werden können.
+jcmd kann interaktiv oder mittels Kommandozeilenparametern genutzt werden.
+
+Mittels `jcmd <pid/main-klasse> <kommando>` können die spezifischen Aktionen ausgelöst werden, mehrere Kommandos werden mit Zeilenumbruch getrennt.
+Dabei gibt `jcmd <pid/main-klasse> help` Auskunft darüber, welche Kommandos möglich sind.
+
+----
+jcmd 14358 $'VM.version\nVM.uptime\nVM.flags'
+
+14358:
+OpenJDK 64-Bit Server VM version 25.181-b02
+JDK 8.0_181
+623,663 s
+-XX:CICompilerCount=3 -XX:CompressedClassSpaceSize=260046848 -XX:+HeapDumpOnOutOfMemoryError -XX:InitialHeapSize=268435456 -XX:MaxHeapSize=536870912 -XX:MaxMetaspaceSize=268435456 -XX:MaxNewSize=178782208 -XX:MinHeapDeltaBytes=524288 -XX:NewSize=89128960 -XX:OldSize=179306496 -XX:+UseCompressedClassPointers -XX:+UseCompressedOops -XX:+UseParallelGC 
+----
+
+Hier ein paar Beispiele:
+[opts=header,cols="m,a"]
+|===
+| Kommando | Beschreibung
+| GC.class_stats | Detaillierte Informationen über alle geladene Klassen
+| GC.class_histogram | Histogramm für Klassenanzahl
+| GC.heap_dump filename=<file> | Heapdump erzeugen
+| GC.heap_info | Übersicht über Nutzung des Heaps
+| GC.run | Garbage Collection auslösen
+| Thread.print | Thread Dump ausgeben
+| JFR.start name=<name> settings=<settings> delay=20s duration=2m | Java Flight Recorder Aufzeichnung starten
+| JFR.dump name=<name> filename=<file> | JFR Dump erzeugen
+| VM.uptime | Laufzeit der JVM
+| VM.flags | Gesetzte JVM Flags
+| VM.system_properties | System Properties
+| VM.command_line | Kommandozeile der JVM
+| VM.version | JVM version
+| VM.class_hierarchy | Visuelle Ausgabe der Klassenhierarchie
+| VM.log | Detaillierte Steuerung des Logging
+| 
+|===
+
+----
+jcmd 15254 GC.heap_info
+15254:
+ garbage-first heap   total 1048576K, used 214334K [0x00000007c0000000, 0x0000000800000000)
+  region size 1024K, 135 young (138240K), 0 survivors (0K)
+ Metaspace       used 136764K, capacity 142605K, committed 142896K, reserved 1169408K
+  class space    used 19855K, capacity 22505K, committed 22576K, reserved 1048576K
+----
+
+----
+jcmd GradleDaemon GC.class_histogram | head
+14358:
+
+ num     #instances         #bytes  class name
+----------------------------------------------
+   1:         42635        4515304  [C
+   2:         10100        1096152  java.lang.Class
+   3:         42595        1022280  java.lang.String
+   4:         27743         887776  java.util.concurrent.ConcurrentHashMap$Node
+   5:         10598         599128  [Ljava.lang.Object;
+   6:         26119         417904  java.lang.Object
+----
+
+////
+15254:
+The following commands are available:
+Compiler.CodeHeap_Analytics
+Compiler.codecache
+Compiler.codelist
+Compiler.directives_add
+Compiler.directives_clear
+Compiler.directives_print
+Compiler.directives_remove
+Compiler.queue
+GC.class_histogram
+GC.class_stats
+GC.finalizer_info
+GC.heap_dump
+GC.heap_info
+GC.run
+GC.run_finalization
+JFR.check
+JFR.configure
+JFR.dump
+JFR.start
+JFR.stop
+JVMTI.agent_load
+JVMTI.data_dump
+ManagementAgent.start
+ManagementAgent.start_local
+ManagementAgent.status
+ManagementAgent.stop
+Thread.print
+VM.class_hierarchy
+VM.classloader_stats
+VM.classloaders
+VM.command_line
+VM.dynlibs
+VM.flags
+VM.info
+VM.log
+VM.metaspace
+VM.native_memory
+VM.print_touched_methods
+VM.set_flag
+VM.start_java_debugging
+VM.stringtable
+VM.symboltable
+VM.system_properties
+VM.systemdictionary
+VM.uptime
+VM.version
+help
+
+For more information about a specific command use 'help <command>'.
+
+VM.native_memory
+VM.check_commercial_features
+VM.unlock_commercial_features
+////
+
+
+== Java Flight Recorder (jfr)
+
+Java Flight Recorder ist ein Runtime Tracing Mechanismus der es erlaubt verschiedene Events von Aktivitäten die in der JVM stattfinden aufzuzeichnen und mit dem Aktivität der Anwendung zu korrelieren.
+Alles von JIT-Optimierungen, Garbage Collection, Safepoints und sogar eigene Evetns sind möglich.
+
+Das `jfr` Tool erlaubt es, Java Flight Recorder Datein zu lesen und anzuzeigen (`print`, `summary` und `metadata`).
+Das kann in einem lesbaren Textformat oder JSON/XML (`--json, --xml`) erfolgen.
+
+* `print` stellt das ganze Event-log dar
+* `metadata` zeigt welche Events aufgezeichnet wurden (Event-Klassen)
+* `summary` stellt in einen Histogramm dar, welche Events wie oft aufgezeichnet wurden
+
+----
+jfr summary /tmp/test.jfr 
+
+ Version: 2.0
+ Chunks: 1
+ Start: 2020-06-21 12:06:38 (UTC)
+ Duration: 7 s
+
+ Event Type                            Count  Size (bytes) 
+===========================================================
+ jdk.ModuleExport                       2536         37850
+ jdk.ClassLoaderStatistics              1198         35746
+ jdk.NativeLibrary                       506         45404
+ jdk.SystemProcess                       490         53485
+ jdk.JavaMonitorWait                     312          8736
+ jdk.NativeMethodSample                  273          4095
+ jdk.ModuleRequire                       184          2578
+ jdk.ThreadAllocationStatistics           96          1462
+ jdk.ThreadSleep                          65          1237
+ jdk.ThreadPark                           53          2012
+ jdk.InitialEnvironmentVariable           40          2432
+ jdk.InitialSystemProperty                20         16392
+ jdk.ThreadCPULoad                        17           357
+----
+
+Um die Menge an Informationen zu beschränken können Kategorien mittels `--categories "GC,JVM,Java*"` und Events via `--events CPULoad,GarbageCollection` bzw. `--events "jdk.*"` gefiltert werden.
+Leider ist das nicht bei summary oder metadata möglich, nur bei `print`.
+
+Das bessere Tool, JFR Aufzeichnungen auszuwerten, ist natürlich Mission Control [JMC], das seit Java 11? als OpenSource veröffentlich ist, und auch von anderen Anbietern wie Azul [ZuluMC] angeboten wird.
+
+image::https://i.imgur.com/VE3MaNh.png[]
+
+== jdeprscan
+
+Da in den letzen Jahren einige Bestandteile des JDK abgekündigt wurden, erlaubt `jdeprscan` Klassen, Verzeichnisse oder Jar-Dateien nach der Nutzung dieser APIs zu durchsuchen.
+
+Beispiel:
+
+----
+jdeprscan --release 11 testcontainers/testcontainers/1.9.1/testcontainers-1.9.1.jar 2>&1 | grep -v 'error: cannot '
+Jar file testcontainers/testcontainers/1.9.1/testcontainers-1.9.1.jar:
+class org/testcontainers/shaded/org/apache/commons/lang/reflect/FieldUtils uses 
+  deprecated method java/lang/reflect/AccessibleObject::isAccessible()Z 
+class org/testcontainers/shaded/org/apache/commons/lang/reflect/MemberUtils uses 
+  deprecated method java/lang/reflect/AccessibleObject::isAccessible()Z 
+class org/testcontainers/shaded/org/apache/commons/io/input/ClassLoaderObjectInputStream
+  uses deprecated method java/lang/reflect/Proxy::getProxyClass(Ljava/lang/Class
+----
+
+Mittels `jdeprscan --list --release 11` kann man sich die APIs anzeigen lassen, die in diesem Release deprecated sind.
+
+----
+jdeprscan --release 11 --list | cut -d' ' -f 3- | cut -d. -f1-3 | sort | uniq -c | sort -nr | head -10
+ 132 
+  40 java.rmi.server
+  34 java.awt.Component
+  25 javax.swing.text
+  25 javax.swing.plaf
+  20 javax.management.monitor
+  18 java.util.Date
+  13 java.awt.List
+   9 javax.swing.JComponent
+   8 java.util.concurrent
+----
+
+== Andere Tools
+
+Es gibt natürlich noch viel mehr wichtige Tools für die Arbeit mit der JVM, von `async-profiler` und `jol` (Java Object Layout) bis zu grafischen Programmen für das Parsen und Anzeige von GC-Logs (gceasy.io), JFR-Recordings (jmc) oder Heap-Dumps (jvisualvm, Eclipse-MAT).
+
+Andere Tools wie der Java Debugger `jdb` sind den Möglichkeiten der IDEs für bequemes Debuggen weit unterlegen, egal ob auf der lokalen oder entfernten Maschinen.
+
+== Fazit
+
+Die Helfer, die das JDK mitbringt, können einem das Leben leichter machen, wenn man um ihre Fähigkeiten weiss und wie man sie miteinander und anderen Shell-Tools kombinieren kann.
+Es lohnt sich auf jeden Fall, sie einmal auszuprobieren und mehr darüber zu lernen.
+
+== Referenzen
+
+* [JEP330] https://openjdk.java.net/jeps/330
+* [HotspotTuning] https://ionutbalosin.com/2020/01/hotspot-jvm-performance-tuning-guidelines/
+* [JMC] https://adoptopenjdk.net/jmc.html
+* [ZuluMC] https://www.azul.com/products/zulu-mission-control/
+* [NealFord] https://www.oreilly.com/library/view/the-productive-programmer/9780596519780/
+* [PragProg] https://pragprog.com/titles/tpp20/
+* [ManPages] https://docs.oracle.com/en/java/javase/14/docs/specs/man/
+////
+https://docs.oracle.com/en/java/javase/14/docs/specs/man/jar.html
+https://docs.oracle.com/en/java/javase/14/docs/specs/man/java.html
+https://docs.oracle.com/en/java/javase/14/docs/specs/man/javap.html
+https://docs.oracle.com/en/java/javase/14/docs/specs/man/jdb.html
+https://docs.oracle.com/en/java/javase/14/docs/specs/man/jfr.html
+https://docs.oracle.com/en/java/javase/14/docs/specs/man/jinfo.html
+
+attach to process or core-dump
+postmortem debugger to analyze the content of a core dump from a crashed Java Virtual Machine 
+https://docs.oracle.com/en/java/javase/14/docs/specs/man/jhsdb.html
+////
