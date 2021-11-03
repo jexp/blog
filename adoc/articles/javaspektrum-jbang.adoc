@@ -218,21 +218,21 @@ public class Query {
 [source,shell]
 ----
 export JDBC_URL="jdbc:postgresql://db-examples.cmlvojdj5cci.us-east-1.rds.amazonaws.com/northwind?user=n4examples&password=36gdOVABr3Ex"
-jbang Query.java "select company_name, contact_name, city, country, phone from customers limit 5"
+jbang Query.java "select contact_name, city, country from customers limit 5"
 [jbang] Building jar...
-+------------------------------------+--------------------+-------------+---------+----------------+
-| company_name                       | contact_name       | city        | country | phone          |
-+------------------------------------+--------------------+-------------+---------+----------------+
-|                Alfreds Futterkiste |       Maria Anders |      Berlin | Germany |    030-0074321 |
-+------------------------------------+--------------------+-------------+---------+----------------+
-| Ana Trujillo Emparedados y helados |       Ana Trujillo | México D.F. |  Mexico |   (5) 555-4729 |
-+------------------------------------+--------------------+-------------+---------+----------------+
-|            Antonio Moreno Taquería |     Antonio Moreno | México D.F. |  Mexico |   (5) 555-3932 |
-+------------------------------------+--------------------+-------------+---------+----------------+
-|                    Around the Horn |       Thomas Hardy |      London |      UK | (171) 555-7788 |
-+------------------------------------+--------------------+-------------+---------+----------------+
-|                 Berglunds snabbköp | Christina Berglund |       Luleå |  Sweden |  0921-12 34 65 |
-+------------------------------------+--------------------+-------------+---------+----------------+
++--------------------+-------------+---------+
+| contact_name       | city        | country |
++--------------------+-------------+---------+
+|       Maria Anders |      Berlin | Germany |
++--------------------+-------------+---------+
+|       Ana Trujillo | México D.F. |  Mexico |
++--------------------+-------------+---------+
+|     Antonio Moreno | México D.F. |  Mexico |
++--------------------+-------------+---------+
+|       Thomas Hardy |      London |      UK |
++--------------------+-------------+---------+
+| Christina Berglund |       Luleå |  Sweden |
++--------------------+-------------+---------+
 ----
 
 JBang bringt auch schon einige Quelltext-Vorlagen für spezifische Anwendungen mit, diese können mit `--template=` oder `-t` angewandt werden.
