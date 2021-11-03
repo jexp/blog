@@ -388,7 +388,7 @@ Zum Beispiel können damit kleine Projekte gebaut und paketiert werden, sogar ko
 | jbang run Ls.java . | Ausführung
 | jbang --native Ls.java . | Native Ausführung mit GraalVM
 | jbang export --native Ls.java | Natives Binary bereitstellen
-| jbang export [local|portable|mavenrepo] Ls.java | Stellt Binary [mit Abhängigkeiten] bereit
+| jbang export [local\|portable\|mavenrepo] Ls.java | Stellt Binary [mit Abhängigkeiten] bereit
 | jbang app install [--name html] https://git.io/JasGS | Lokale Installation des Codes. Ausführung mittels `./html ...`
 |===
 
