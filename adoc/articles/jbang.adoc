@@ -1,0 +1,593 @@
+== Java-Script - Execute Java Source Code with JBang
+
+With [jbang] real scripting comes to Java, instead of traditional bash scripts automation tasks can now be done with the full capabilities of Java including additional libraries and parallelization.
+
+Other languages like Python or Javascript allow to write scripts for daily needs with little effort and ceremony.
+With Java this was relatively complex until now.
+
+In several articles I already noted that thanks to [JEP330] since Java 11 source code can be executed directly with the `java` command (listing {counter:listing}).
+In Unix systems java can even be specified as shell at the beginning of the file, `#!/usr/bin/java --source 11`, but then the file extension must not end with `.java`.
+
+.Listing {listing}: Example for listing files in a folder
+[source,java]
+----
+// java Ls.java .
+import java.io.*;
+
+public class Ls {
+    public static void main(String...args) {
+        for (var f : new File(args[0]).listFiles()) 
+            System.out.println(f);
+    }
+}
+----
+
+Unfortunately, this capability still has some limitations, the biggest being the very cumbersome provision of additional libraries (e.g. a JDBC driver).
+These have to be downloaded separately and provided in the classpath.
+
+In the past, I have mostly resorted to `groovy` and the `@Grab` annotation in such cases, which automatically (transitively) downloads and includes libraries.
+But this requires Groovy to be installed again, and Groovy syntax to be used.
+
+Writing scripts with Java has a lot of advantages, besides the IDE support you have thanks to Java Streams, Java (N)IO and JDBC a powerful tool in hand to accomplish even more complex tasks.
+
+=== History of JBang
+
+The JBang developer, Max Rydahl Andersen (Redhat Switzerland), was concerned about these and other problems, so he decided to release a tool (January 2020 [jbang-history]) that goes well beyond JEP330 and allows comprehensive Java scripting.
+
+He wanted to make learning, executing, scripting and packaging small Java applications and scripts as easy as possible.
+
+The name JBang is a reference to the "hash bang" (`#!`) used in shell scripts as a prefix to specify an interpreter.
+
+So instead of Python or Go for recurring scripts you can simply use Java for example also for plugins for tools like git or kubectl.
+
+For example also in CI tools like GitHub Actions, for this `jbang-action` is available.
+
+A practical application of JBang is also the compact reporting of bugs, since in a single file both the bug reproduction and necessary dependencies can be encapsulated.
+
+Other possibilities are in compact UI applications with Java FX (listing {counter:listing}) using Gluon or interaction with browser (Selenium) or desktop (Java Desktop API).
+
+The tool consists mainly of the jbang command line application which combines relevant functions. 
+Additional functions like the app store are optional.
+
+.Listing {listing} - Execution of a JFX-Tile Demo
+[source,shell]
+----
+`jbang https://git.io/JKPVb`
+----
+
+Many examples of such applications are available in [jbang-examples].
+
+// picocli shell support / ansi colors
+
+////
+Thus, I created jbang-action that lets you write single file java scripts to use in your GitHub action workflows.
+
+Imagine you have a createissue.java that you use to create an issue based on some workflow in your GitHub actions - a minimal (dumb) version of that would be:
+////
+
+=== My First JBang Example
+
+JBang works from Java 8 and is available under the MIT license in version 0.81.x.
+
+Here is a first JBang example for parsing HTML pages with JSoup as library (listing {counter:listing}).
+The given URL is opened and elements (e.g. anchors) are found and output based on the requested selector.
+
+The dependency on JSoup is noted as a `DEPS` comment at the top of the file and downloaded on first execution.
+
+Using a `//JAVA 17` comment we can even specify the desired Java version and configure JVM options with `//JAVA[C]_OPTIONS`.
+Alternatively `--java 17` can be used as command line parameter when calling.
+
+.Listing {listing}: Html Parser with JSoup
+[source,java]
+----
+//DEPS org.jsoup:jsoup:1.14.3
+//JAVA 17+
+//JAVA_OPTIONS --enable-preview
+import static java.lang.System.*;
+import org.jsoup.*;
+
+public class Html {
+    public static void main(String...args) throws Exception {
+        var doc = Jsoup.connect(args[0]).get();
+        out.println(doc.title());
+        doc.select(args[1]).stream()
+        .map(e -> new Anchor(e.text(), e.attr("href")))
+        .forEach(out::println);
+    }
+    record Anchor(String text, String href) {}
+}
+----
+
+.Listing {counter:listing}: Execution of Html Parser for Wikipedia
+[source,shell]
+----
+jbang Html.java "https://en.wikipedia.org/" "#mp-itn b a"
+[jbang] Building jar...
+Wikipedia, the free encyclopedia
+Expo 2020 -> /wiki/Expo_2020
+2021 Ryder Cup -> /wiki/2021_Ryder_Cup
+74th Tony Awards -> /wiki/74th_Tony_Awards
+2021 German federal election -> /wiki/2021_German_federal_election
+Detention of Michael Spavor and Michael Kovrig -> /wiki/Detention_of_Michael_Spavor_and_Michael_Kovrig
+Meng Wanzhou -> /wiki/Meng_Wanzhou
+Portal:Current events -> /wiki/Portal:Current_events
+Deaths in 2021 -> /wiki/Deaths_in_2021
+Wikipedia:In the news/Candidates -> /wiki/Wikipedia:In_the_news/Candidates
+----
+
+=== Installation
+
+JBang can be installed most easily via SDKMan, a simple `sdk install jbang` will do.
+It is also available from homebrew, scoop, chocolatey and other package managers and is also easy to install in any shell (see listing {counter:listing}).
+
+Thankfully, on machines where Java is not yet available, it is downloaded and installed once when using JBang.
+
+.Listing {listing}: Installation of jbang with a Shell
+[source,shell]
+----
+# Powershell:
+iex "& { $(iwr https://ps.jbang.dev) } app setup"
+
+# GitBash/cygwin/mingwin/WSL:
+curl -Ls https://sh.jbang.dev | bash -s - app setup
+----
+
+=== Develop with JBang
+
+JBang you can tell that its developer has created a tool for its own practical use.
+It is designed to be really thoughtful and user-friendly.
+
+A new JBang script can be initialized using `jbang init Query.java`, which provides the relevant body (listing {counter:listing}).
+
+.Listing {listing} - Hello World
+[source,java]
+----
+///usr/bin/env jbang "$0" "$@" ; exit $?
+// //DEPS <dependency1> <dependency2>
+
+import static java.lang.System.*;
+
+public class Query {
+    public static void main(String... args) {
+        out.println("Hello World");
+    }
+}
+----
+
+Using `jbang edit Query.java` JBang generates a temporary Gradle project with the relevant dependencies so that an IDE can resolve them correctly and opens the project in the IDE (IntelliJ Idea, Eclipse, VS Code) (Listing {counter:listing}).
+After updating the dependencies, the invisible project can be updated again using `edit`.
+
+The current script file is included using a symbolic link, so it remains in the current directory without project setup.
+
+This is also one of the nice features of JBang, only the current script file is relevant, all infrastructure disappears from view.
+
+.Listing {listing}: Initialization and editing of the Query.java source code
+[source,shell]
+---
+jbang edit --open=code Query.java 
+[jbang] Running `sh -c code /Users/mh/.jbang/cache/projects/Query.java_jbang_af9d1b3ed59c667238ae61b13a5c64c0d7e4486ac0f3f16fe190e844272620f4/Query`
+/Users/mh/.jbang/cache/projects/Query.java_jbang_af9d1b3ed59c667238ae61b13a5c64c0d7e4486ac0f3f16fe190e844272620f4/Query
+---
+
+In this example (listing {counter:listing}), we query a relational database and represent the result with an ascii-type table.
+
+.Listing {listing} - Database querying using JDBC
+[source,java]
+----
+///usr/bin/env jbang "$0" "$@" ; exit $?
+//DEPS org.postgresql:postgresql:42.2.24
+//DEPS com.github.freva:ascii-table:1.2.0
+
+import static java.lang.System.*;
+import java.sql.*;
+import java.util.*;
+import com.github.freva.asciitable.*;
+
+public class Query {
+
+    public static void main(String... args) throws Exception {
+        // JDBC URL from environment variable
+        try (var con=DriverManager.getConnection(System.getenv("JDBC_URL"));
+             var stmt=con.createStatement();
+             // all params turned into query string
+             var rs=stmt.executeQuery(String.join(" ",args))) {
+
+                var meta=rs.getMetaData();
+                // column names as fields
+                var cols=new String[meta.getColumnCount()];
+                for (int c=1;c<=cols.length;c++) 
+                    cols[c-1]=meta.getColumnName(c);
+                int row=0;
+                // values as two-dimensional array (max 100 rows)
+                String[][] rows=new String[100][];
+                while (rs.next() || row>=rows.length) {
+                    rows[row]=new String[cols.length];
+                    for (int c=1;c<=cols.length;c++) 
+                        rows[row][c-1]=rs.getString(c);
+                    row++;
+                }
+                out.println(AsciiTable.getTable(cols, 
+                            Arrays.copyOf(rows,row)));
+             }
+    }
+}
+----
+
+.Listing {counter:listing}: Output of the query of a Postgres Northwind database
+[source,shell]
+----
+export JDBC_URL="jdbc:postgresql://db-examples.cmlvojdj5cci.us-east-1.rds.amazonaws.com/northwind?user=n4examples&password=36gdOVABr3Ex"
+jbang Query.java "select contact_name, city, country from customers limit 5"
+[jbang] Building jar...
++--------------------+-------------+---------+
+| contact_name       | city        | country |
++--------------------+-------------+---------+
+|       Maria Anders |      Berlin | Germany |
++--------------------+-------------+---------+
+|       Ana Trujillo | México D.F. |  Mexico |
++--------------------+-------------+---------+
+|     Antonio Moreno | México D.F. |  Mexico |
++--------------------+-------------+---------+
+|       Thomas Hardy |      London |      UK |
++--------------------+-------------+---------+
+| Christina Berglund |       Luleå |  Sweden |
++--------------------+-------------+---------+
+----
+
+JBang also already brings some source code templates for specific applications, these can be applied with `--template=` or `-t`.
+
+Here is an example for command line applications with PicoCLI (listing {counter:listing}).
+
+.Listing {listing} - PicoCLI Example
+[source,java]
+----
+// jbang init -t cli Cli.java
+
+///usr/bin/env jbang "$0" "$@" ; exit $?
+//DEPS info.picocli:picocli:4.5.0
+
+import picocli.CommandLine;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Parameters;
+
+import java.util.concurrent.Callable;
+
+@Command(name = "Cli", mixinStandardHelpOptions = true, 
+        version = "Cli 0.1", description = "Cli made with jbang")
+class Cli implements Callable<Integer> {
+
+    @Parameters(index = "0", description = "The greeting to print", 
+                defaultValue = "World!")
+    private String greeting;
+
+    public static void main(String... args) {
+        int exitCode = new CommandLine(new Cli()).execute(args);
+        System.exit(exitCode);
+    }
+
+    @Override
+    public Integer call() throws Exception { 
+        System.out.println("Hello " + greeting);
+        return 0;
+    }
+}
+// jbang Cli.java Jbang!
+// Hello Jbang!
+----
+
+More existing templates are available via `jbang template list`:
+
+* agent = Agent template
+* cli = CLI template
+* hello = Basic Hello World template
+* hello.kt = Basic kotlin Hello World template
+* qcli = Quarkus CLI template
+* qmetrics = Quarkus Metrics template
+* qrest = Quarkus REST template
+
+But you can easily add templates for your own team or project (listing {counter:listing}).
+
+.Listing {listing} - Add template
+[source,shell]
+----
+jbang template add --name myapp-starter myapp.java logo-banner.jpg app.properties
+----
+
+Multiple Java files and resources can also be used in JBang.
+As usual it is indicated by comment, where these are to be found, and/or where files in the current directory within the Jar file are to be put.
+
+* Source code: `SOURCES **/*.JAVA`
+* Resources: `FILES META-INF/resources/index.html=index.html`
+
+Here is a Quarkus Http Service example in Listing {counter:listing}.
+
+.Listing {listing} - Quarkus Http Service
+[source,java]
+----
+///usr/bin/env jbang "$0" "$@" ; exit $?
+//DEPS io.quarkus:quarkus-resteasy:1.8.1.Final
+//SOURCES **/*.java
+//FILES META-INF/resources/index.html=index.html
+
+import static java.lang.System.*;
+import io.quarkus.runtime.*;
+import javax.enterprise.context.ApplicationScoped;
+import javax.ws.rs.*;
+
+@Path("/hello")
+@ApplicationScoped
+public class quarkus {
+
+    @GET
+    public String hello() {
+        return "Hello Quarkus";
+    }
+}
+----
+
+Since Max works full-time on Quarkus, there are some dedicated configuration options and templates for microservices and other applications for it.
+
+// jbang --native quarkus
+// jbang -Dquarkus.container-image.build=true  quarkus
+
+////
+Installation of scripts to user PATH
+
+Control compile and runtime options with //JAVAC_OPTIONS <flags> and //JAVA_OPTIONS <flags>
+Compiled jar and Dependency resolution caching
+
+native-image generation (--native)
+Launch with debug enabled for instant debugging from your favorite IDE
+
+.jsh via JShell from Java 9 and upwards
+.kt via kotlinc (EXPERIMENTAL)
+////
+
+=== Execution
+
+Since JBang also supports URLs as source for the scripts, I can also load my HTML parser script from a GitHub Gist for example: `jbang https://git.io/JasGS https://neo4j.com/developer/ a.page`.
+
+This allows me to transparently deploy my code without compilation/deployment.
+However, JBang will ask if the URL should be trusted.
+
+JBang scripts can also be executed as normal shell scripts, in which case they must contain a comment in the first line that identifies jbang as the interpreter: `//usr/bin/env jbang "$0" "$@" ; exit $?` `
+
+Jbang can also execute jar files directly and scripts for jshell with the `.jsh` suffix, or even Maven coordinates pointing to a jar with an appropriate main class.
+
+Frequently recurring calls can be stored as aliases in the "catalog", which can also be published centrally, e.g. on GitHub (Listing {counter:listing}).
+
+.Listing {listing} - Execution and aliases, here with Neo4j's Cypher shell.
+[source,shell]
+----
+# execution of Maven coordinates
+jbang -m=org.neo4j.shell.Main org.neo4j:cypher-shell:4.3.6
+
+# add alias
+jbang alias add --name=cypher \
+ -m=org.neo4j.shell.Main org.neo4j:cypher-shell:4.3.6
+
+# execute alias
+jbang cypher -a neo4j+s://demo.neo4jlabs.com \
+-d movies -u movies -p movies \
+"MATCH () RETURN count(*);"
+----
+
+A very nice example from Max is a pre-packaged Minecraft server [jbang-minecraft] that reduces all the complexity to a `jbang sponge@jbangdev/jbang-minecraft`.
+
+=== Build and Packaging
+
+JBang has evolved from the initial idea of an execution environment, and now offers other services as well.
+
+For example, it can be used to build and package small projects, even complete Maven deployments or creation of Docker container images.
+
+[cols="m,a",opts=header]
+|===
+| command | description
+| jbang build Ls.java | Compiles the file
+| jbang run Ls.java . | Execution
+| jbang --native Ls.java . | Native execution with GraalVM
+| jbang export --native Ls.java | Provide native binary
+| jbang export [local\|portable\|mavenrepo] Ls.java | Deploy binary [with dependencies] .
+| jbang app install [--name html] https://git.io/JasGS | Install code locally. Execution via `./html ...`
+|===
+
+=== Other applications
+
+=== Testcontainers
+
+With the Testcontainers project Docker containers can be configured, started and managed using a fluent Java API.
+Generic containers for arbitrary applications as well as already preconfigured containers for databases, web servers etc. are available.
+
+Thanks to JBang, you can now encapsulate containers and Java tests in one file and use them to reproduce bugs or demonstrate features, for example.
+
+Here is an example (Listing {counter:listing}) with the Neo4j test container, which starts a Neo4j instance as a Docker container and then opens a connection with the Java driver and executes a query.
+
+Listing {listing} - Launch and use TestContainers
+[source,java]
+----
+///usr/bin/env jbang "$0" "$@" ; exit $?
+//DEPS org.testcontainers:neo4j:1.15.3
+//DEPS org.neo4j.driver:neo4j-java-driver:4.3.4
+
+import static java.lang.System.*;
+import java.util.*;
+import org.testcontainers.containers.*;
+import org.neo4j.driver.*;
+
+public class Neo4jTest {
+
+    private static Neo4jContainer startContainer() {
+        var container = new Neo4jContainer()
+        .withAdminPassword(null);
+        container.start();
+        return container;
+    }
+
+    private static Value queryDatabase(String boltUrl) {
+        try (
+            Driver driver = GraphDatabase.driver(boltUrl, AuthTokens.none());
+            Session session = driver.session()) {
+            return session.run("RETURN 1", Map.of()).single().get(0);
+        }
+    }
+    public static void main(String... args) {
+        var container = startContainer();
+        var result = queryDatabase(container.getBoltUrl());
+        out.println(result);
+        assert result.asLong() == 1L;
+        container.stop();
+    }
+}
+----
+
+=== GitHub Actions
+
+For automating GitHub Actions continuous integration tasks, Max Andersen has provided a [jbang-github-action] (listing {counter:listing}).
+This was also one of the original drivers for developing JBang - implementing GitHub Actions scripts in Java, not just Javascript or Python.
+
+// todo GH flat files?
+.Listing {listing}: GitHub Action using JBang
+[source,yaml]
+----
+on: [push]
+
+jobs:
+    jbang:
+    runs-on: ubuntu-latest
+    name: A job to run jbang
+    steps:
+    - name: checkout
+      uses: actions/checkout@v1
+    - uses: actions/cache@v1
+      with:
+        path: /root/.jbang
+        key: ${{ runner.os }}-jbang-${{ hashFiles('*.java') }}
+        restore-keys: |
+            ${{ runner.os }}-jbang-
+    - name: jbang
+      uses: jbangdev/jbang-action@v0.81.0
+      with:
+        script: createissue.java
+        scriptargs: "my world"
+      env:
+        JBANG_REPO: /root/.jbang/repository
+        GITHUB_TOKEN: ${{ secrets.ISSUE_GITHUB_TOKEN }}
+----
+
+=== App Store
+
+You don't want to reinvent many wheels over and over again, this is also true for scripts.
+Therefore with JBang also an "App Store" for scripts is available, these can be called directly from the command line.
+
+Of course, one should make sure that these scripts really fulfill the tasks they claim to do.
+For security reasons, it is better to trust well-known projects / authors.
+
+Examples:
+
+* `jbang jreleaser@jreleaser` - Publish Java Projects by Andres Almiray
+* `jfrprint@mbien/JFRLog~cli` - List events from JFR logs by Michael Bien
+* `httpd@quintesse` - Http server for the current directory by Tako Schotanus 
+* `tabula@tabulapdf/tabula-java` - Extract tables from PDF by Max Rydahl Andersen
+
+These apps from the catalog can also be installed locally once under a catchy name using `jbang app install`, and then simply used like an executable file.
+
+My colleague Michael Simons did a nice example using the Java library for remote control of MacOS to capture his currently playing music tracks, this could then be passed to an API [simons-itunes] for example.
+
+=== Advanced features
+
+JBang has a number of other features that I haven't gone into here, but are explained in detail in the built-in help and online documentation [jbang-docs].
+
+* Record JFR events (`--jfr`)
+* Enable Java debugger (`--debug`)
+* Class data sharing for faster startup (`--cds`)
+* JDK management like SDKMan,
+* Generation of Java agents
+* Offline mode (`--offline`)
+* Forced update (`--fresh`)
+* Management of a JBang wrapper in the project similar to `gradlew` or `mvnw`.
+
+=== Conclusion
+
+While I originally only knew about the ability to run Java files like scripts, JBang has impressed me with its scope.
+
+With it, Max tries to provide the pleasant features of developer and user friendliness of Python and Node.js to Java as well.
+It doesn't limit itself to execution, but also includes compilation, deployment, deployment and installation of applications.
+
+I'm thrilled all around, it just goes to show once again that when enthusiastic developers tackle their own problems, good solutions come out of it.
+
+The only shortcoming I see is the compatibility of the generated artifacts.
+Although jbang uses standard Java tools for its behind-the-scenes work, the generated files are not automatically available in a local Maven repository for other environments, and the jbang catalogs are also a proprietary format.
+
+=== Ressources
+
+* [jbang-historie] https://xam.dk/blog/unleasing-the-scripting-powers-of-java/
+* [jbang] https://www.jbang.dev/
+* [jbang-docs] https://www.jbang.dev/documentation
+* [jbang-video-jugsaxony] https://vimeo.com/499180554
+* [JEP330] https://openjdk.java.net/jeps/330
+* [jsoup] https://github.com/jhy/jsoup
+* [ascii-table] https://github.com/freva/ascii-table
+* [jbang-github-action] https://github.com/marketplace/actions/java-scripting-w-jbang
+* [jbang-everywhere] https://xam.dk/blog/jbang-everywhere/
+* [jbang-examples] https://github.com/jbangdev/jbang-examples
+* [jbang-k8s-cli-java] https://github.com/jbangdev/k8s-cli-java
+* [simons-itunes] https://gist.github.com/michael-simons/c2fb92c387b2a7c7300ff686bac88177
+* [jbang-minecraft] https://github.com/jbangdev/jbang-minecraft
+
+////
+jbang -h
+jbang is a tool for building and running .java/.jsh scripts and jar packages.
+Usage: jbang [-hV] [--verbose | --quiet] [-o | [--fresh]] [COMMAND]
+
+  jbang init hello.java [args...]
+        (to initialize a script)
+  or  jbang edit --open=code --live hello.java
+        (to edit a script in IDE with live updates)
+  or  jbang hello.java [args...]
+        (to run a .java file)
+  or  jbang gavsearch@jbangdev [args...]
+        (to run a alias from a catalog)
+  or  jbang group-id:artifact-id:version [args...]
+        (to run a .jar file found with a GAV id)
+
+      --fresh     Make sure we use fresh (i.e. non-cached) resources.
+  -h, --help      Display help/info. Use 'jbang <command> -h' for detailed
+                    usage.
+  -o, --offline   Work offline. Fail-fast if dependencies are missing. No
+                    connections will be attempted
+      --quiet     jbang will be quiet, only print when error occurs.
+  -V, --version   Display version info (use `jbang --verbose version` for more
+                    details)
+      --verbose   jbang will be verbose on what it does.
+
+Essentials:
+  run         Builds and runs provided script.
+  build       Compiles and stores script in the cache.
+
+Editing:
+  init        Initialize a script.
+  edit        Setup a temporary project to edit script in an IDE.
+
+Caching:
+  cache       Manage compiled scripts in the local cache.
+  export      Export the result of a build.
+  jdk         Manage Java Development Kits installed by jbang.
+
+Configuration:
+  trust       Manage which domains you trust to run scripts from.
+  alias       Manage aliases for scripts.
+  template    Manage templates for scripts.
+  catalog     Manage Catalogs of aliases.
+  app         Manage scripts installed on the user's PATH as commands.
+
+Other:
+  completion  Output auto-completion script for bash/zsh.
+              Usage: source <(jbang completion)
+  info        Provides info about the script for tools (and humans who are
+                tools).
+  version     Display version info.
+  wrapper     Manage jbang wrapper for a folder.
+
+Copyright: 2020 Max Rydahl Andersen and jbang.dev contributors, License: MIT
+Website: https://jbang.dev
+////
