@@ -1,0 +1,362 @@
+== Graph-Analyse Wahl-O-Mat Bundestagswahl 2021
+:img: ../img
+
+Für jede Landtags und Bundestagswahl stellt der "Wahl-O-Mat" der Bundeszentrale für politische Bildung die Programme der Parteien für eine Reihe von Themen (Thesen) gegenüber.
+
+Durch den Vergleich der eigenen Meinung zu diesen Thesen kann sich jede:r ein personalisiertes Bild von der Parteienlandschaft machen, die zur Wahl antritt.
+
+Die offizielle Seite zum interaktiven Vergleich und Auswertung ist hier zu finden: https://www.wahl-o-mat.de
+
+
+=== Ziel
+
+Unser Ziel ist die Daten des Wahl-O-Mats in ein Graphmodell zu importieren und dieses dann mittels Abfragen, Visualisierung und Graphalgorithmen zu analysieren.
+
+image::{img}/election-bloom-cluster.png[]
+
+=== Daten
+
+Dankenswerterweise stehen die Rohdaten zur Verfügung und können  https://www.bpb.de/politik/wahlen/wahl-o-mat/bundestagswahl-2021/337541/download[hier heruntergeladen werden^], das Archiv beinhaltet eine Excel Datei, die nach CSV exportiert werden kann
+
+Meine Analyse dient nur wissenschaftlichen Zwecken und zeigt wie Graphanalyse auf gewichteten Beziehungsdaten erfolgen kann.
+
+====
+Die Bundeszentrale für politische Bildung ist Urheber des nachfolgend veröffentlichten "Wahl-O-Mat-Datensatzes". Die Veröffentlichung des Datensatzes dient lediglich dem Zugang zu den in ihm enthaltenen Informationen. Jede Nutzung des Datensatzes, egal welcher Art, wird untersagt. Die Schranken des Urheberrechts durch gesetzlich erlaubte Nutzung bleiben hiervon unberührt.
+
+Eine Ausnahme gilt nur für die Analyse des Datensatzes zu wissenschaftlichen oder journalistischen Zwecken sowie für die Veröffentlichung der Ergebnisse dieser Analyse. Dabei muss jederzeit klar erkennbar sein, dass die Bundeszentrale für politische Bildung nicht Urheber dieser Analyse ist.
+====
+
+== Graphdatenbank
+
+Ich benutze für die Analyse Neo4j, eine weitverbreitete Graphdatenbank, die sowohl zur Anwendungsenwicklung für komplexe Anwendungsfälle als auch zur Graphanalyse viele Möglichkeiten bereit stellt.
+
+Wer die Analyse selbst ausführen möchte, kann das auf der https://sandbox.neo4j.com/?usecase=blank-sandbox[Neo4j Sandbox^] nachvollziehen, wir benutzen eine leere (blank) Sandbox, die noch keine Daten enthält.
+
+In der Sandbox kann mittels des "Open" Buttons der Neo4j Browser als Entwickler-Oberfläche, "Bloom" als Visualisierungstool bzw. "Neuler" als Graph Data Science Playground geöffnet werden.
+
+Wir fangen mit Neo4j Browser an.
+Im oberen Bereich Statements können ausgeführt werden, deren Ergebnisse dann als Graphvisualisierung oder Tabelle angezeigt werden.
+
+image::{img}/election-party-browser.png[]
+
+=== Datenmodell
+
+In den Ausgangsdaten gibt es 38 Parteien und 38 Thesen mit diesen Attributen:
+
+* Partei (Nr; Name; Kurzbezeichnung)
+* These (Nr; Titel; Text)
+* Position (Position - stimme zu, neutral, stimme nicht zu; Begründung)
+
+Das Datenmodell ist trivial, da wir nur zwei Entitäten - `Partei` und `These` haben.
+
+* Partei (id, name, text)
+* These (id, name)
+
+Verbunden werden sie über eine Beziehung "POSITION", die sowohl die Begründung als auch ein numerisches Gewicht für die Haltung der Partei zur These beinhaltet.
+
+* "stimme nicht zu" 0.0
+* "neutral" 0.5
+* "stimme zu" 1.0
+
+image::{img}/election-party-topic.png[]
+
+=== Datenimport
+
+Mit Hilfe der `LOAD CSV` Klausel können wir das CSV direkt in die Datenbank importieren.
+
+Zuerst erzeugen wir ein paar Indexe und Constraints.
+Diese erhöhen die Abfrageperformance für Startpunkte im Graphen beziehungsweise verhindern inkonsistente Daten.
+
+.Indexe erzeugen
+[source,cypher]
+----
+create index on :Partei(name);
+create index on :These(name);
+create constraint if not exists on (p:Partei) assert p.id is unique;
+create constraint if not exists on (t:These) assert t.id is unique;
+----
+
+.Daten laden
+[source,cypher]
+----
+LOAD CSV WITH HEADERS FROM 
+"https://github.com/neo4j-examples/discoveraurafree/raw/main/data/wom-btw-2021.csv" 
+AS row
+
+// Partei erzeugen
+MERGE  (p:Partei {id:toInteger(row.`Partei: Nr.`)}) 
+ON CREATE SET p.text = row.`Partei: Name`, p.name = row.`Partei: Kurzbezeichnung`
+
+// These erzeugen
+MERGE (t:These {id:toInteger(row.`These: Nr.`)}) 
+ON CREATE SET t.name = row.`These: Titel`, t.text = row.`These: These`
+
+// These und Partei mittels "POSITION" verbinden
+MERGE (p)-[pos:POSITION]->(t) 
+ON CREATE SET pos.text = row.`Position: Begründung`,
+pos.weight = 
+CASE row.`Position: Position` 
+  WHEN "stimme nicht zu" THEN 0.0 
+  WHEN "stimme zu" THEN 1.0 
+  WHEN "neutral" THEN 0.5 
+END
+
+RETURN count(*);
+----
+
+Dieses Script erzeugt uns 38 Parteien und Thesen und 1444 Positionen.
+
+=== Exploration
+
+Wir können die Daten einfach visualisieren, entweder indem in der linken Sidebar auf eine der Entitäten oder den Beziehungsnamen geklickt wird.
+
+Schöner ist aber mit einer Abfrage wie dieser, die uns die 6 größten Parteien mit den Thesen darstellt zu denen sie zustimmen. (ggf. muss in den Einstellungen "Connect Result Nodes" deaktiviert werden)
+
+.Top 6 Parteien und PRO Thesen
+[source,cypher]
+----
+MATCH (p:Partei)-[r:POSITION]->(t) 
+WHERE p.id <= 6 AND r.weight = 1 
+RETURN *;
+----
+
+image::{img}/election-party-yes.png[]
+
+Dasselbe können wir mit den Positionen darstellen, denen die Parteien nicht zustimmen.
+
+image::{img}/election-party-no.png[]
+
+
+Wir sehen schon in dieser Visualisierung ein Clustering bzw. eine Gruppierung.
+
+Diese können wir über die Berechnung einer Ähnlichkeit (Distanz) zwischen den Parteien noch deutlicher machen.
+Dazu berechnen wir den Durchschnitt der absoluten Gewichtsdifferenzen zu allen Thesen zwischen zwei Parteien.
+
+Wenn zwei Parteien diesselbe Meinung zu einem Thema haben ist die Differenz 0, bei Abweichungen 0.5 oder 1.
+
+.Ähnlichkeitsberechnung (Distanz)
+[source,cypher]
+----
+// Graph Muster von Partei via These zu Partei
+MATCH (p1:Partei)-[r1:POSITION]->(t:These)<-[r2:POSITION]-(p2:Partei) 
+WHERE id(p1)>id(p2) // nur für große Parteien and p1.id <=6 and p2.id <= 6 
+RETURN p1.name,p2.name, avg(abs(r1.weight-r2.weight)) AS avg
+ORDER BY avg ASC;
+----
+
+----
+╒═══════════╤═══════════╤═══════════════════╕
+│"p1.name"  │"p2.name"  │"avg"              │
+╞═══════════╪═══════════╪═══════════════════╡
+│"GRÜNE"    │"DIE LINKE"│0.13157894736842102│
+├───────────┼───────────┼───────────────────┤
+│"DIE LINKE"│"SPD"      │0.26315789473684215│
+├───────────┼───────────┼───────────────────┤
+│"GRÜNE"    │"SPD"      │0.2894736842105262 │
+├───────────┼───────────┼───────────────────┤
+│"AfD"      │"CDU / CSU"│0.30263157894736836│
+├───────────┼───────────┼───────────────────┤
+│"FDP"      │"CDU / CSU"│0.31578947368421056│
+├───────────┼───────────┼───────────────────┤
+│"FDP"      │"AfD"      │0.4078947368421052 │
+├───────────┼───────────┼───────────────────┤
+│"FDP"      │"SPD"      │0.4868421052631579 │
+├───────────┼───────────┼───────────────────┤
+│"SPD"      │"CDU / CSU"│0.486842105263158  │
+├───────────┼───────────┼───────────────────┤
+│"GRÜNE"    │"FDP"      │0.5394736842105264 │
+├───────────┼───────────┼───────────────────┤
+│"AfD"      │"SPD"      │0.6052631578947367 │
+├───────────┼───────────┼───────────────────┤
+│"DIE LINKE"│"FDP"      │0.6184210526315791 │
+├───────────┼───────────┼───────────────────┤
+│"GRÜNE"    │"CDU / CSU"│0.671052631578947  │
+├───────────┼───────────┼───────────────────┤
+│"DIE LINKE"│"CDU / CSU"│0.7236842105263157 │
+├───────────┼───────────┼───────────────────┤
+│"DIE LINKE"│"AfD"      │0.8421052631578948 │
+├───────────┼───────────┼───────────────────┤
+│"GRÜNE"    │"AfD"      │0.8421052631578948 │
+└───────────┴───────────┴───────────────────┘
+----
+
+
+Wenn diese Distanz unter einer gewissen Schwelle liegt, können wir mit ihr eine neue Beziehung `SIMILAR` (Ähnlichkeit) erstellen, die wir ebenfalls mit einem Gewicht (1-distanz) versehen.
+
+
+.Ähnlichkeitsbeziehung
+[source,cypher]
+----
+MATCH (p1:Partei)-[r1:POSITION]->(t:These)<-[r2:POSITION]-(p2:Partei) 
+WHERE id(p1)>id(p2)
+WITH p1, p2, avg(abs(r1.weight-r2.weight)) AS dist
+WHERE dist < 0.3
+MERGE (p1)-[s:SIMILAR]-(p2) SET s.weight = 1-dist; 
+----
+
+Diese Beziehung können wir jetzt wieder visualisieren, aber auch mit Graphalgorithmen weiter analysieren.
+
+Neben Neo4j Browser ist Bloom ein praktisches Visualiserungstool für all jene die die Abfragesprache Cypher (noch) nicht kennen.
+Dort kann mit einfachen verbalen Phrasen Teile des Graphen geladen und visualisiert werden.
+
+Zum Beispiel mittels `Partei SIMILAR Partei`, bei der dargestellten Visualisierung wird die politische Gruppierung der Parteien schon sehr deutlich.
+
+image::{img}/election-similar-bloom.png[]
+
+
+=== Graphanalyse - Graph Data Science
+
+Im nächsten Schritt nutzen wir Graphalgorithmen, um zum Beispiel Cluster numerisch zu berechnen, oder sogar Embeddings (Vektorrepräsentationen) für die Knoten unseres Graphen zu berechnen, um dann ML Modelle zu trainieren um Vorhersagen (Klassifikation, fehlende Verbindungen) zu treffen.
+
+Dazu benutzen wir die Graph Data Science Library von Neo4j, die in unserer Sandbox schon installiert ist.
+
+Wir können sie direkt von Cypher aus ansprechen, oder mittels des "Neuler - Playgrounds" interaktiv benutzen.
+
+Für die Nutzung der Graphalgorithmen ist es oft die Rohdaten in einen minimalistischen "Topologiegraphen" zu projizieren, dabei können sowohl existierende Beziehungen im Graphen als auch berechnete/aggregierte Beziehungen genutzt werden.
+
+In unserem Beispiel interessiert uns die Struktur `(:Partei)-[:SIMILAR {weight}]-(:Partei)`.
+
+Die Projektion erfolgt mittels eines Prozeduraufrufs:
+
+.Projektion für Algorithmen
+[source,cypher]
+----
+call gds.graph.create("parteien", 
+"Partei", 
+{SIMILAR: {type:"SIMILAR", properties: ["weight"], direction:"UNDIRECTED"}});
+----
+
+////
+.Projektion in Speicher
+[source,cypher]
+----
+// undirected für Embeddings
+call gds.graph.create("p2",
+  {Partei:{properties:"cluster"},These:{}},
+  {POSITION:{orientation:"UNDIRECTED",properties:"weight"}}
+);
+----
+////
+
+Auf dem virtuellen Graphen "parteien", können wir jetzt unsere Algorithmen anwenden, zum Beispiel https://neo4j.com/docs/graph-data-science/current/algorithms/louvain/[Louvain^] für Clusterermittlung.
+Dabei werden nicht nur die Beziehungen, sondern auch ihre Gewichte berücksichtigt.
+
+.Louvain Algorithmus, Zurückschreiben von Cluster Id in Datenbank
+[source,cypher]
+----
+call gds.louvain.write("parteien",
+   {relationshipWeightProperty:'weight', writeProperty:'cluster'})
+----
+
+Jeder Knoten in unserem Graphen bekommt jetzt eine "cluster"-Nummer, die wir in Bloom farbig darstellen können.
+
+image::{img}/election-bloom-cluster.png[]
+
+Im nächsten Schritt können wir für die Knoten unseres Graphen sogenannte Embeddings berechnen, d.h. vieldimensionale Vektoren mit Gewichten die die "Essenz" einer Entität darstellen, also sowohl Attribute als auch Topologie als Kontext erfassen.
+
+Diese können dann z.B. für weitere Ähnlichkeitsstrukturen (k-NN Graphen) oder für das Training von ML Modellen genutzt werden, um Klassifikationen von Entitäten (Node-Classification) vorzunehmen oder fehlende Beziehungen vorherzusagen (Link Prediction)
+
+.Berechnung von Embeddings
+[source,cypher]
+----
+call gds.fastRP.mutate("parteien",
+   {relationshipWeightProperty:"weight", mutateProperty:"embedding", embeddingDimension:128});
+----
+
+.Cluster-id in Projektion speichern
+[source,cypher]
+----
+call gds.louvain.mutate("parteien",
+   {relationshipWeightProperty:'weight', mutateProperty:'cluster'})
+----
+
+.Training und Vorhersage der Cluster-Id
+[source,cypher]
+----
+CALL gds.alpha.ml.nodeClassification.train("parteien",
+ {modelName:"classify",featureProperties:["embedding"],
+  targetProperty:"cluster", nodeLabels:["Partei"],
+  holdoutFraction: 0.2,
+  validationFolds: 5,
+  metrics: [ 'F1_WEIGHTED' ],
+  params: [
+    {penalty: 0.0625},
+    {penalty: 0.5},
+    {penalty: 1.0},
+    {penalty: 4.0}
+  ]});
+
+CALL gds.alpha.ml.nodeClassification.predict.stream('parteien', {
+  nodeLabels: ['Partei'],
+  modelName: 'classify',
+  includePredictedProbabilities: true
+}) YIELD nodeId, predictedClass, predictedProbabilities
+RETURN gds.util.asNode(nodeId).name AS party, gds.util.asNode(nodeId).cluster AS cluster, predictedClass, predictedProbabilities;
+----
+
+====
+Wir hätten unsere Ähnlichkeitsberechnung auch über eine ML-Pipeline laufen lassen können:
+
+1. Graphprojektion von `(:Partei {cluster})-[:POSITION {weight}]->(:These)`
+2. Embeddings mittels FastRP berechnen
+3. Für Parteien top-K Ähnlichkeitsberechnung (kNN - k-nearest neighbours) mittels Vektorabstand (cosine-similarity) ermitteln
+
+[source, cypher]
+----
+call gds.graph.create("p4",["Partei","These"],
+                      {POSITION:{orientation:"UNDIRECTED",properties:"weight"}});
+
+call gds.fastRP.mutate("p4",{relationshipWeightProperty:"weight",
+                             embeddingDimension:128,  
+                             mutateProperty:"embedding"});
+
+call gds.beta.knn.stream("p4",{nodeLabels:['Partei'],topK:3, nodeWeightProperty:'embedding'})
+yield node1, node2, similarity where node1 > node2
+with gds.util.asNode(node1) as n1,
+          gds.util.asNode(node2) as n2, similarity 
+where n1.id <= 6 OR n2.id <= 6
+return n1.name, n2.name, similarity
+order by similarity desc LIMIT 10;
+----
+
+----
+╒══════════════╤═══════════╤══════════════════╕
+│"n1.name"     │"n2.name"  │"similarity"      │
+╞══════════════╪═══════════╪══════════════════╡
+│"du."         │"DIE LINKE"│0.9997360110282898│
+├──────────────┼───────────┼──────────────────┤
+│"LfK"         │"GRÜNE"    │0.9976046085357666│
+├──────────────┼───────────┼──────────────────┤
+│"PdF"         │"SPD"      │0.9972654581069946│
+├──────────────┼───────────┼──────────────────┤
+│"FREIE WÄHLER"│"FDP"      │0.9972607493400574│
+├──────────────┼───────────┼──────────────────┤
+│"BP"          │"AfD"      │0.9957306981086731│
+├──────────────┼───────────┼──────────────────┤
+│"Bündnis C"   │"CDU / CSU"│0.992030143737793 │
+├──────────────┼───────────┼──────────────────┤
+│"LKR"         │"AfD"      │0.9916372895240784│
+├──────────────┼───────────┼──────────────────┤
+│"BÜNDNIS21"   │"CDU / CSU"│0.9860299229621887│
+└──────────────┴───────────┴──────────────────┘
+----
+
+====
+
+=== Fazit
+
+Mit einem Graphmodell und Graphanalyse kann man schnell und (semi-)automatisch implizite Verbindungen zwischen Fakten und Informationen sichtbar machen und deren Struktur jenseits von Tabellen und Diagrammen analysieren.
+
+Ich bin immer wieder beeindruckt, wieviel verstecktes Wissen in unseren "simplen" Ausgangsdaten versteckt sind.
+Das ist auch der Fall für komplexere Domänen und große Graphen mit Millionen von Entitäten aus existierenden Daten die oft im Unternehmen schlummern.
+
+Ich hoffe der Ausflug in die Welt der Graphanalyse war interessant und aufschlussreich.
+
+Und zum Schluss mein Appell an alle: "Geht Wählen!"
+
+=== Ähnliche Analysen
+
+* https://www.dkriesel.com/blog/2021/0903_wahl-o-mat-auswertung_bundestagswahl_2021[Wahl-O-Mat-Exploration Bundestagswahl 2021: Partei Landscape by D.Kriesel^]
+
+
+===

@@ -1,0 +1,305 @@
+== The Power of Subqueries in Neo4j 4.x
+
+https://neo4j.com/release-notes/neo4j-4-1-0/[Neo4j 4.1 came out in June^] with the final piece to make subqueries work well in Neo4j.
+
+So I want to use the opportunity for a deep dive into the topic.
+For those of you that rather watch than read, I did a https://twitch.tv/neo4j_[Twitch session^] on this topic last week. 
+You can follow us there or on https://youtube.com/neo4j[Youtube^] to not miss future sessions.
+
+https://www.youtube.com/watch?v=_FrysY0HgBY&list=PL9Hl4pk2FsvXjk0hrerr78pLN-477pDLo&index=3
+
+I have to start with a disclaimer: In all the years writing SQL with a variety of databases I always disliked subqueries.
+I felt that they made queries harder to read, understand, and to reason about.
+
+TL;DR: Since Neo4j 4.1 you can use subqueries for sub-structuring your Cypher queries in all cases.
+
+=== History
+
+That's why in Neo4j's Cypher I always vetoed subqueries and rather pushed for a query pipeline that passes data from one query part to the next.
+Similar to a Unix shell pipe that connects small tools that do one job well with each other like Lego blocks to form a more complex process.
+
+In Cypher you achieve that with the `WITH` statement that allows you to chain query parts together.
+WITH has the same semantics as the final `RETURN`, you can select columns, rename, aggregate, filter, paginate and sort your data.
+And all that *WITHIN*  each query multiple times.
+
+That is also the reason we never needed a `HAVING` keyword in Cypher, as it is just glorified post-filter after your result selection.
+You can have as many of those intermediate result-processing-passing steps in your Cypher query as you want.
+
+Here is a quick example. 
+Get me the cast of the movies with the highest ratings in our dataset.
+
+[source,cypher]
+----
+MATCH (m:Movie)<-[r:RATED]-()
+// this is inline processing + passing of data
+WITH m, avg(r.rating) as rating 
+ORDER BY rating DESC LIMIT 5
+MATCH (m)<-[:ACTED_IN]-(a:Person)
+RETURN m.title, collect(a.name) as cast, rating
+----
+
+That's also the approach you can use for handling many of the "traditional" subqueries.
+Built-in list processing and an `+exists( (n)-[:REL]->(m) )+` expression for patterns managed other use-cases.
+
+=== Subqueries
+
+But subqueries support two use-cases that were not so easy to handle before.
+
+One was an long-time requested feature called *post-union-processing*.
+A `UNION (ALL)` construct combines multiple independent queries into one result.
+
+[source,cypher]
+----
+MATCH (:Person) RETURN 'person' as type, count(*) as count
+UNION ALL
+MATCH (:Movie)  RETURN 'movie'  as type, count(*) as count
+----
+
+But `UNION` itself is not a full query, i.e. you can not do anything else than combining those queries and have their (equally named) columns returned to the caller in any order.
+
+So in the past you had to do any post-processing client-side.
+
+Neo4j 4.0 introduced subqueries in a way that addressed this issue.
+With the new `CALL {}` syntax you can wrap a query part as a subquery and it's result and cardinality will be available in the parts following it.
+
+[source,cypher]
+----
+MATCH (q:Question)
+CALL { RETURN 42 as answer }
+RETURN q.text as question, answer
+----
+
+This calls the subquery which returns a `42` as an answer, which is then available in the outer statement, for each question found. 
+
+To apply this to the `UNION` in question, you would wrap that statement as a subquery and then can filter, sort, paginate (or do whatever) with the results.
+
+[source, cypher]
+----
+CALL {
+  MATCH (:Person) RETURN 'person' as type, count(*) as count
+  UNION ALL
+  MATCH (:Movie)  RETURN 'movie' as type, count(*) as count
+} 
+WITH * WHERE count > 100
+RETURN type, count ORDER BY count DESC LIMIT 5
+----
+
+[NOTE]
+====
+Please note that the subqueries in Neo4j 4.0 were not able to access variables defined outside of their scope (non-correlated) . 
+That only changed in 4.1, see below.
+====
+
+My colleague Mark wrote a great https://neo4j.com/developer/subqueries[developer guide on subqueries^] and Luanne Misquitta from our partner GraphAware dove into this in a https://graphaware.com/neo4j/2020/01/17/post-union-processing-explained.html[full blog post on post-union-processing^].
+
+=== Existential Subqueries
+
+Existential subqueries, are a special construct that is a partial subquery to test the existence of certain graph patterns.
+Before you could express patterns with the `exists` function/predicate, which might get deprecated.
+
+Now with existential subqueries the syntax is one of these three:
+
+* `+WHERE exists { (node)-[:REL]->...(:Label) }+`, which is a shorthand for
+* `+WHERE exists { MATCH (node)-[:REL]->...(:Label) }+`, which can be extended with `WHERE`
+* `+WHERE exists { MATCH (node)-[:REL]->...(:Label) WHERE expression ... }+`
+
+It cannot contain `RETURN`, `WITH`, aggregations or such.
+
+NOTE: Currently the existential subquery cannot be used as an expression, I think that's a bug and will be fixed.
+
+=== Navigating along sub-trees
+
+When fetching data that contained many disparate sub-trees, the `WITH` and aggregation approach became a bit cumbersome, as your query is then not just a pipe for processing but a tree of nested sub-parts.
+
+For example if you want to get the co-actors of an actor in their movies but then at the same time the directors and their movies in a single query, you're navigating two very distinct subtrees of your data.
+
+Which was possible with multiple (OPTIONAL) MATCH expressions and incremental aggregation of map-datastructures, but not trivial.
+
+----
+(actor)-->(movie)<--(co-actors)
+(actor)-->(movie)<--(director)-->(other-movies)
+----
+
+TODO viz
+
+In Neo4j 3.1 Andres Taylor the father of Cypher https://neo4j.com/blog/cypher-graphql-neo4j-3-1-preview/[sneaked in two really cool features that were inspired by GraphQL^] and made this kind of querying so much easier.
+
+First there are *pattern comprehensions*:
+
+Those are like list comprehensions but allow an expression to use a graph pattern (with new identifiers) to be filtered and then have an expression applied to each element `[ (pattern...) WHERE filter | expression]`. 
+
+These two return equivalent results.
+
+[source,cypher]
+----
+MATCH (a:Person)-[:ACTED_IN]->(m:Movie)
+OPTIONAL MATCH (m)<-[:ACTED_IN]-(coActor:Person)
+WHERE coActor.name contains 'T'
+RETURN a.name, collect(coActor.name) as coActors
+----
+
+and
+
+[source,cypher]
+----
+MATCH (a:Person)-[:ACTED_IN]->(m:Movie)
+RETURN a.name, 
+  [(m)<-[:ACTED_IN]-(coActor:Person) 
+   WHERE coActor.name contains 'T' | coActor.name] as coActors
+----
+
+Which is very cool as it doesn't change the cardinality of your query like an `MATCH` does which you then have to counteract with an aggregation like `collect` or `count`.
+
+And then *map projections*:
+
+Which can take a map-like element (map, node, relationship) and extract attributes in a concise syntax into a map again: `elem {.foo, .bar, .* , answer: 42}`.
+
+So you can subselect the parts you are interested in and then with the regular map `key:expression` syntax you can start nesting the two together.
+
+So our second "tree" can be expressed as:
+
+----
+[ (m)<-[:DIRECTED]-(d:Person) 
+  | d { .name, movies: 
+      [ (d)-[:DIRECTED]->(m2) | m2 {.title} ]
+] as directors
+----
+
+These features are especially useful if you want to regularly query nested structures with defined sub-tree selections, like in any object-graph-mapping tool like our https://grandstack.io[GraphQL integration^] or https://neo4j.com/developer/spring-data-neo4j[Spring Data Neo4j^].
+
+So I wrote up this concept as a dedicated blog post a while ago.
+
+https://medium.com/neo4j/loading-graph-data-for-an-object-graph-mapper-or-graphql-5103b1a8b66e
+
+The drawback is, that those features _are not optimized well_ by the query planner and also don't offer support for sorting and pagination.
+You can paginate by just applying a slice `[0..10]` after the fact but that is only applied after the full comprehension has been computed.
+
+And sorting has to be simulated with a user defined function in apoc `apoc.coll.sortMaps`.
+
+=== Full Subqueries
+
+This is where full (or correlated) subqueries come in, which were added in Neo4j 4.1 released in June 2020.
+
+These subqueries now can also access identifiers/variables from the outer scope, but those need to be declared explicitely at the beginning of the subquery with `WITH a,b,c`.
+
+I personally think that syntax is not optimal, it would have been nicer to align subquery and procedure call syntax and treat them like parameters.
+
+Such a subquery can contain a *full* Cypher query with all clauses and operations.
+
+Here is a full example:
+
+[source, cypher]
+----
+MATCH (a:Person)-[:ACTED_IN]->(m)
+CALL {
+    WITH a,m
+    MATCH (m)<-[:ACTED_IN]-(co:Person)
+    WHERE a <> co AND co.name contains 'T' 
+    WITH distinct co LIMIT 10
+    RETURN collect(co.name) as coactors
+}
+CALL {
+    WITH m
+    MATCH (m)<-[:DIRECTED]-(d:Person)-[:DIRECTED]->(m2)
+    WITH  d, collect(m2.title) as movies
+    RETURN collect(d {.name, movies:movies}) as directors
+}
+RETURN a, coactors, directors
+----
+
+[WARNING]
+====
+The cardinality of the subquery affects the outer query, if it doesn't return any rows, the outer query will not return any rows.
+The opposite is also true, if your subquery returns multiple rows then that will multiply the cardinality of your outer query.
+That's why either use `OPTIONAL MATCH` in your subquery and/or a pure (single) aggregation with `collect` so you always get one row from a subquery (except if you want more).
+
+You cannot shadow existing identifiers, if you want to return something that was passed in, you have to rename it. 
+Identifiers returned from a subquery are named as is, i.e. if you have an expression the name of the identifier will be the same, e.g. `n.value + 5`, so make sure to always alias them properly even if it's not enforced (which is imho an oversight, in `WITH` we enforced it back then).
+====
+
+Subqueries can be nested, and are planned better (like regular query parts) by the query analyzer.
+
+And within subqueries you can now also use sorting and pagination, so our workarounds for GraphQL and Spring Data Neo4j will not be necessary any longer, starting with this version.
+
+E.g. 
+
+[source,cypher]
+----
+MATCH (m:Movie)
+RETURN m { .title, actors: apoc.coll.sort(
+              [(m)<-[:ACTED_IN]-(a:Person) | a {.name}], ["name"]
+            )[0..10]} as movie
+----
+
+can become
+
+[source,cypher]
+----
+MATCH (m:Movie)
+CALL {
+    WITH m
+    MATCH (m)<-[:ACTED_IN]-(a:Person)
+    WITH a ORDER BY a.name DESC LIMIT 10
+    RETURN collect(a {.name}) as actors
+}
+RETURN m { .title, actors: actors }
+----
+
+Personally, I still like the pattern comprehension syntax much more.
+Perhaps at some point it can be extended with `ORDER BY` and `LIMIT` semantics as syntactic sugar for subqueries.
+
+==== Updates
+
+You can also do updates in a subquery.
+Remember that the subquery is executed each time for an outer row (with the same cardinality), so watch out for that (e.g. use `MERGE` instead of `CREATE`)
+
+If you want to use subqueries for conditional updates, you should always return a aggregation, to make sure to not stop the outer query.
+
+[source,cypher]
+----
+MATCH (m:Movie)
+CALL {
+   WITH m
+   WITH m WHERE exists(m.genres)
+   UNWIND m.genres as genre
+   MERGE (g:Genre {name: genre})
+   MERGE (m)-[:IN_GENRE]->(g)
+   RETURN count(*) as c
+}
+...
+----
+
+=== Subqueries in Neo4j Fabric
+
+Finally, subqueries are also used in Neo4j's sharding and federation approach https://neo4j.com/developer/neo4j-fabric-sharding/["Neo4j Fabric"^] for delineating query parts that are meant to execute on different databases.
+
+Here you can use subqueries together with the `USE` keyword to direct a query part to a certain database.
+
+For example (from the https://neo4j.com/docs/operations-manual/current/fabric/queries/#fabric-correlated-subquery[Fabric documentation^]):
+
+[source,cypher]
+----
+CALL {
+  USE movies.moviesUSA
+  MATCH (movie:Movie)
+  RETURN max(movie.released) AS usLatest
+}
+CALL {
+  USE movies.moviesEU
+  WITH usLatest
+  MATCH (movie:Movie)
+  WHERE movie.released = usLatest
+  RETURN movie
+}
+RETURN movie
+----
+
+This uses a fabric database named `movies` with two mounted shards/databases called `moviesUSA` and `moviesEU`.
+
+=== References
+
+* Please ask your question in our https://community.neo4j.com[community forum^] or  https://neo4j.com/slack[Slack^]
+* Read the https://neo4j.com/developer/subqueries/[developer guide on subqueries^]
+* Or the https://neo4j.com/docs/cypher-manual/current/clauses/call-subquery/[reference documentation^]
+
+Happy querying
