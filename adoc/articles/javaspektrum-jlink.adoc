@@ -1,0 +1,597 @@
+== Ich hab die JVM geschrumpft - mit jlink
+
+Image Espresso Coffee Press
+
+image::https://www.stoll-espresso.de/media/image/6b/6a/31/espressomaschinen-zubehoer-ersatzteile-tamper.jpg[]
+
+Es gibt verschiedene Mittel und Wege den Fußabdruck von Java Anwendungen zu reduzieren.
+Native Binaries mit GraalVM, Minimierung des Speicherbedarfs mit den neueren JVMs (z.B. für Strings), bessere Datenstrukturen usw.
+Eine weitere Möglichkeit stellt die Anpassung der JVM selbst an die Bedürfnisse der Anwendung dar.
+
+Das kann mit `jlink` dem Java Linker erfolgen, den wir uns heute genauer anschauen wollen.
+
+=== Komponenten der JVM
+
+Die JVM ist traditionell nicht besonders schlank, z.B. auf meinem System ist Java 17, 298 MB gross, neben den Kommandozeilentools wie `java`, `javac` usw. wird der meiste Platz von JDK- und nativen Bibliotheken eingenommen.
+
+Seit Java 9 sind mit dem "Java Platform Module System" (JPMS) [JEP 261] die Komponenten des JDK individuell als Plattform-Module verfügbar.
+Im selben Zuge wurde auch die JRE (Java Runtime Environment) als abgespeckte Variante des JDK abgeschafft.  
+
+Mit `java --list-modules` können diese angezeigt werden, hier in Listing 1 ist eine kleine Auswahl der über 70 Module zu sehen. 
+Neben den `java.\*` Modulen sind auch spezifische Module des JDK verfügbar `jdk.\*`.
+
+.Listing 1 - Vorhandene Java Module
+----
+java.base@17
+java.compiler@17
+java.datatransfer@17
+java.desktop@17
+java.instrument@17
+java.logging@17
+java.management@17
+java.net.http@17
+java.prefs@17
+java.rmi@17
+java.scripting@17
+java.se@17
+java.security.jgss@17
+java.sql@17
+java.xml@17
+jdk.httpserver@17
+jdk.jfr@17
+jdk.random@17
+----
+
+Für das Deployment von Anwendungen als Container oder Installation auf Systemen (Server und Desktop) kann es sinnvoll sein, die JVM auf die benötigten Module zu verkleinern.
+
+Wenn der JVM weninger Plattform-Module zur Verfügung stehen, können diese auch nicht geladen werden, und benötigen keinen Speicher für Klassen- und Modul-Metadata.
+
+Mit `jlink` dem "Java Linker" [JEP-282] kann seit Java 9 eine Selektion von Modulen vorgenommen werden, die die Abhängikeiten der konkreten Anwendung darstellt, und diese zusammen mit den regulären Tools in ein eigenes, minimales aber eigenständiges JVM-Artefakt packt.
+
+Minimal wird das `java.base` Modul genutzt, zusätziche Module (und deren transitive Abhängikeiten) nur bei Bedarf hinzugenommen.
+
+Das können sowohl Module aus dem JDK aber auch aus Bibliotheken oder sogar der Anwendung selbst sein.
+Diese werden dann in der selbst erstellten Runtime zu "Systemmodulen".
+
+////
+Given these command line options, jlink resolves modules, starting with the ones listed with --add-modules. But it has a few peculiarities:
+
+services are not bound by default - we'll see further below what to do about that
+optional dependencies are not resolved - they need to be added manually
+automatic modules are not allowed - we'll discuss this when we get to application images
+Unless any problems like missing or duplicate modules are encountered, the resolved modules (root modules plus transitive dependencies) end up in the new runtime image.
+////
+
+=== Minimales JDK mit java.base
+
+Alle Java Runtimes benötigen das `java.base` Modul. 
+
+Damit können wir also direkt eine minimale Runtime erstellen, die beim Ausführen von `--list-modules` auch nur dieses Modul als verfügbar anzeigt, wie in Listing 2 gezeigt.
+
+.Listing 2 - Minimales JDK mit java.base
+[source,shell]
+----
+# Java 17 mittels SDK-Man (funktioniert ab Java 9)
+sdk use java 17-open
+jlink \
+    --add-modules java.base \
+    --output ./jdk-base
+
+./jdk-base/bin/java --list-modules
+# java.base@17
+----
+
+.Tabelle 1 Weitere Optionen für jlink
+[opts=header, cols="m,a"]
+|===
+| Option | Auswirkung
+| --add-modules | Namen der hinzuzufügenden Module, transitive Auflösung, `ALL-MODULE-PATH` für alle
+| --module-path | Pfad für Module (jar, jmod oder ausgepackt)
+| --output | Zielverzeichnis für die neue Runtime, darf noch nicht existieren
+| --strip-debug | Debug Symbole entfernen, inkl Zeilennummern von Stacktraces und Parameternamen
+| --compress=0,1,2 | Kompression: 0-keine, 1-String Deduplikation, 2-komprimierte Module
+| --vendor-version="text" | Informationstext für die Runtime
+| --include-locales="en,de" | Welche Sprachversionen sollen integriert werden (benötigt Modul `jdk.localedata`)
+|===
+
+=== Voraussetzungen der Anwendung
+
+Die Vorraussetzung für solch eine Selektion ist, dass die eigene Anwendung entweder schon im Modulpfad definiert ist, oder für ältere Anwendungen die Abhängigkeiten auf dem Classpath mit Tools wie `jdeps` festgestellt werden können.
+
+Wie schon bei nativen Images mittels GraalVM sind indirekte Nutzung von APIs wie z.B. mittels Reflection oder Methodhandles nicht festzustellen und müssten manuell hinzugefügt werden.
+
+////
+----
+A basic invocation of the linker tool, jlink, is:
+
+$ jlink --module-path <modulepath> --add-modules <modules> --limit-modules <modules> --output <path>
+where:
+
+--module-path is the path where observable modules will be discovered by the linker; these can be modular JAR files, JMOD files, or exploded modules
+
+--add-modules names the modules to add to the run-time image; these modules can, via transitive dependencies, cause additional modules to be added
+
+--limit-modules limits the universe of observable modules
+
+--output is the directory that will contain the resulting run-time image
+
+The --module-path, --add-modules, and --limit-modules options are described in further detail in JEP 261.
+
+Other options that jlink will support include:
+
+--help to print a usage/help message
+--version to print version information
+
+--strip-debug this is going to strip debug symbols from both the native binaries and bytecode, you probably don't want to use this since this will remove all line numbers from stack traces. Its likely that the binaries of the JDK distribution you are using have most of their symbols already stripped.
+--strip-native-debug-symbols=objcopy=/usr/bin/objcopy Same as above, but only for native binaries
+--compress=0|1|2 0 for no compression, 1 for string deduplication, 2 for zip compressed modules. This might influence startup time slightly; see CDS section below
+--include-locales=langtag[,langtag]* include only a subset of locales instead of the full module
+--vendor-version="i made this" this looks uninteresting at first glance but it is very useful if you want to recognize your custom runtime again once you have multiple variants in containers. Adding domain name/project name or purpose of the base image helps.
+It will appear on the second line of the output of java -version
+full JDK as baseline
+MODS=ALL-MODULE-PATH
+
+----
+////
+
+=== Minimalbeispiel einer klassischen Anwendung
+
+In unserer minimalen Anwendung geben wir nur einen Gruß aus, benutzen als ausser `java.base` keine anderen Module.
+
+.Listing 3 - Minimalanwendung "Hello World"
+[source,java]
+----
+package de.jlink;
+
+public class Hallo {
+
+    public static void main(String...args) {
+        System.out.println("Gruß JavaSpektrum!");
+    }
+}
+----
+
+Bestimmung von Abhängigkeiten von nicht-modularen Java Anwendungen mit `jdeps` und Erstellung des JDK mittles `jlink` in Listing 4.
+
+.Listing 4 Analyse, JDK-Erstellung 
+----
+java Hallo.java
+# Gruß JavaSpektrum!
+
+javac Hallo.java
+jar --create --file hallo.jar --main-class Hallo Hallo.class
+
+# Analyse der Abhängigkeiten
+jdeps Hallo.class 
+
+# Ausgabe: 
+# Hallo.class -> java.base
+#    de.jlink -> java.io     java.base
+#    de.jlink -> java.lang   java.base
+
+# jdeps -s Kurzform (-R rekursiv)
+jdeps -s Hallo.class
+Hallo.class -> java.base
+
+# Funktioniert auch mit Jar Archiv
+jdeps -s hallo.jar
+# Ausgabe: Hallo.class -> java.base
+
+rm -rf hallo-jdk
+
+jlink -v --add-modules java.base \
+ --compress=2 --strip-debug --no-header-files --no-man-pages\
+ --output ./hallo-jdk
+
+du -sh ./hallo-jdk
+----
+
+In der Tabelle 1 können die Auswirkungen der verschiedenen Optionen zur Platzeinsparung nachvollzogen werden.
+
+.Tablle 1 Größenvergleich
+[.opts=header]
+|===
+| Optionen | Größe (MB)
+| <keine> | 41
+| --compress=1 | 34
+| --compress=2 | 28
+| --compress=2 --strip-debug | 26
+|===
+
+=== Beispiel Modulare Java Anwendung
+
+In einer minimal komplexeren modularen Anwendung nutzen wir das `java.logging` Modul und den `HttpClient` aus `java.net.http` seit Java 11, siehe Listings 5 und 6.
+
+.Listing 5 module-info.java
+[source,java]
+----
+module httpEchoModule {
+    requires java.logging;
+    requires java.net.http;
+}
+----
+
+.Listing 6 HttpEcho.java
+----
+package de.jexp.jlink;
+
+import java.util.logging.Logger;
+import java.net.http.*;
+import java.net.URI;
+
+public class HttpEcho {
+
+    private static Logger LOG = Logger.getLogger("echo");
+
+    public static void main(String...args) throws Exception {
+        var request = HttpRequest.newBuilder()
+        .uri(new URI("https://postman-echo.com/get"))
+        .GET().build();
+
+        var client = HttpClient.newHttpClient();
+
+        var response = client.send(request, 
+            HttpResponse.BodyHandlers.ofString());
+        LOG.info("status "+response.statusCode());
+        LOG.info(response.body());
+    }
+}
+----
+
+Im Anschluss kompilieren wir beide Dateien auf dem Modul-Pfad und führen sie testweise aus (Listing 7).
+
+.Listing 7 - Kompilieren und Ausführen des HttpEcho Demos
+[source,shell]
+----
+javac -d target module-info.java
+javac -d target --module-path target HttpEcho.java
+
+java --module-path target --module httpEchoModule/de.jexp.jlink.HttpEcho
+
+# Ausgabe
+Jan. 23, 2022 10:21:01 PM de.jexp.jlink.HttpEcho main
+INFO: status 200
+Jan. 23, 2022 10:21:01 PM de.jexp.jlink.HttpEcho main
+INFO: {"args":{},"headers":{"x-forwarded-proto":"https",...
+----
+
+Jetzt können wir wie gehabt `jdeps` nutzen, um uns die genutzten System-Module unserer modularen Anwendung `--module httpEchoModule` informativ anzuzeigen - dabei gibt es keine Überraschungen.
+
+Ebenso kann `jlink` unser Modul `--add-modules httpEchoModule` direkt übergeben werden, die transitiven Abhängigkeiten werden automatisch ermittelt (Listing 8).
+
+.Listing 8 - Analyse und Runtime erstellen für modulare Anwendung
+[source,shell]
+----
+jdeps --module-path target -s --module httpEchoModule
+
+# Ausgabe
+httpEchoModule -> java.base
+httpEchoModule -> java.logging
+httpEchoModule -> java.net.http
+
+# Eigene Runtime erstellen für unser Modul
+jlink --module-path target \
+  --add-modules httpEchoModule \
+  --output echoRuntime
+----
+
+Im Listing 9 wird gezeigt welche Module in unserer neuen Runtime vorhanden sind, und dass unsere Anwendung darin problemlos ausgeführt werden kann.
+
+.Listing 9 - Test der erstellten Runtime für die modulare Anwendung
+[source,shell]
+----
+# welche Module sind in der neuen Runtime vorhanden
+echoRuntime/bin/java --list-modules 
+hwModule
+java.base@17
+java.logging@17
+
+# Ausführen unseres Moduls in der erstellten Runtime
+echoRuntime/bin/java --module httpEchoModule/de.jexp.jlink.HttpEcho
+Jan 23, 2022 10:23:03 PM de.jexp.jlink.HttpEcho main
+INFO: status 200
+Jan 23, 2022 10:23:03 PM de.jexp.jlink.HttpEcho main
+INFO: {"args":{},"headers":{"x-forwarded-proto":"https",...
+----
+
+Mit einem zusätzlichen Parameter `--launcher` können der erstellten Runtime auch noch Startskripte für die Anwendung mitgeben werden.
+
+In Listing 10 wird das verdeutlicht.
+
+.Listing 10 Startskripte erstellen
+[source,shell]
+----
+jlink --module-path target \
+  --add-modules httpEchoModule \
+  --launcher http-echo=httpEchoModule/de.jexp.jlink.HttpEcho \
+  --output echoRuntime
+
+echoRuntime/bin/http-echo
+# Ausgabe
+Jan 23, 2022 10:48:49 PM de.jexp.jlink.HttpEcho main
+INFO: status 200 ...
+----
+
+=== Zusätzliche Module JavaFX
+
+Falls zusätzliche Module benötigt werden die nicht (mehr) im JDK vorhanden sind, wie z.B. JavaFX, können diese bei der Analyse der Abhängigkeiten mit angegeben werden.
+
+JavaFX wurde nie ins OpenJDK übernommen, daher gibt es von Gluon im [OpenJFX] Projekt das [JavaFXSDK] zum Herunterladen mit den entsprechenden Modulen.
+
+Für `jdeps` und `jlink` können diese Module auf dem Modul-Pfad zusätzlich mit angegeben werden wie in Listing 11 zu sehen.
+
+.Listing 11 zusätzliche Module für JavaFX
+[source,shell]
+----
+jdeps --module-path $JAVAFX/javafx-sdk-11/lib --add-modules=javafx.controls --print-module-deps MyApp.jar
+
+jlink --no-header-files --no-man-pages --compress=2 --strip-debug \
+--add-modules java.desktop,java.logging,java.scripting,java.xml,\
+jdk.jsobject,jdk.unsupported,jdk.unsupported.desktop,jdk.xml.dom \
+—output java-runtime
+----
+
+=== JLink Maven Plugin
+
+Im realen Einsatz möchte man natürlich nicht `jlink` ständing auf der Kommandozeile ausführen, daher gibt es entsprechende Maven, Gradle, JReleaser Plugins bzw. die Möglichkeit es in einen Docker-Deploy-Build mit zu integrieren.
+
+Im folgenden sollen die Möglichkeiten kurz aufgezeigt werden, zuerst das [JlinkMavenPlugin].
+
+Diese Plugin erzeugt je nach Konfiguration (Listing 12) eine betriebssystemabhängige Zip-Datei mit der Runtime, der Anwendung und entsprechenden Startskripten.
+
+// https://blog.bmarwell.de/en/maven-jlink-plugin-version-3-1-0-released/
+
+
+////
+ This plugin is used to create a JLink distribution using Maven. It is as easy as creating a jar file, but will instead create a zip file containing a reduced Java Runtime along with a launcher script, as well as the actual application of course. A JLink zip file is therefore platform dependent.
+////
+
+.Listing 12 Maven Plugin Konfiguration
+[source,xml]
+----
+<project …>
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- benötigt extension=true im plugin-->
+  <packaging>jlink</packaging>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jlink-plugin</artifactId>
+        <version>3.1.0</version>
+        <extensions>true</extensions>
+        <configuration>
+          <noHeaderFiles>true</noHeaderFiles>
+          <noManPages>true</noManPages>
+          <stripDebug>true</stripDebug>
+          <launcher>http-echo=httpEchoModule/d.j.e.HttpEcho</launcher>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+----
+
+=== JLink Gradle Plugin
+
+Für Gradle gibt es 2 Plugins, eines für modulbasierte Anwendungen (`badass-jlink-plugin` [JlinkGradlePlugin]) und eines für den Rest (`badass-runtime-plugin`).
+
+Ihre Konfiguration (Listing 13 und 14) ist ähnlich, und hält keine Überraschungen bereit:
+
+.Listing 13 badass-runtime-plugin
+[source,groovy]
+----
+plugins {
+    id 'org.beryx.runtime' version '1.12.7'
+}
+...
+runtime {
+    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
+    modules = ['java.naming', 'java.xml']
+}
+----
+
+.Listing 14 badass-jlink-plugin
+[source,groovy]
+----
+plugins {
+    id 'org.beryx.jlink' version '2.24.4'
+}
+...
+jlink {
+    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
+    launcher{
+        name = 'hello'
+        jvmArgs = ['-Dlog4j.configurationFile=./log4j2.xml']
+    }
+}
+----
+
+////
+some noteworthy flags:
+
+--strip-debug this is going to strip debug symbols from both the native binaries and bytecode, you probably don't want to use this since this will remove all line numbers from stack traces. Its likely that the binaries of the JDK distribution you are using have most of their symbols already stripped.
+--strip-native-debug-symbols=objcopy=/usr/bin/objcopy Same as above, but only for native binaries
+--compress=0|1|2 0 for no compression, 1 for string deduplication, 2 for zip compressed modules. This might influence startup time slightly; see CDS section below
+--include-locales=langtag[,langtag]* include only a subset of locales instead of the full module
+--vendor-version="i made this" this looks uninteresting at first glance but it is very useful if you want to recognize your custom runtime again once you have multiple variants in containers. Adding domain name/project name or purpose of the base image helps.
+It will appear on the second line of the output of java -version
+full JDK as baseline
+MODS=ALL-MODULE-PATH
+
+# --compress=1
+138372 (151812 with CDS)
+
+# --compress=2
+102988 (116428 with CDS)
+
+# --compress=2 --strip-debug
+90848 (102904 with CDS)
+////
+
+////
+jdeps is excellent for porting classic classpath based applications to java modules. It analyzes jars and list all their dependencies, which can be other jars, or modules, with package granularity. Although we don't want to port the dusty application to the module system for this blog post, listing all the module dependencies is exactly what we need for jlink, to be able to create a custom java runtime.
+
+Thats it? Not quite. Analyzing an application like that won't show dependencies which are caused via reflection. So you will have to take a good look at the resulting modules and probably add some manually. A good candidate are jdk.crypto.* modules. jlink can assist with that task too by listing service providers.
+
+$JDK/bin/jlink --suggest-providers java.security.Provider
+Suggested providers:
+  java.naming provides java.security.Provider used by java.base
+  java.security.jgss provides java.security.Provider used by java.base
+  jdk.crypto.ec provides java.security.Provider used by java.base
+
+  You might also want to add modules like jdk.jfr, java.management or jdk.localedata even when the application isn't direclty depending on them. You can experiment with options like --compile-time which will usually list more dependencies (default is runtime analysis). jlink adds transitive dependencies automatically.
+////
+
+////
+== Beispiel Webserver
+
+jdk.httpserver
+
+[source,java]
+----
+var server = SimpleFileServer.createFileServer(new InetSocketAddress(8080), Path.of("."), OutputLevel.VERBOSE);
+server.start();
+
+var server = HttpServer.create(new InetSocketAddress(8080), 10, "/store/", new SomePutHandler());
+var handler = SimpleFileServer.createFileHandler(Path.of("/some/path"));
+server.createContext("/browse/", handler);
+server.start();
+
+A customized output filter can be added to a server during creation:
+
+var filter = SimpleFileServer.createOutputFilter(System.out,
+OutputLevel.INFO);
+var server = HttpServer.create(new InetSocketAddress(8080), 10, "/store/", new SomePutHandler(), filter);
+server.start();
+----
+////
+
+=== JReleaser
+
+Ein Tool das in den letzten Monaten viel Aufmerksamkeit bekommen hat, und auch einen zukünftigen Artikel verdient, ist [JReleaser] von Andres Almiray.
+
+Nach dem Vorbild von GoReleaser erlaubt es Java Anwendungen in vielfältiger Art und Weise zu publizieren.
+Die Paketierung wird dabei vor allem konfiguriert, JReleaser kümmert sich um die Ausführung der verschiedenen Build- und Paketierungs-Tools. 
+
+Beispiele für Release-Ziele sind:
+
+* Maven Central
+* Homebrew
+* RPM / Debian Packages
+* Docker Images
+* uvm.
+
+Der JLink [Assembler] erstellt die Runtime als Teil des Buildprozesses.
+
+Im Assembler gibt es vielfältige Konfigurationsoptionen für den Erstellungsprozess inklusive Bereitstellung verschiedener JDK-Versionen für Betriebssysteme, Argumente für `jdeps` und `jlink` sowie Benennung und Strukturierung von Artefakten.
+
+Hier ein Beispiel für eine Konfiguration:
+
+.Listing 15 - JReleaser JLink Assembler
+[source,yaml]
+----
+assemble:
+  jlink:
+    app:
+      active: always
+      mainJar:
+        path: 'target/{{distributionName}}-{{projectVersion}}.jar'
+      jdk:
+        path: /home/jdks/16.0.0-zulu-osx
+        platform: osx
+      targetJdks:
+        - path: /home/jdks/16.0.0-zulu-linux_x64
+          platform: linux
+----
+
+JReleaser unterstützt auch [JLink Distributionen] mit eigenen JDK Runtimes, die mittels `jlink` erstellt wurden.
+Dann wird keine JVM Installation auf dem Zielsystem vorgenommen bzw. vorausgesetzt.
+
+Da angepasste Runtimes betriebssystemspezifisch sind, müssen sie für verschiedene Zielsysteme bereitgestellt werden und als Zip-Datei in Distribution integriert werden.
+
+=== Docker Multistage Build
+
+Besonders auf Betriebssystemen auf denen die notwendigen Linux-JDK-Distributionen nicht so einfach zu handhaben sind und für Continuous-Integration-Systeme, sind auch multi-stage Docker-Builds eine Variante.
+
+Dabei werden in einer einzigen `Dockerfile` Datei mehrere Builds definiert die aufeinander aufbauen können.
+In Listing 16 ist zu sehen, wie eine eigene Runtime in einem openjdk Docker Image erzeugt und dann auf ein Linux-Image installiert wird.
+
+.Listing 16 Dockerfile
+[source,docker]
+----
+# Multi-stage Docker build
+FROM openjdk:17.0.2 as runtime-build
+
+# 1. Mittels Jlink eigenes JDK in "/custom-jdk" bauen
+RUN $JAVA_HOME/bin/jlink \
+         --add-modules java.base \
+         --strip-debug \
+         --no-man-pages \
+         --no-header-files \
+         --compress=2 \
+         --output /custom-jdk
+
+# Stage 2. Custom JDK in Debian JVM installieren
+FROM alpine:latest
+ENV LANG en_US.UTF-8
+ENV JAVA_HOME /usr/lib/jvm/custom-jdk
+ENV PATH "${JAVA_HOME}/bin:${PATH}"
+# Kopieren des vorher gebauten JDKs
+COPY --from=runtime-build /custom-jdk $JAVA_HOME
+
+# Anwendung kopieren und mittels des neuen JDK ausführen
+RUN mkdir /opt/app
+COPY hello.jar /opt/app
+CMD ["java", "-jar", "/opt/app/hello.jar"]
+----
+
+////
+javax.net.ssl.SSLHandshakeException: Received fatal alert: handshake_failure
+
+When using a library that attempts to establish a secure connection, make sure the module jdk.crypto.ec is included in the Java runtime.
+////
+
+=== Andere Tools
+
+Eine nützliche Idee ist [jlink.online], ein AdoptOpenJDK Service, der dynamisch via API Aufruf neue JDKs baut und ausliefert.
+
+So kann man mit einem `curl` Aufruf sich das Binary für ein eigenes JDK herunterladen, z.B. mittels `https://jlink.online/runtime/x64/linux/11.0.8+10?modules=java.desktop,jdk.zipfs`
+
+Damit kann auch der "multi-stage" Docker Build eingespart werden, und das notwendige JDK einfach beim Erstellen des Docker Images nach Bedarf hinzugefügt werden (siehe Listing 17).
+
+.Listing 17
+[source,docker]
+----
+FROM alpine:latest
+
+RUN apk add curl
+
+# custom JDK herunterladen und auspacken
+RUN curl -G 'https://jlink.online/runtime/x64/linux/17.0.2' \
+    -d modules=java.base \
+    | tar zxf -
+----
+
+Gunnar [Morling] hat einen interessanten Artikel zur Paketierung von Quarkus Anwendungen mit JLink und AppCDS (Class Data Sharing) verfasst, den ich empfehlen kann.
+
+== References
+
+* [JEP282] https://openjdk.java.net/jeps/282
+* [JlinkDocs]: https://docs.oracle.com/en/java/javase/15/docs/specs/man/jlink.html
+* [Morling] https://www.morling.dev/blog/smaller-faster-starting-container-images-with-jlink-and-appcds/
+* [dev.java] https://dev.java/learn/creating-runtime-and-application-images-with-jlink/
+* [MBien] https://mbien.dev/blog/entry/custom-java-runtimes-with-jlink
+* [Baeldung] https://www.baeldung.com/jlink
+* [OpenJFX] https://wiki.openjdk.java.net/display/OpenJFX/Main
+* [JavaFXSDK] https://gluonhq.com/products/javafx/
+* [jlink.online] https://github.com/AdoptOpenJDK/jlink.online
+https://mbien.dev/blog/entry/custom-java-runtimes-with-jlink
+* [JlinkMavenPlugin] https://maven.apache.org/plugins/maven-jlink-plugin/
+* [JlinkGradlePlugin] https://badass-jlink-plugin.beryx.org/releases/latest/
+// https://badass-runtime-plugin.beryx.org/releases/latest/
+* [Assembler] https://jreleaser.org/guide/latest/configuration/assemble/jlink.html
+* [JReleaser] https://jreleaser.org
+* [JLink Distributionen] https://jreleaser.org/guide/latest/distributions/jlink.html
