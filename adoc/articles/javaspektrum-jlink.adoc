@@ -17,10 +17,10 @@ Die JVM ist traditionell nicht besonders schlank, z.B. auf meinem System ist Jav
 Seit Java 9 sind mit dem "Java Platform Module System" (JPMS) [JEP 261] die Komponenten des JDK individuell als Plattform-Module verfügbar.
 Im selben Zuge wurde auch die JRE (Java Runtime Environment) als abgespeckte Variante des JDK abgeschafft.  
 
-Mit `java --list-modules` können diese angezeigt werden, hier in Listing 1 ist eine kleine Auswahl der über 70 Module zu sehen. 
-Neben den `java.\*` Modulen sind auch spezifische Module des JDK verfügbar `jdk.\*`.
+Mit `java --list-modules` können die Module angezeigt werden, hier in Listing 1 ist eine kleine Auswahl der über 70 Module zu sehen. 
+Neben den `+java.*+` Modulen sind auch spezifische Module des JDK verfügbar `+jdk.*+`.
 
-.Listing 1 - Vorhandene Java Module
+.Listing 1 - Im JDK vorhandene Java Module
 ----
 java.base@17
 java.compiler@17
@@ -177,10 +177,12 @@ Hallo.class -> java.base
 jdeps -s hallo.jar
 # Ausgabe: Hallo.class -> java.base
 
+# voherigen Lauf aufräumen
 rm -rf hallo-jdk
 
 jlink -v --add-modules java.base \
- --compress=2 --strip-debug --no-header-files --no-man-pages\
+ --compress=2 --strip-debug --no-header-files \
+ --no-man-pages \
  --output ./hallo-jdk
 
 du -sh ./hallo-jdk
@@ -189,7 +191,7 @@ du -sh ./hallo-jdk
 In der Tabelle 1 können die Auswirkungen der verschiedenen Optionen zur Platzeinsparung nachvollzogen werden.
 
 .Tablle 1 Größenvergleich
-[.opts=header]
+[opts=header,%autowidth]
 |===
 | Optionen | Größe (MB)
 | <keine> | 41
@@ -212,6 +214,7 @@ module httpEchoModule {
 ----
 
 .Listing 6 HttpEcho.java
+[source,java]
 ----
 package de.jexp.jlink;
 
@@ -224,6 +227,7 @@ public class HttpEcho {
     private static Logger LOG = Logger.getLogger("echo");
 
     public static void main(String...args) throws Exception {
+        // GET Request zu postman echo service
         var request = HttpRequest.newBuilder()
         .uri(new URI("https://postman-echo.com/get"))
         .GET().build();
@@ -272,22 +276,23 @@ httpEchoModule -> java.net.http
 # Eigene Runtime erstellen für unser Modul
 jlink --module-path target \
   --add-modules httpEchoModule \
-  --output echoRuntime
+  --output ./echoRuntime
 ----
 
 Im Listing 9 wird gezeigt welche Module in unserer neuen Runtime vorhanden sind, und dass unsere Anwendung darin problemlos ausgeführt werden kann.
+Neben den Java Plattform Modulen ist auch das Modul unserer Anwendung integriert.
 
 .Listing 9 - Test der erstellten Runtime für die modulare Anwendung
 [source,shell]
 ----
 # welche Module sind in der neuen Runtime vorhanden
-echoRuntime/bin/java --list-modules 
+./echoRuntime/bin/java --list-modules 
 hwModule
 java.base@17
 java.logging@17
 
 # Ausführen unseres Moduls in der erstellten Runtime
-echoRuntime/bin/java --module httpEchoModule/de.jexp.jlink.HttpEcho
+./echoRuntime/bin/java --module httpEchoModule/de.jexp.jlink.HttpEcho
 Jan 23, 2022 10:23:03 PM de.jexp.jlink.HttpEcho main
 INFO: status 200
 Jan 23, 2022 10:23:03 PM de.jexp.jlink.HttpEcho main
@@ -304,15 +309,15 @@ In Listing 10 wird das verdeutlicht.
 jlink --module-path target \
   --add-modules httpEchoModule \
   --launcher http-echo=httpEchoModule/de.jexp.jlink.HttpEcho \
-  --output echoRuntime
+  --output ./echoRuntime
 
-echoRuntime/bin/http-echo
+./echoRuntime/bin/http-echo
 # Ausgabe
 Jan 23, 2022 10:48:49 PM de.jexp.jlink.HttpEcho main
 INFO: status 200 ...
 ----
 
-=== Zusätzliche Module JavaFX
+=== Zusätzliche Module wie JavaFX
 
 Falls zusätzliche Module benötigt werden die nicht (mehr) im JDK vorhanden sind, wie z.B. JavaFX, können diese bei der Analyse der Abhängigkeiten mit angegeben werden.
 
@@ -323,12 +328,16 @@ Für `jdeps` und `jlink` können diese Module auf dem Modul-Pfad zusätzlich mit
 .Listing 11 zusätzliche Module für JavaFX
 [source,shell]
 ----
-jdeps --module-path $JAVAFX/javafx-sdk-11/lib --add-modules=javafx.controls --print-module-deps MyApp.jar
+jdeps --module-path $JAVAFX/javafx-sdk-11/lib \
+      --add-modules=javafx.controls \
+      --print-module-deps MyApp.jar
 
-jlink --no-header-files --no-man-pages --compress=2 --strip-debug \
---add-modules java.desktop,java.logging,java.scripting,java.xml,\
-jdk.jsobject,jdk.unsupported,jdk.unsupported.desktop,jdk.xml.dom \
-—output java-runtime
+jlink --no-header-files --no-man-pages --compress=2 \
+      --strip-debug --add-modules java.desktop,\
+      java.logging,java.scripting,java.xml,\
+      jdk.jsobject,jdk.unsupported,\
+      jdk.unsupported.desktop,jdk.xml.dom \
+      —output java-runtime
 ----
 
 === JLink Maven Plugin
@@ -510,7 +519,7 @@ assemble:
 JReleaser unterstützt auch [JLink Distributionen] mit eigenen JDK Runtimes, die mittels `jlink` erstellt wurden.
 Dann wird keine JVM Installation auf dem Zielsystem vorgenommen bzw. vorausgesetzt.
 
-Da angepasste Runtimes betriebssystemspezifisch sind, müssen sie für verschiedene Zielsysteme bereitgestellt werden und als Zip-Datei in Distribution integriert werden.
+Da angepasste Runtimes betriebssystemspezifisch sind, müssen sie für verschiedene Zielsysteme bereitgestellt werden und als Zip-Datei in die Distribution integriert werden.
 
 === Docker Multistage Build
 
@@ -535,7 +544,7 @@ RUN $JAVA_HOME/bin/jlink \
          --output /custom-jdk
 
 # Stage 2. Custom JDK in Debian JVM installieren
-FROM alpine:latest
+FROM debian:buster-slim
 ENV LANG en_US.UTF-8
 ENV JAVA_HOME /usr/lib/jvm/custom-jdk
 ENV PATH "${JAVA_HOME}/bin:${PATH}"
