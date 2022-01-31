@@ -14,7 +14,7 @@ Das kann mit `jlink` dem Java Linker erfolgen, den wir uns heute genauer anschau
 
 Die JVM ist traditionell nicht besonders schlank, z.B. auf meinem System ist Java 17, 298 MB gross, neben den Kommandozeilentools wie `java`, `javac` usw. wird der meiste Platz von JDK- und nativen Bibliotheken eingenommen.
 
-Seit Java 9 sind mit dem "Java Platform Module System" (JPMS) [JEP 261] die Komponenten des JDK individuell als Plattform-Module verfügbar.
+Seit Java 9 sind mit dem "Java Modulsystem" [JEP 261] die Komponenten des JDK individuell als Plattform-Module verfügbar.
 Im selben Zuge wurde auch die JRE (Java Runtime Environment) als abgespeckte Variante des JDK abgeschafft.  
 
 Mit `java --list-modules` können die Module angezeigt werden, hier in Listing 1 ist eine kleine Auswahl der über 70 Module zu sehen. 
@@ -44,7 +44,7 @@ jdk.random@17
 
 Für das Deployment von Anwendungen als Container oder Installation auf Systemen (Server und Desktop) kann es sinnvoll sein, die JVM auf die benötigten Module zu verkleinern.
 
-Wenn der JVM weninger Plattform-Module zur Verfügung stehen, können diese auch nicht geladen werden, und benötigen keinen Speicher für Klassen- und Modul-Metadata.
+Wenn der JVM weniger Plattform-Module zur Verfügung stehen, können diese auch nicht geladen werden, und benötigen keinen Speicher für Klassen- und Modul-Metadaten.
 
 Mit `jlink` dem "Java Linker" [JEP-282] kann seit Java 9 eine Selektion von Modulen vorgenommen werden, die die Abhängikeiten der konkreten Anwendung darstellt, und diese zusammen mit den regulären Tools in ein eigenes, minimales aber eigenständiges JVM-Artefakt packt.
 
@@ -66,7 +66,7 @@ Unless any problems like missing or duplicate modules are encountered, the resol
 
 Alle Java Runtimes benötigen das `java.base` Modul. 
 
-Damit können wir also direkt eine minimale Runtime erstellen, die beim Ausführen von `--list-modules` auch nur dieses Modul als verfügbar anzeigt, wie in Listing 2 gezeigt.
+Damit können wir also direkt eine minimale Runtime erstellen, die beim Ausführen von `--list-modules` auch nur dieses Modul als verfügbar anzeigt, wie in Listing 2 gezeigt (alle Beispiele mit Java 17, diese Kommandozeilensyntax ab Java 10).
 
 .Listing 2 - Minimales JDK mit java.base
 [source,shell]
@@ -94,11 +94,14 @@ jlink \
 | --include-locales="en,de" | Welche Sprachversionen sollen integriert werden (benötigt Modul `jdk.localedata`)
 |===
 
+Es ist zu beachten, dass (wie auch das JDK) die erstellten Runtimes betriebssystemspezifisch sind.
+JLink kann aber auch Runtimes für andere Betriebssysteme erstellen, siehe [MultiOS]
+
 === Voraussetzungen der Anwendung
 
 Die Vorraussetzung für solch eine Selektion ist, dass die eigene Anwendung entweder schon im Modulpfad definiert ist, oder für ältere Anwendungen die Abhängigkeiten auf dem Classpath mit Tools wie `jdeps` festgestellt werden können.
 
-Wie schon bei nativen Images mittels GraalVM sind indirekte Nutzung von APIs wie z.B. mittels Reflection oder Methodhandles nicht festzustellen und müssten manuell hinzugefügt werden.
+Wie schon bei nativen Images mittels GraalVM sind indirekte Nutzung von APIs wie z.B. mittels Reflection oder Methodhandles nicht festzustellen und müssten manuell hinzugefügt werden [ReflectionParlog].
 
 ////
 ----
@@ -247,6 +250,7 @@ Im Anschluss kompilieren wir beide Dateien auf dem Modul-Pfad und führen sie te
 .Listing 7 - Kompilieren und Ausführen des HttpEcho Demos
 [source,shell]
 ----
+# Kann auch zusammen kompiliert werden
 javac -d target module-info.java
 javac -d target --module-path target HttpEcho.java
 
@@ -290,6 +294,7 @@ Neben den Java Plattform Modulen ist auch das Modul unserer Anwendung integriert
 hwModule
 java.base@17
 java.logging@17
+java.net.http@17
 
 # Ausführen unseres Moduls in der erstellten Runtime
 ./echoRuntime/bin/java --module httpEchoModule/de.jexp.jlink.HttpEcho
@@ -589,7 +594,7 @@ Gunnar [Morling] hat einen interessanten Artikel zur Paketierung von Quarkus Anw
 == References
 
 * [JEP282] https://openjdk.java.net/jeps/282
-* [JlinkDocs]: https://docs.oracle.com/en/java/javase/15/docs/specs/man/jlink.html
+* [JlinkDocs]: https://dev.java/learn/jlink---assemble-and-optimize-a-set-of-modules/
 * [Morling] https://www.morling.dev/blog/smaller-faster-starting-container-images-with-jlink-and-appcds/
 * [dev.java] https://dev.java/learn/creating-runtime-and-application-images-with-jlink/
 * [MBien] https://mbien.dev/blog/entry/custom-java-runtimes-with-jlink
@@ -604,3 +609,5 @@ https://mbien.dev/blog/entry/custom-java-runtimes-with-jlink
 * [Assembler] https://jreleaser.org/guide/latest/configuration/assemble/jlink.html
 * [JReleaser] https://jreleaser.org
 * [JLink Distributionen] https://jreleaser.org/guide/latest/distributions/jlink.html
+* [ReflectionParlog] https://stackoverflow.com/questions/70664036/find-the-missing-module/70733470#70733470
+* [MultiOS] https://dev.java/learn/creating-runtime-and-application-images-with-jlink/#cross-os
