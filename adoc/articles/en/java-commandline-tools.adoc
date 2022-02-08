@@ -3,26 +3,27 @@
 
 image::https://www.dieckmann-aroma-kaffee.de/images/blog/kaffeemuehle.jpg[]
 
-In the book "97 Things every Java Programmer should know" (I contributed 2 of the 97 tips) there is a chapter about some command line tools in the JDK.
+In the book "https://medium.com/97-things[97 Things every Java Programmer should know^]" (I contributed 2 of the 97 tips) there is a chapter about some command line tools in the JDK.
 
 Since I make heavy use of such helpers myself, I wanted to briefly introduce them in today's article.
 
 Personally I prefer the command line for my daily work, using the combination of `git`, `sed`, `grep`, `bash` commands etc. makes recurring tasks easier.
 
-Already in the "Pragmatic Programmer" [PragProg], there was a clear reference to this in section 21:
+Already in the "https://pragprog.com/titles/tpp20/[Pragmatic Programmer^]", there was a clear reference to this in section 21:
 
 ____
 Use the Power of Command Shells+
 Use the shell when graphical user interfaces don't cut it.
 ____
 
-I would also like to refer to the book "Productive Programmer" [NealFord].
+I would also like to refer to the book "https://www.oreilly.com/library/view/the-productive-programmer/9780596519780/[Productive Programmer^]"  by NealFord.
+
 
 You don't have to be afraid of the command line, it's like any programming language, you execute commands or scripts and can combine their inputs and outputs to more complex processes.
-On Linux and OSX you are well served with the built-in bash or zsh, on Linux you can be happy either on the `cmd` prompt or since recently with the Linux Subsystem for Windows (WLS).
+On Linux and OSX you are well served with the built-in bash or zsh, on Windows you can be happy either on the `cmd` prompt or since recently with the Windows Subsystem for Linux (WSL).
 
 Most of the tools come with a built-in help with the `-h` parameter, or provide help pages using `man <commandoname>`.
-These can also be found on the Oracle website [ManPages].
+These https://docs.oracle.com/en/java/javase/14/docs/specs/man/[manpages can also be found on the Oracle website^].
 
 == Managing installations with SDKman
 
@@ -33,19 +34,19 @@ To do this you install sdkman e.g. with: `curl -s "https://get.sdkman.io" | bash
 After that `sdk list` shows the installable tools and with `sdk list java` you can see available and installed versions of JDKs.
 You have a wide choice from OpenJDK over Azul Zuulu, GraalVM to Amazon and SAP JDKs.
 
-With e.g. `sdk install java 14.0.1-zulu` you can install new versions (up to the last EAP) and with `sdk use java 15.ea.27-open` you can switch for the current shell or globally.
+With e.g. `sdk install java 17-open` you can install new versions (up to the last EAP) and with `sdk use java 17-open` you can switch for the current shell or globally.
 
 == Simple helpers
 
 In every JRE and JDK there are a lot of useful helpers in the `bin` directory of the distribution besides the `javac` compiler and the `java` runtime environment.
-Some of them, like jarsigner or keytool are very special and I will not go into them here.
+Some of them, like `jarsigner` or `keytool` are very special and I will not dive into them here.
 We will start with some useful tools and then give the more complex ones a separate section each.
 
 === jps
 
 If you want to get rid of a hanging Java process you can either search for it in the TaskManager and close it there, or find the PID (Process ID) with `ps auxww | grep java` and then terminate it with `kill <pid>`.
 
-Instead, the built-in `jps` can do the same service.
+Instead, the built-in `jps` can provide the same service.
 Additional options are `-l` for FQN of main class or path to startup JAR, `-v` for JVM arguments, and `-m` for command line arguments for `main` method.
 
 === jstack
@@ -53,7 +54,7 @@ Additional options are `-l` for FQN of main class or path to startup JAR, `-v` f
 To get a thread dump of a JVM, especially if it is stuck at a point you want to examine more closely, there are 2 ways.
 Either a `kill -3 <pid>` produces the output directly from the process, or better with `jstack <pid>`.
 
-Thereby jstack can also force stalled processes to output with the "force" `-F` flag, which you can then redirect to a file for example.
+Thereby jstack can also force stalled processes to output with the "force" `-F` flag, which you can then redirect to a file.
 With `jstack -l <pid>` you get additional output about locks, deadlocks are also shown.
 
 The status of the threads differs between `kill -3` and `jstack`.
@@ -72,7 +73,6 @@ Using `jinfo` you can quickly access system properties, JVM flags, and JVM argum
 
 A `jinfo <pid>` gives a complete overview, which can help in detecting strange effects.
 Using `jinfo <pid> -flag name=value` or `-flag [+|-]name` you can change dynamic JVM flags.
-// todo, example
 
 === jshell
 
@@ -93,13 +93,13 @@ Better readable is to use `var` from Java 11 on, then variables can be created w
 New language features that are still available in preview mode can be enabled `--enable-preview`.
 
 A very handy feature of `jshell` is the auto-completion. 
-Each class, method and variable name can be contextually completed by pressing <tab> several times.
+Each class, method and variable name can be contextually completed by pressing kbd:[Tab] several times.
 
 Here is an example to run Game of Life (Rest in Peace - John Conway) in `jshell`.
 
 [source,java]
 ----
-// GOL Regeln: Zelle lebt, wenn am Leben + 2,3 Nachbarn oder 3 Nachbarn
+// GOL Rules: Cell is alive, if it was alive and has 2 or 3 living neighbours or always with 3 living neighbours
 import static java.util.stream.IntStream.range;
 import static java.util.stream.Collectors.*;
 import static java.util.function.Predicate.*;
@@ -155,7 +155,7 @@ Set<Cell> parse(String s) {
 
 To deal with jar files (Java ARchive) there is a command of the same name.
 The command line syntax is similar to the `tar` command.
-While `tar` only stores files in an archive, `jar` also compresses them which leads to a significant reduction in size.
+While `tar` by default only stores files in an archive, `jar` also compresses them which leads to a significant reduction in size.
 
 Here are some useful applications:
 
@@ -171,7 +171,7 @@ The Java command starts the Java Virtual Machine, with the given classpath (dire
 
 With `java -jar file.jar` the main class is determined from the meta information of the jar file instead.
 
-Since Java 11 JEP 330 is available, so source files can be executed directly.
+Since Java 11, https://openjdk.java.net/jeps/330[JEP 330^] is available, so source files can be executed directly.
 
 [source,java]
 ----
@@ -201,21 +201,27 @@ chmod +x hello
 ./hello JEP 330
 ----
 
-The JVM can be controlled with hundreds of flags [JVMFlags], from memory allocation with `-Xmx` and `-Xms` to garbage collector selection with `-XG1GC` and log settings.
+The JVM can be controlled with https://foojay.io/command-line-arguments/[hundreds of flags^], from memory allocation with `-Xmx` and `-Xms` to garbage collector selection with `-XG1GC` and log settings.
+A collection of resources on JVM flags was published by https://foojay.io/today/top-10-fun-with-jvm-flags/[[Betsy Rhodes on Foojay^]
 
 A few useful flags follow, the list represents only a fraction of the JVM options.
 
-- `HeapDumpOnOutOfMemory`
-- ...
+- `HeapDumpOnOutOfMemoryError`
+- `Xshareclasses` - Class Data Sharing
+- `verbose:gc` - GC logging
+- `+TraceClassLoading`
+- `+UseCompressedStrings`
 
 == Javac
 
 The `javac` compiler translates Java source code into one or more class files, containing the bytecode of the classes, performing initial optimizations and triggering the processing of annotations by "annotation processors".
-To specify all classes on which the current code depends, they or their archives must be listed in the classpath.
+To specify all classes on which the current code depends, they or their archives must be listed on the classpath or module-path.
+
+Going deeper into `javac` would require its own article so we leave it at the honorable mention.
 
 == JavaP
 
-Whenever you want to examine the result of Javac, `javap` comes into play.
+Whenever you want to examine the result of `javac`, `javap` comes into play.
 This tool allows to display the signature of a class, its memory layout with `-l -v -constants` and with `-c` the bytecode instructions of the JVM stack language.
 This can be useful if you want to see the effect of certain compiler options or Java versions, or if the behavior of optimizations has changed (inlining size).
 
@@ -228,10 +234,10 @@ javap -c Hello
 
 Compiled from "Hello.java"
 public class Hello {
-  // Konstruktor mit Super-Konstruktor Aufruf
+  // Constructor with Super-Constructor call
   public Hello();
     Code:
-       // lade "this" auf Stack
+       // load "this" on stack
        0: aload_0
        4: return
 
@@ -239,10 +245,10 @@ public class Hello {
     Code:
        0: getstatic     #7                  // Field java/lang/System.out:Ljava/io/PrintStream;
        3: ldc           #13                 // String
-       // lade 1. Parameter auf den Stack, also "args"
+       // load first parameter on stack, i.e. "args"
        5: aload_0
        6: invokestatic  #15                 // Method java/lang/String.join:(Ljava/lang/CharSequence;[Ljava/lang/CharSequence;)Ljava/lang/String;
-       // Stringverkettung
+       // string concatenation
        9: invokedynamic #21,  0             // InvokeDynamic #0:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
       14: invokevirtual #25                 // Method java/io/PrintStream.println:(Ljava/lang/String;)V
       17: return
@@ -261,7 +267,7 @@ Currently it is recommended to use `jcmd`.
 === JCMD
 
 Using `jcmd` Java processes can be controlled remotely, there are quite a few actions that can be triggered in the JVM.
-jcmd can be used interactively or by command line parameters.
+`jcmd` can be used interactively or by command line parameters.
 
 Using `jcmd <pid/main-class> <command>` the specific actions can be triggered, multiple commands are separated with newlines.
 Thereby `jcmd <pid/main-class> help` gives information about which commands are possible.
@@ -280,22 +286,22 @@ Here are a few examples:
 
 [opts=header,cols="m,a"]
 |===
-| Kommando | Beschreibung
-| GC.class_stats | Detaillierte Informationen über alle geladene Klassen
-| GC.class_histogram | Histogramm für Klassenanzahl
-| GC.heap_dump filename=<file> | Heapdump erzeugen
-| GC.heap_info | Übersicht über Nutzung des Heaps
-| GC.run | Garbage Collection auslösen
-| Thread.print | Thread Dump ausgeben
-| JFR.start name=<name> settings=<settings> delay=20s duration=2m | Java Flight Recorder Aufzeichnung starten
-| JFR.dump name=<name> filename=<file> | JFR Dump erzeugen
-| VM.uptime | Laufzeit der JVM
-| VM.flags | Gesetzte JVM Flags
+| Command | Description
+| GC.class_stats | Detail information on all loaded classes
+| GC.class_histogram | Histogramm for instance counts
+| GC.heap_dump filename=<file> | Create heapdump
+| GC.heap_info | Overview of heap usage
+| GC.run | Trigger Garbage Collection
+| Thread.print | Output thread dump
+| JFR.start name=<name> settings=<settings> delay=20s duration=2m | Start JDK Flight Recorder Recording
+| JFR.dump name=<name> filename=<file> | Create JFR Dump
+| VM.uptime | Runtime of the JVM
+| VM.flags | Active JVM Flags
 | VM.system_properties | System Properties
-| VM.command_line | Kommandozeile der JVM
+| VM.command_line | Command line of the JVM
 | VM.version | JVM version
-| VM.class_hierarchy | Visuelle Ausgabe der Klassenhierarchie
-| VM.log | Detaillierte Steuerung des Logging
+| VM.class_hierarchy | visual output of the class hierarchy
+| VM.log | Control JVM logging
 | 
 |===
 
@@ -380,12 +386,12 @@ VM.check_commercial_features
 VM.unlock_commercial_features
 ////
 
-== Java Flight Recorder (jfr)
+== JDK Flight Recorder (jfr)
 
-Java Flight Recorder is a runtime tracing mechanism that allows to record various events of activities that take place in the JVM and correlate them with the activity of the application.
-Everything from JIT optimizations, garbage collection, safepoints and even custom evetns are possible.
+JDK Flight Recorder is a runtime tracing mechanism that allows to record various events of activities that take place in the JVM and correlate them with the activity of the application.
+Everything from JIT optimizations, garbage collection, safepoints and even custom events are possible.
 
-The `jfr` tool allows to read and display Java Flight Recorder files (`print`, `summary` and `metadata`).
+The `jfr` tool allows to read and display JDK Flight Recorder files (`print`, `summary` and `metadata`).
 This can be done in a readable text format or JSON/XML (`--json, --xml`).
 
 * `print` represents the whole event log
@@ -420,7 +426,7 @@ jfr summary /tmp/test.jfr
 To limit the amount of information categories can be filtered via `--categories "GC,JVM,Java*"` and events via `--events CPULoad,GarbageCollection` or `--events "jdk.*"`.
 Unfortunately this is not possible with summary or metadata, only with `print`.
 
-The better tool to evaluate JFR records is of course Mission Control [JMC], which is released as OpenSource since Java 11? and is also offered by other vendors like Azul [ZuluMC].
+The better tool to evaluate JFR records is of course https://adoptopenjdk.net/jmc.html[JDK Mission Control (JMC)^], which was released as OpenSource since Java 11 and is also offered https://www.azul.com/products/zulu-mission-control/[by other vendors like Azul^].
 
 image::https://i.imgur.com/VE3MaNh.png[]
 
@@ -458,25 +464,18 @@ jdeprscan --release 11 --list | cut -d' ' -f 3- | cut -d. -f1-3 | sort | uniq -c
 
 == Other tools
 
-There are of course many more important tools for working with the JVM, from `async-profiler` and `jol` (Java Object Layout) to graphical programs for parsing and displaying GC logs (gceasy.io), JFR recordings (jmc) or heap dumps (jvisualvm, Eclipse-MAT).
+There are of course many more important tools for working with the JVM, from `async-profiler` and `jol` (Java Object Layout) to graphical programs for parsing and displaying GC logs (https://gceasy.io), JFR recordings (jmc) or heap dumps (jvisualvm, Eclipse-MAT).
 
-Other tools like the Java debugger `jdb` are far inferior to the capabilities of the IDEs for convenient debugging, whether on the local or remote machines.
+Other tools like the Java debugger `jdb` are not as comfortable as the capabilities of the IDEs for convenient debugging, whether on the local or remote machines.
 
 == Conclusion
 
 The helpers that come with the JDK can make your life easier if you know about their capabilities and how to combine them with each other and other shell tools.
 It is definitely worth trying them out and learning more about them.
 
+////
 == References
 
-* [JEP330] https://openjdk.java.net/jeps/330
-* [HotspotTuning] https://ionutbalosin.com/2020/01/hotspot-jvm-performance-tuning-guidelines/
-* [JMC] https://adoptopenjdk.net/jmc.html
-* [ZuluMC] https://www.azul.com/products/zulu-mission-control/
-* [NealFord] https://www.oreilly.com/library/view/the-productive-programmer/9780596519780/
-* [PragProg] https://pragprog.com/titles/tpp20/
-* [ManPages] https://docs.oracle.com/en/java/javase/14/docs/specs/man/
-////
 https://docs.oracle.com/en/java/javase/14/docs/specs/man/jar.html
 https://docs.oracle.com/en/java/javase/14/docs/specs/man/java.html
 https://docs.oracle.com/en/java/javase/14/docs/specs/man/javap.html
