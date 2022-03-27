@@ -1,14 +1,14 @@
 == Bernsteinschatz - Muster, Switch, Records und Sealed Classes in Modernem Java
 
 
-Ein Bereich dem ich in der letzten Zeit nicht soviel Aufmerksamkeit gewidmet habe, ist die massive Verbesserung der, `switch` und `instanceof` Operationen in Java seit Version 14, die einhergehend mit Records [Hunger0220] und "sealed classes" viel mächtigere deklarative Konstrukte werden.
+Ein Bereich, dem ich in der letzten Zeit nicht soviel Aufmerksamkeit gewidmet habe, ist die massive Verbesserung der `switch` und `instanceof` Operationen in Java seit Version 14, die einhergehend mit Records [Hunger0220] und "sealed classes" viel mächtigere deklarative Konstrukte wurden.
 
 Der Vortrag von José [Paumard] zu diesem Thema hat mich ziemlich beeindruckt, ich hatte davon nur einen Bruchteil der Features erwartet.
 Einiges davon ist schon in Java 18 verfügbar, anderes noch in Preview oder Diskussion, aber die Möglichkeiten die sich aus diesen Bausteinen des [Amber]-Projekts auftun, sind sehr umfänglich.
 
 image::https://upload.wikimedia.org/wikipedia/commons/2/27/%D0%9D%D0%B0%D1%81%D0%B5%D0%BA%D0%BE%D0%BC%D1%8B%D0%B5_%D0%B2_%D1%8F%D0%BD%D1%82%D0%B0%D1%80%D0%B5._%D0%AF%D0%BD%D1%82%D0%B0%D1%80%D0%BD%D1%8B%D0%B9_%D0%B8%D0%BD%D0%BA%D0%BB%D1%8E%D0%B7_02.jpg[]
 
-Damit wird es möglich in Java bequem Dekonstruktion von komplexen Datentypen vorzunehmen, wie ich es in anderen Sprachen wie Kotlin und Clojure in vergangenen Kolumnen [Hunger17] schon gezeigt habe.
+Damit wird es möglich werden in Java bequem Dekonstruktion von komplexen Datentypen vorzunehmen, wie ich es in anderen Sprachen wie Kotlin und Clojure in vergangenen Kolumnen [Hunger17] schon gezeigt habe.
 
 Operationen auf abstrakte Datentypen (Abstract Data Types) mittels "sealed classes" können komplexe Berechnungen, Regeln und Teilsprachen ausdrücken, die "komplett" sind, d.h. keine Lücken im Eingabewertbereich erlauben.
 
@@ -57,7 +57,7 @@ if (value instanceof Movie m && m.title().startsWith("F"))
 // Film Forrest Gump veröffentlicht 1994
 ----
 
-Für genrics funktioniert das leider nicht, aber für Felder (Listing 4).
+Für Collection-Typen mit Generics funktioniert das leider nicht, aber für Felder (Listing 4).
 
 .Listing 4 - Instanceof für Felder und Listen
 [source,java]
@@ -75,10 +75,10 @@ if (value instanceof Movie[] movies && movies.length>0) {
 // Film Encanto veröffentlicht 2022
 ----
 
-Pattern Variablen, werden vom Compiler lokale Variablen in einer Methode oder Block behandelt, d.h. sie können andere Variablen verstecken (shadow) und ihnen kann auch ein neuer Wert zugewiesen werden.
-Ich persönlich finde gerade letzteres nicht sinnvoll und hätte eine `final` Deklaration für die Variable für sinnvoll gehalten, besondern da diese ein neues Konstrukt darstellen und man hier nicht die Fehler der Vergangenheit wiederholen sollte.
+Pattern Variablen, werden vom Compiler wie lokale Variablen in einer Methode oder Block behandelt, d.h. sie können andere Variablen verstecken (shadow) und ihnen kann auch ein neuer Wert zugewiesen werden.
+Ich persönlich finde gerade letzteres nicht sinnvoll und hätte eine `final` Deklaration für die Variable für sinnvoll gehalten, besonders da diese ein neues Konstrukt darstellen und man hier nicht die Fehler der Vergangenheit wiederholen sollte.
 
-Das "Shadowing" ist auch ungünstig, da der Gültigkeitsbereich der Variablen auf dem Block nach, bzw. innerhalb der erfolgreichen `instanceof` Bedingung beschränkt ist, siehe Listing 5. 
+Das "Shadowing" zu erlauben ist auch ungünstig, da der Gültigkeitsbereich der Variablen auf dem Block nach, bzw. innerhalb der erfolgreichen `instanceof` Bedingung beschränkt ist, siehe Listing 5. 
 
 .Listing 5 - Shadowing Problem
 [source,java]
@@ -99,17 +99,17 @@ class StarInfo {
 
 == Switch Ausdrücke
 
-Switch war in Java immer sehr limitiert, ursprünglich nur auf Gleichkeit konkreter, konstanter Werte primitiver Typen und Strings, dann erweitert um Enums.
+Switch war in Java immer sehr limitiert, ursprünglich nur auf Gleichkeit konkreter, konstanter Werte primitiver Typen und Strings, dann erweitert um Enums in Java 5.
 
 Die `switch` Struktur ist seit Java 14 mit dem [JEP361] nicht mehr nur ein imperatives Konstrukt, sondern kann auch als Ausdruck benutzt werden.
-Ich hatte das bisher über extrahierte Berechnunges-Methoden und  ein `return` im `switch` Konstrukt realisiert.
+Ich hatte das bisher meist über extrahierte Berechnungs-Methoden und  ein `return` im `switch` Konstrukt realisiert.
 
 Der Hauptunterschied für den Switch-Ausdruck ist der Ersatz von Doppelpunkt nach dem `case` durch einen Pfeil `+->+`, und dass das Ergebnis jetzt idealerweise einer Variablen oder Rückgabewert zugewiesen werden sollte, damit es genutzt werden kann. 
 
 Für komplexere Ausdrücke mit mehreren "Rückgabepunkten" in einem Zweig, kann das `yield` Schlüsselwort benutzt werden.
 Beides ist in Listing 6 zu sehen.
 
-.Listing 6 - Switch Ausdrücker
+.Listing 6 - Switch Ausdrücke
 [source,java]
 ----
 var ergebnis = switch (antwort) {
@@ -125,7 +125,7 @@ Damit können auch Kaskaden von `if-else-if-else` kompakt als Switch-Ausdruck um
 
 Im "Pattern Matching for switch" [JEP406] [JEP420], das mit Java 17 und 18 als (Preview Feature) veröffentlicht wurde, sollte die Flexibilität des Pattern Matchings aus dem `instanceof` auf `switch` Statements und Ausdrücke übertragen werden.
 
-Damit könnten im Werte kompakt mit mehreren komplexeren Bedingungen (hier Muster genannt) überprüft werden, einen pro case-Zweig, was für analytische Anwendungszwecke und Geschäftsregeln hilfreich wäre.
+Dabei könnten im Werte kompakt mit mehreren komplexeren Bedingungen (hier Muster genannt) überprüft werden, einen pro case-Zweig, was für analytische Anwendungszwecke und Geschäftsregeln hilfreich wäre.
 
 Damit wird der Geltungsbereich für Switch-Argumente von Strings, primitiven Werten und Enums auf beliebige Referenzen inklusive Arrays erweitert. 
 Es muss nur sichergestellt werden, dass die Ausdrücke der Muster kompatibel zum Basistyp der Referenz sind.
@@ -136,7 +136,7 @@ Es muss nur sichergestellt werden, dass die Ausdrücke der Muster kompatibel zum
 // type patterns
 // any type
 
-Zum einen wären da Typausdrücke wie in Listing 7, diese können auch wie bisher mit Komma separiert für einen Zweig zusammengefasst werden.
+Zum einen wären da Typausdrücke wie in Listing 7, sie können auch wie bisher mit Komma separiert für einen Zweig zusammengefasst werden.
 
 .Listing 7 - Typ-Ausdrücke in Switch-Zweigen
 [source,java]
@@ -152,10 +152,10 @@ double zahl = switch (value) {
 Diese können, wie in Listing 8 gezeigt, mit Zusatzbedingungen (guard clauses) ergänzt werden.
 Für komplexere Ausdrücke können diese auch geklammert und mit booleschen Operatoren kombiniert werden.
 
-Ohne `default` Zweig wird der Ausdruck nicht kompiliert, da nicht alle "Subklassen" von `Objekt` abgehandelt wurden.
-Im Allgemeinen müssen Subklassen nach ihren Superklassen gelistet werden, um Compiler-Fehler zu vermeiden, wie in unserem Fall `Number` nach `Double`.
+Ohne `default` Zweig wird der Ausdruck nicht kompiliert, da nicht alle "Subklassen" von `Object` abgehandelt wurden.
+Im Allgemeinen müssen Subklassen vor ihren Superklassen gelistet werden, um Compiler-Fehler zu vermeiden, wie in unserem Fall `Double` vor `Number`.
 
-Früher gab `null` immer eine `NullpointerException`, jetzt kann es explizit gehandhabt werden, damit die Exception nicht auftritt.
+Früher gab `null` immer eine `NullPointerException`, jetzt kann es explizit gehandhabt werden, damit die Exception nicht auftritt.
 
 .Listing 8 - Typausdrücke mit Zusatzbedingungen
 [source,java]
@@ -226,7 +226,7 @@ Wie auch mit bisherigen Switch-Strukturen müssen mit Muster-Checks auch alle M�
 
 Sealed classes [JEP409] (seit Java 17) sind ein Feature das die Anzahl der Subklassen einer Klasse oder Interfaces begrenzt und garantiert.
 
-Offensichtliche Beispiele sind dafür Subklassen von `Optional` wie `Some(x)` und `None` oder ein fixes Set von Operatoren, wie in Bereichen der Mathematik oder Logik.
+Offensichtliche Beispiele sind dafür Subklassen von `Optional` wie `Some(x)` und `None` oder ein fixes Set von Operatoren/Ausdrücken, wie in Bereichen der Mathematik oder Logik.
 
 Mit dieser Gruppe an Subklassen kann dann eine Sprache, Berechnung oder Regelwerk abschliessend spezifiziert werden.
 
@@ -235,7 +235,7 @@ Wie bei Enums kann mit "sealed classes", die eine feste Anzahl von Subklassen ha
 Damit können Ausdrücke über abstrakte Datentypen (Abstract-Data-Types ADT) verifizierbar realisiert werden. 
 Sobald der "sealed class" ein weiterer Typ hinzugefügt wird, werden alle `switch` Statements ungültig.
 
-.Listing 11 - Sealed Clases und Switch
+.Listing 11 - Sealed Classes und Switch
 [source,java]
 ----
 sealed interface Binary permits Zero, One {}
@@ -243,7 +243,8 @@ final class Zero implements Binary {};
 final class One implements Binary {};
 
 Binary o = new One(); 
-// Fehler: the switch expression does not cover all possible input values
+// Fehler: the switch expression does not cover 
+// all possible input values
 switch (o) {
     case Zero b -> 0;
 }
@@ -272,9 +273,9 @@ Do not make the switch expression or statement behave differently when case labe
 
 == Records
 
-Mit Records können "struct"-ähliche Konstrukte erstellt werden wie in einer vorherigen Kolumne erläutert [Hunger022020], diese können schon mit Typ-Mustern genutzt werden (siehe Listing 3 und 5).
+Mit Records können "struct"-ähliche Konstrukte erstellt werden wie in einer vorherigen Kolumne erläutert [Hunger0220], diese können schon mit Typ-Mustern genutzt werden (siehe Listings 3 und 5).
 
-Durch [JEP405] (preview in Java 19, im aktuellen 19.ea.14-open noch nicht vorhanden) "Record Patterns" werden diese in der Zukunft auch in destrukturierenden Muster-Ausdrücken auswertbar, was vor allem zum Zugriff auf (verschachtelte) Elemente genutzt werden.
+Durch [JEP405] "Record Patterns" (preview in Java 19, im aktuellen 19.ea.14-open noch nicht vorhanden) werden diese in der Zukunft auch in destrukturierenden Muster-Ausdrücken auswertbar, was vor allem zum Zugriff auf (verschachtelte) Elemente genutzt werden.
 
 Dabei würde ein Ausdruck ähnlich dem Konstruktor (siehe Listing 12) mit `instanceof` oder `case` genutzt, der die Parameter als deklarierte lokale Variablen bereitstellt. 
 Verschachtelte Ausdrücke wären möglich, um auf Werte von beinhalteten Records zuzugreifen.
@@ -313,7 +314,8 @@ final record Node(String type, String name) implements Entity {}
 final record Relationship(Node start, String type, Node end) implements Entity {}
 
 switch (entity) {
-    case Node(var type, var name) -> String.format("(:%s {name:%s})", type, name);
+    case Node(var type, var name) -> 
+        String.format("(:%s {name:%s})", type, name);
     case Relationship(Node(var start, _), var type, Node(var end, _)) -> 
         String.format("(:%s)-[:%s]->(:%s)", star,type,end);
 }
@@ -323,17 +325,15 @@ Weitere vorgeschlagene Features sind:
 
 * `var` für die Elemente spart die Typdeklaration
 * `_` Platzhalter für uninteressante Elemente
-* Unterstützung für (teilweise) Felder, wie `instanceof Movie[] {m1, m2}`
+* Unterstützung für (partielle) Felder, wie `instanceof Movie[] {m1, m2}`
 * Unterstützung nicht nur für Records
-
-Dafür generiert der Compiler eine zusätzliche Methode unter der Haube, "xxxx".
 
 == Fazit
 
 Mit den im aktuellen Java 18 verfügbaren Verbesserungen für `switch` und `instanceof` Ausdrücke, kann man schon viel klareren und sichereren Code schreiben ohne komplexe Ketten von `if`-Anweisungen. 
 Mit Java 19 wird sich die Situation dann nochmal verbessern, besonders für deklarative und funktionale Ausdrücke.
 
-Für einige Teile der Präsentation von José Paumard, wie Factory-Methoden, `deconstructor`-Methoden und `match` gibt es noch keine JEPs, nur die Diskussion im [Pattern-Matching] Dokument von Projekt Amber.
+Für einige Teile der Präsentation von José Paumard, wie Factory-Methoden, `deconstructor`-Methoden und `match` gibt es noch keine JEPs, nur die Diskussion im [Pattern-Matching] Dokument von Projekt Amber und einem Entwurf von Brian Goetz [DeconstructionGoetz].
 
 == Referenzen
 
@@ -342,6 +342,8 @@ Für einige Teile der Präsentation von José Paumard, wie Factory-Methoden, `de
 * [JEP394] Pattern Matching instanceof https://openjdk.java.net/jeps/394
 * [JEP405] Record Patterns https://openjdk.java.net/jeps/405
 * [JEP409] Sealed Classes https://openjdk.java.net/jeps/409
+* [JEP420] Sealed Classes https://openjdk.java.net/jeps/420
 * [Baeldung-Switch] https://www.baeldung.com/java-switch-pattern-matching
 * [Amber] https://openjdk.java.net/projects/amber/
 * [Pattern-Matching-Amber] https://openjdk.java.net/projects/amber/design-notes/patterns/pattern-matching-for-java
+* [DeconstructionGoetz] https://github.com/openjdk/amber-docs/blob/master/eg-drafts/deconstruction-patterns-records-and-classes.md
