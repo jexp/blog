@@ -1,0 +1,347 @@
+== Bernsteinschatz - Muster, Switch, Records und Sealed Classes in Modernem Java
+
+
+Ein Bereich dem ich in der letzten Zeit nicht soviel Aufmerksamkeit gewidmet habe, ist die massive Verbesserung der, `switch` und `instanceof` Operationen in Java seit Version 14, die einhergehend mit Records [Hunger0220] und "sealed classes" viel mächtigere deklarative Konstrukte werden.
+
+Der Vortrag von José [Paumard] zu diesem Thema hat mich ziemlich beeindruckt, ich hatte davon nur einen Bruchteil der Features erwartet.
+Einiges davon ist schon in Java 18 verfügbar, anderes noch in Preview oder Diskussion, aber die Möglichkeiten die sich aus diesen Bausteinen des [Amber]-Projekts auftun, sind sehr umfänglich.
+
+image::https://upload.wikimedia.org/wikipedia/commons/2/27/%D0%9D%D0%B0%D1%81%D0%B5%D0%BA%D0%BE%D0%BC%D1%8B%D0%B5_%D0%B2_%D1%8F%D0%BD%D1%82%D0%B0%D1%80%D0%B5._%D0%AF%D0%BD%D1%82%D0%B0%D1%80%D0%BD%D1%8B%D0%B9_%D0%B8%D0%BD%D0%BA%D0%BB%D1%8E%D0%B7_02.jpg[]
+
+Damit wird es möglich in Java bequem Dekonstruktion von komplexen Datentypen vorzunehmen, wie ich es in anderen Sprachen wie Kotlin und Clojure in vergangenen Kolumnen [Hunger17] schon gezeigt habe.
+
+Operationen auf abstrakte Datentypen (Abstract Data Types) mittels "sealed classes" können komplexe Berechnungen, Regeln und Teilsprachen ausdrücken, die "komplett" sind, d.h. keine Lücken im Eingabewertbereich erlauben.
+
+Daher wollte ich heute einmal die Gelegenheit nutzen, die verschiedenen spannenden JEPs zu beleuchten und auszutesten.
+
+Wie immer können wir das unkompliziert mit `jshell` und Java 18 (via sdkman) interaktiv nachvollziehen, siehe Listing 1.
+
+.Listing 1 - Installation von Java 18 und JShell
+[source,shell]
+----
+sdk install java 18-open
+sdk use java 18-open
+jshell --enable-preview
+----
+
+== Verbessertes instanceof
+
+Ein schon immer etwas nerviges Konstrukt in Java war der boolesche `instanceof` Operator, der für nicht-null Instanz-Referenzen "true" liefert, wenn es eine Instanz der angegebenen Klasse/Interface oder ihrer Subklassen ist `value instanceof String`.
+Aber danach mussten wir immer noch einmal einen Typcast ausführen. 
+
+Mit [JEP394] seit Java 16 (Previews waren in Java 14 und 15) kann neben dem Instance-Of gleich auch noch eine Zuweisung an eine gebundene Variable vorgenommen werden.
+Diese ist für abhängige Ausdrücke im `if`, z.b. nach `&&` (aber nicht `||`) und im Geltungsbereich des if-Ausdrucks gültig (Listing 2).
+Das gilt auch nach dem if-Ausdruck, falls dieser negierend war.
+
+.Listing 2 - Typ-Check im instanceof
+[source,java]
+----
+if (value instanceof String str && !str.isEmpty()) 
+    System.out.println(str.length());
+
+// oder als Guard Clause
+if (!(value instanceof String str)) return 0;
+return str.length();
+----
+
+Damit können auch Methoden und Attribute der Instanz benutzt werden, entweder direkt im Ausdruck oder nach positiver Evaluation (Listing 3).
+
+.Listing 3 - Zugriff auf Methoden von Klassen
+[source,java]
+----
+record Movie(String title, int year) {};
+Object value = new Movie("Forrest Gump", 1994);
+
+if (value instanceof Movie m && m.title().startsWith("F")) 
+    System.out.printf("Film %s veröffentlicht %d", m.title(), m.year());
+// Film Forrest Gump veröffentlicht 1994
+----
+
+Für genrics funktioniert das leider nicht, aber für Felder (Listing 4).
+
+.Listing 4 - Instanceof für Felder und Listen
+[source,java]
+----
+Object value = List.of(new Movie("Encanto",2022));
+if (value instanceof List<Movie> movies && !movies.isEmpty()) {
+    System.out.println(movies.get(0).title());
+}
+// java.lang.Object cannot be safely cast to java.util.List<Movie>
+
+Object value = new Movie[] {new Movie("Encanto",2022)};
+if (value instanceof Movie[] movies && movies.length>0) {
+    System.out.printf("Film %s veröffentlicht %d", movies[0].title(), movies[0].year());
+}
+// Film Encanto veröffentlicht 2022
+----
+
+Pattern Variablen, werden vom Compiler lokale Variablen in einer Methode oder Block behandelt, d.h. sie können andere Variablen verstecken (shadow) und ihnen kann auch ein neuer Wert zugewiesen werden.
+Ich persönlich finde gerade letzteres nicht sinnvoll und hätte eine `final` Deklaration für die Variable für sinnvoll gehalten, besondern da diese ein neues Konstrukt darstellen und man hier nicht die Fehler der Vergangenheit wiederholen sollte.
+
+Das "Shadowing" ist auch ungünstig, da der Gültigkeitsbereich der Variablen auf dem Block nach, bzw. innerhalb der erfolgreichen `instanceof` Bedingung beschränkt ist, siehe Listing 5. 
+
+.Listing 5 - Shadowing Problem
+[source,java]
+----
+record Star(String name, int planets) {};
+class StarInfo {
+    Object star = "Schwarzes Loch";
+
+    public String info(Object quelle) {
+        if (quelle instanceof Star star && star.name() == "Sun") {
+            return "Unsere Sonne hat Planeten "+star.planets();
+        } else {
+            return "Stern "+star.name(); // Schlägt fehl
+        }
+    }
+}
+----
+
+== Switch Ausdrücke
+
+Switch war in Java immer sehr limitiert, ursprünglich nur auf Gleichkeit konkreter, konstanter Werte primitiver Typen und Strings, dann erweitert um Enums.
+
+Die `switch` Struktur ist seit Java 14 mit dem [JEP361] nicht mehr nur ein imperatives Konstrukt, sondern kann auch als Ausdruck benutzt werden.
+Ich hatte das bisher über extrahierte Berechnunges-Methoden und  ein `return` im `switch` Konstrukt realisiert.
+
+Der Hauptunterschied für den Switch-Ausdruck ist der Ersatz von Doppelpunkt nach dem `case` durch einen Pfeil `+->+`, und dass das Ergebnis jetzt idealerweise einer Variablen oder Rückgabewert zugewiesen werden sollte, damit es genutzt werden kann. 
+
+Für komplexere Ausdrücke mit mehreren "Rückgabepunkten" in einem Zweig, kann das `yield` Schlüsselwort benutzt werden.
+Beides ist in Listing 6 zu sehen.
+
+.Listing 6 - Switch Ausdrücker
+[source,java]
+----
+var ergebnis = switch (antwort) {
+    case 42 -> true;
+    case 43 -> {if (Math.random() > 0.5) yield true; else yield false;}
+    default -> false;
+}
+----
+
+Damit können auch Kaskaden von `if-else-if-else` kompakt als Switch-Ausdruck umgeformt werden.
+
+== Musterausdrücke im Switch
+
+Im "Pattern Matching for switch" [JEP406] [JEP420], das mit Java 17 und 18 als (Preview Feature) veröffentlicht wurde, sollte die Flexibilität des Pattern Matchings aus dem `instanceof` auf `switch` Statements und Ausdrücke übertragen werden.
+
+Damit könnten im Werte kompakt mit mehreren komplexeren Bedingungen (hier Muster genannt) überprüft werden, einen pro case-Zweig, was für analytische Anwendungszwecke und Geschäftsregeln hilfreich wäre.
+
+Damit wird der Geltungsbereich für Switch-Argumente von Strings, primitiven Werten und Enums auf beliebige Referenzen inklusive Arrays erweitert. 
+Es muss nur sichergestellt werden, dass die Ausdrücke der Muster kompatibel zum Basistyp der Referenz sind.
+
+// We are saying, "the parameter o matches at most one of the following conditions, figure it out and evaluate the corresponding arm." As a bonus, it is optimizable; in this case we are more likely to be able to perform the dispatch in O(1) time.
+
+// TODO
+// type patterns
+// any type
+
+Zum einen wären da Typausdrücke wie in Listing 7, diese können auch wie bisher mit Komma separiert für einen Zweig zusammengefasst werden.
+
+.Listing 7 - Typ-Ausdrücke in Switch-Zweigen
+[source,java]
+----
+double zahl = switch (value) {
+  case Double d -> d;
+  case Number n -> n.doubleValue();
+  case String s -> Double.parseDouble(s);
+  default -> 0d;
+}
+----
+
+Diese können, wie in Listing 8 gezeigt, mit Zusatzbedingungen (guard clauses) ergänzt werden.
+Für komplexere Ausdrücke können diese auch geklammert und mit booleschen Operatoren kombiniert werden.
+
+Ohne `default` Zweig wird der Ausdruck nicht kompiliert, da nicht alle "Subklassen" von `Objekt` abgehandelt wurden.
+Im Allgemeinen müssen Subklassen nach ihren Superklassen gelistet werden, um Compiler-Fehler zu vermeiden, wie in unserem Fall `Number` nach `Double`.
+
+Früher gab `null` immer eine `NullpointerException`, jetzt kann es explizit gehandhabt werden, damit die Exception nicht auftritt.
+
+.Listing 8 - Typausdrücke mit Zusatzbedingungen
+[source,java]
+----
+Object value = "43";
+switch (value) {
+  case Double d && ! d.isNaN() -> d.doubleValue();
+  case Number n && n.intValue() % 2 == 0 -> n.doubleValue();
+  case String s && s.matches("-?\\d+(\\.\\d+)?") -> Double.parseDouble(s);
+  case null -> Double.NaN;
+  default -> 0d;
+}
+----
+
+Durch die höhere Variabilität der Muster, ist mehr auf Präzedenz zu achten, das kann sowohl Subtypen betreffen, die vor ihren Supertypen getestet werden müssen.
+
+Im Listing 9 wird sichtbar, dass für `String`, die Subklasse von `CharSequence` ein "Dominierungs"-Fehler vom Compiler gemeldet wird, wenn der konkretere Typ später in der Liste der `case` Muster erscheint.
+
+.Listing 9 Präzedenz von Typ-Mustern
+[source,java]
+----
+switch(o) {
+    case CharSequence cs ->
+        "A sequence of length " + cs.length();
+    // Fehler - pattern is dominated by previous pattern
+    case String s ->    
+        "A string: " + s;
+    default -> 
+        "Another value";
+}
+
+// Kein Fehler
+switch(o) {
+    case String s ->
+        "A string: " + s;
+    case CharSequence cs ->
+        "A sequence of length " + cs.length();
+    default -> 
+        "Another value";
+}
+----
+
+Für bedingte Muster kann nicht generisch entschieden werden, welches Präzedenz hat, daher schlägt dort der Compiler nur fehl wenn der generelle Typ-Ausdruck, vor dem bedingten kommt (siehe Listing 10).
+
+.Listing 10 - Präzedenz von bedingten Typmustern
+[source,java]
+----
+switch(o) {
+    case -1, 1 -> "Spezialfall";
+    case Integer i -> "Andere Ganzzahlen";
+    // Fehler: case label is dominated by a preceding case label
+    case Integer i && i > 0 -> "Positive Ganzzahlen";
+    default -> "Andere Werte";
+}
+
+// Kein Fehler
+switch(o) {
+    case -1, 1 -> "Spezialfall";
+    case Integer i && i > 0 -> "Positive Ganzzahlen";
+    case Integer i -> "Andere Ganzzahlen";
+    default -> "Andere Werte";
+}
+----
+
+=== Vollständigkeit und Sealed Classes
+
+Wie auch mit bisherigen Switch-Strukturen müssen mit Muster-Checks auch alle Möglichkeiten abgedeckt werden, bei fehlenden Zweigen (wie `default`) für die verbliebenen Fälle gibt es einen Compiler-Fehler.
+
+Sealed classes [JEP409] (seit Java 17) sind ein Feature das die Anzahl der Subklassen einer Klasse oder Interfaces begrenzt und garantiert.
+
+Offensichtliche Beispiele sind dafür Subklassen von `Optional` wie `Some(x)` und `None` oder ein fixes Set von Operatoren, wie in Bereichen der Mathematik oder Logik.
+
+Mit dieser Gruppe an Subklassen kann dann eine Sprache, Berechnung oder Regelwerk abschliessend spezifiziert werden.
+
+Wie bei Enums kann mit "sealed classes", die eine feste Anzahl von Subklassen haben, ein Vollständigkeitstest auch ohne generische `default` Zweige erfolgen (siehe Listing 11).
+
+Damit können Ausdrücke über abstrakte Datentypen (Abstract-Data-Types ADT) verifizierbar realisiert werden. 
+Sobald der "sealed class" ein weiterer Typ hinzugefügt wird, werden alle `switch` Statements ungültig.
+
+.Listing 11 - Sealed Clases und Switch
+[source,java]
+----
+sealed interface Binary permits Zero, One {}
+final class Zero implements Binary {};
+final class One implements Binary {};
+
+Binary o = new One(); 
+// Fehler: the switch expression does not cover all possible input values
+switch (o) {
+    case Zero b -> 0;
+}
+// Kein Fehler, Ausgabe 1
+switch (o) {
+    case Zero b -> 0;
+    case One b -> 1;
+}
+----
+
+////
+Expand the expressiveness and applicability of switch expressions and statements by allowing patterns to appear in case labels.
+
+Allow the historical null-hostility of switch to be relaxed when desired.
+
+Introduce two new kinds of patterns: guarded patterns, to allow pattern matching logic to be refined with arbitrary boolean expressions, and parenthesized patterns, to resolve some parsing ambiguities.
+
+Ensure that all existing switch expressions and statements continue to compile with no changes and execute with identical semantics.
+
+Do not introduce a new switch-like expression or statement with pattern-matching semantics that is separate from the traditional switch construct.
+
+Do not make the switch expression or statement behave differently when case labels are patterns versus when case labels are traditional constants.
+////
+
+// Extending pattern matching to switch allows an expression to be tested against a number of patterns, each with a specific action, so that complex data-oriented queries can be expressed concisely and safely.
+
+== Records
+
+Mit Records können "struct"-ähliche Konstrukte erstellt werden wie in einer vorherigen Kolumne erläutert [Hunger022020], diese können schon mit Typ-Mustern genutzt werden (siehe Listing 3 und 5).
+
+Durch [JEP405] (preview in Java 19, im aktuellen 19.ea.14-open noch nicht vorhanden) "Record Patterns" werden diese in der Zukunft auch in destrukturierenden Muster-Ausdrücken auswertbar, was vor allem zum Zugriff auf (verschachtelte) Elemente genutzt werden.
+
+Dabei würde ein Ausdruck ähnlich dem Konstruktor (siehe Listing 12) mit `instanceof` oder `case` genutzt, der die Parameter als deklarierte lokale Variablen bereitstellt. 
+Verschachtelte Ausdrücke wären möglich, um auf Werte von beinhalteten Records zuzugreifen.
+
+.Listing 12 - Record Muster
+[source,java]
+----
+record Movie(String title, int year) {};
+Object value = new Movie("La-La-Land", 2016);
+
+if (value instanceof Movie(String title, int year)  && title.contains("La"))
+    System.out.printf("Film %s veröffentlicht %d", title, year);
+// Film La-La-Land veröffentlicht 2016
+----
+
+Richtig schön wird das dann in `switch` Ausdrücken (besonders mit "sealed classes"), da damit DSLs und andere ADT Konstrukte elegant behandelt werden können (siehe Listing 13).
+
+.Listing 13 - Record Muster in Switch
+[source,java]
+----
+sealed interface Option<T> permits None, Some {}
+final record None() implements Option<Void> {}
+final record Some<T>(T value) implements Option<T> {}
+
+switch (result) {
+    case Some(x) -> x;
+    case None() -> defaultValue;
+}
+----
+
+.Listing 14 - Verschachtelte Record Muster in Switch
+[source,java]
+----
+sealed interface Entity permits Node, Relationship {}
+final record Node(String type, String name) implements Entity {}
+final record Relationship(Node start, String type, Node end) implements Entity {}
+
+switch (entity) {
+    case Node(var type, var name) -> String.format("(:%s {name:%s})", type, name);
+    case Relationship(Node(var start, _), var type, Node(var end, _)) -> 
+        String.format("(:%s)-[:%s]->(:%s)", star,type,end);
+}
+----
+
+Weitere vorgeschlagene Features sind:
+
+* `var` für die Elemente spart die Typdeklaration
+* `_` Platzhalter für uninteressante Elemente
+* Unterstützung für (teilweise) Felder, wie `instanceof Movie[] {m1, m2}`
+* Unterstützung nicht nur für Records
+
+Dafür generiert der Compiler eine zusätzliche Methode unter der Haube, "xxxx".
+
+== Fazit
+
+Mit den im aktuellen Java 18 verfügbaren Verbesserungen für `switch` und `instanceof` Ausdrücke, kann man schon viel klareren und sichereren Code schreiben ohne komplexe Ketten von `if`-Anweisungen. 
+Mit Java 19 wird sich die Situation dann nochmal verbessern, besonders für deklarative und funktionale Ausdrücke.
+
+Für einige Teile der Präsentation von José Paumard, wie Factory-Methoden, `deconstructor`-Methoden und `match` gibt es noch keine JEPs, nur die Diskussion im [Pattern-Matching] Dokument von Projekt Amber.
+
+== Referenzen
+
+* [JEP381] Switch Expressions https://openjdk.java.net/jeps/361
+* [Paumard] The Future of Java https://www.slideshare.net/jpaumard/the-future-of-java-records-sealed-classes-and-pattern-matching
+* [JEP394] Pattern Matching instanceof https://openjdk.java.net/jeps/394
+* [JEP405] Record Patterns https://openjdk.java.net/jeps/405
+* [JEP409] Sealed Classes https://openjdk.java.net/jeps/409
+* [Baeldung-Switch] https://www.baeldung.com/java-switch-pattern-matching
+* [Amber] https://openjdk.java.net/projects/amber/
+* [Pattern-Matching-Amber] https://openjdk.java.net/projects/amber/design-notes/patterns/pattern-matching-for-java
