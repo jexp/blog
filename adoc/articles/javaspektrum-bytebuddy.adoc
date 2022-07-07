@@ -3,7 +3,81 @@
 // image coffee ghost
 image::https://pixnio.com/free-images/2017/06/01/2017-06-01-00-14-53-900x600.jpg[]
 
+////
+Du hast ja ein Buch geschrieben! Nehme an Sektion 2 ist zu unfertig, daher nur Rueckmeldung zu 1.
+Ich lese den Rest aber auch gerne. Sehr schoen geschrieben, danke fuer die Exponierung!
 
+Du schreibst:
+
+> Bytecodegenerierung erreicht dies ohne die Leistungseinbussen und Typunsicherheit wie bei
+der Nutzung der Reflection-API beim Zugriff von Bibliotheken auf dynamische, unbekannte
+Klassen aus den eigentlichen Anwendungen (wie Domänenobjekte).
+
+Das ist in modernen JVM-Versionen nur noch wenig relevant. Reflection generiert selbst klassen
+und ist seit Java 17 intern mit method handles implementiert. Eigentlich ist nur noch boxing 
+ein problem, aber selbst das wird oft mit escape analysis abgeschwaecht.
+
+> Jackson
+
+Stimmt das? In dem Fall wusste ich das selbst nicht.
+
+> Klasse transparent umschreiben
+
+Als vierte Variante kann man noch "dekorieren" nennen, bei der nur bestehende methoden umgeschrieben
+werden koennen. Generell ist das gleich "redefine", aber effizienter da Byte Buddy einen weiten Teil
+der internen infrastruktur auslaesst. (new ByteBuddy().decorate(typ))
+
+> ElementMatchers
+
+Vielleicht nennen dass das man auch einen eigenen ElementMatcher implementieren kann? Ist ein einfaches
+funktionelles Interface. ElementMatchers mit "s" ist primaer fuer die Lesbarkeit gedacht.
+
+> Tabelle 1
+
+Da glaube ich, etwas ist verrutscht.
+
+> Es können auch mehrere Methoden auf einmal implementiert werden, indem
+method(MethodMatcher).intercept(Implementation mehrmals aufgerufen wird.
+
+Typisches misverstaendniss dass diese nicht additiv sind. Der letzte Matcher gewinnt.
+
+> http://MethodDelegation.to(new
+RequestProxyInstance()).filter(MethodMatchers.not(isDeclaredBy(Object.class)));
+
+Ist das nicht MethodDelegation.withDefaultConfiguration()
+.filter(MethodMatchers.not(isDeclaredBy(Object.class)))
+.to(newRequestProxyInstance()); ? Das war in einer sehr viel frueheren version anders, 
+aber das war nicht effektiv.
+
+> Daher kann Byte Buddy, sowohl Klassen in bestehende ClassLoader per Reflection injizieren
+( ClassLoadingStrategy.INJECT ) (ausser dem Bootstrap-ClassLoader) oder zumindest die
+Reihefolge der Auflösung umkehren ( ClassLoadingStrategy.CHILD_FIRST ).
+
+Man sollte vielleicht nennen, dass WRAPPER und CHILD_FIRST auf offiziellen APIen basieren.
+INJECT benutzt dagegen Unsafe API. Seit Java 9 gibt es MEthodHandles.Lookup als erste 
+offizielle API zum injecten, das war tatsaechlich das Resultat aus Diskussionen wie BB
+auf Java 9+ funktionieren soll. Um Java 8 und 9+ zu unterstuetzen muss ein Nutzer eine 
+eigene Strategie erstellen: ClassLoadingStrategy.UsingLookup.withFallback(() -> MethodHandles.lookup());
+Der method call kann nicht von BB durchgefuehrt werden, da der lookup die privilegien der caller
+klasse bekommt, also die privilegien des Nutzers, nicht von BB erben soll.
+
+Ref JShell: Das ist tricky weil JShell fuer Foo und Bar zwei Klassen definiert. Foo hat eigentlich den Namen:
+REPL.$JShell$16$Foo
+mit outer class
+REPL.$JShell$16
+
+Man darf den nest host nicht dynamisch aendern, wenn du also Bar den nest host von Foo gibst, dann erlaubt die JVM
+es:
+
+new ByteBuddy()
+  .redefine(Bar.class)
+  .name(Foo.class.getName())
+  .nestHost(Foo.class.getNestHost())
+  .make()
+  .load(Foo.class.getClassLoader(), ClassReloadingStrategy.fromInstalledAgent());
+
+Die Frage ist ob du deinen Lesern nest mates auch noch zumuten willst ;)
+////
 Den meisten Java Code schreiben wir ja von Hand oder lassen ihn maximal von der IDE generieren - in Zukunft vielleicht auch von GitHub's [CodePilot].
 Neben dem offensichtlichen Quelltext, der vom Java Compiler in Bytecode übersetzt wird, passiert eine ganze Menge hinter den Kulissen.
 Viele Bibliotheken nutzen zusätzlich Annotations-Prozessoren und andere Mechanismen, um während des Build-Prozesses Code zu generieren.
@@ -29,7 +103,7 @@ Mit Bytecode-Generierung besonders zur Laufzeit wird fast die "Magie" dynamische
 
 Die heutzutage wieder aktuelle Erzeugung von Binärcode für native Programme mittels Ahead-of-Time (AOT) Kompilierung (z.B. mit GraalVM [HunXxx]) profitiert auch von der Bytecodegenerierung, da in der nativen Umgebung dynamische Instrumentierung und Reflection nur bedingt möglich ist.
 
-Bytecodegenerierung erreicht dies ohne die Leistungseinbussen und Typunsicherheit wie bei der Nutzung der Reflection-API beim Zugriff von Bibliotheken auf dynamische, unbekannte Klassen aus den eigentlichen Anwendungen (wie Domänenobjekte).
+Bytecodegenerierung erreicht dies ohne die minimalen Leistungseinbussen und Typunsicherheit wie bei der Nutzung der Reflection-API beim Zugriff von Bibliotheken auf dynamische, unbekannte Klassen aus den eigentlichen Anwendungen (wie Domänenobjekte).
 
 Anwendungsbeispiele für Bytecodegenerieung sind:
 
@@ -315,7 +389,7 @@ Dabei können die Prädikatsausdrücke zu Ausdrücken kombiniert (z.b. mit `and/
 |declaresField(field) | Typ deklariert Felder dieser Art
 |canThrow(exception) | Methode oder Constructor die angegebene Exception wirft
 |hasMethodName(methodName) | Methode mit spezifischen Namen
-|is(method/field/typ|annotation) | Exakte Übereinstimmung mit Reflection-Typ
+|is(method/field/typ/annotation) | Exakte Übereinstimmung mit Reflection-Typ
 |hasSuperClass(type) | Typ mit Superklasse
 |isFinal() | Feld, Klasse, Methode mit `final` Modifikator
 |isInterface() | Typ ist ein Interface (beeinhaltet Annotationen)
@@ -329,7 +403,9 @@ Die Prädikate werden sowohl genutzt um die Selektion, als auch Transformationen
 
 Als nächstes kann die `Implementation` der Methode mittels `intercept(Implementation)` angegeben werden, dafür gibt es eine Reihe von Optionen, von denen wir schon `FixedValue` in Aktion gesehen haben.
 
+////
 Es können auch mehrere Methoden auf einmal implementiert werden, indem ``method(((MethodMatcher).intercept(Implementation))`` mehrmals aufgerufen wird.
+////
 
 == Delegation von Methoden
 
@@ -424,7 +500,7 @@ Es gibt noch eine Reihe weiterer ``[MethodDelegation]``'s:
 
 Die Ziele der Delegationen können auch noch weiter eingeschränkt werden, z.b. mittels Filtern. 
 Hier werden Methoden ausgeschlossen die in der Superklasse `Object` deklariert sind (z.b. `wait`, `hashCode`, `equals`): 
-`MethodDelegation.to(new RequestProxyInstance()).filter(MethodMatchers.not(isDeclaredBy(Object.class)));`
+`MethodDelegation.filter(MethodMatchers.not(isDeclaredBy(Object.class))).to(new RequestProxyInstance());`
 
 // Wenn das Aufrufziel nicht eindeutig auflösbar ist, kann es mittels eines `AmbiguityResolver` oder Annotationen wie `@BindingPriority(int)` gesteuert werden.
 
@@ -554,7 +630,7 @@ ClassLoader in der JVM bilden eine Hierachie beginnend beim Bootstrap-Classloade
 ClassLoader versuchen normalerweise Klassen erst bei ihren übergeordneten (Eltern-)ClassLoadern zu finden, bevor sie selbst aktiv werden.
 Was im Fall von neudefinierten bzw. überschriebenen Klassen eher hinderlich ist.
 
-Daher kann Byte Buddy, sowohl Klassen in bestehende ClassLoader per Reflection injizieren (`ClassLoadingStrategy.INJECT`) (ausser dem Bootstrap-ClassLoader) oder zumindest die Reihefolge der Auflösung umkehren (`ClassLoadingStrategy.CHILD_FIRST`). 
+Daher kann Byte Buddy, sowohl Klassen in bestehende ClassLoader per inoffizielle Reflection injizieren (`ClassLoadingStrategy.INJECT`) (ausser dem Bootstrap-ClassLoader) oder zumindest die Reihefolge der Auflösung umkehren (`ClassLoadingStrategy.CHILD_FIRST`). 
 
 Ein weiteres Problem stellt die Identität einer Klasse, dar die nicht nur über ihren Namen sondern auch ClassLoader bestimmt wird, daher kann derselbe Klassename mehrmals im System vorkommen mit verschiedenen Definitionen, erreichbar über verschiedene ClassLoader.
 
@@ -603,8 +679,6 @@ In Teil eins haben wir nur die ersten Schritte mit Byte Buddy gemacht, in Teil 2
 * [Baeldung] https://www.baeldung.com/byte-buddy
 * [BB-Proxies] https://mydailyjava.blogspot.com/2022/02/using-byte-buddy-for-proxy-creation.html
 
-
-= Teil 2 - AOP, Agenten und mehr mit Byte Buddy 
 
 ////
 * neuer Classloader in Hierarchie
@@ -668,58 +742,241 @@ public class PoolTest {
 
 ////
 * Byte Buddy abstracts over Java's reflection API such that a Class instance is for example internally represented by an instance of a TypeDescription. As a matter of fact, Byte Buddy only knows how to process a provided Class by an adapter that implements the TypeDescription interface. The big advantage over this abstraction is that information on classes do not need to be provided by a ClassLoader but can be provided by any other sources.
+
+Seit dem Modulsystem in Java 9 ist es schwierig Implementierungen zu nutzen, die von Klassen der Bibliotheken abhängen, da man dann diese Bibliotheken als Modul-Abhängigkeiten deklarieren müsste und die eigenen Module für sie öffnen.
+Zum Beispiel, wenn die zu überschreibende oder geproxiete Klasse ein fremdes Interface implementieren muss, damit man auf dessen Basis den Proxy erstellen kann.
+Daher fügt Bytebuddy keine eigenen Typen in den generierten Code ein, so dass das vermieden wird.
+
+Kommentar Rafael für Annotationen:
+annotationen die nicht sichtbar sind verschwinden
+wenn du klasse X mit interceptor Y proxiest, muss X byte buddy nicht kennen
+der die proxyklasse erstellt muss BB kennen
+aber nicht die geproxiete Klasse
+mit cglib muss die geproxiete klasse zb das cglib dispatcher Interface kennen
+aber weil die annotationen nur beschreiben wie die proxymethode aufgerufen wird sind die nur fürs generieren relevant
+genau, osgi, classloader etc
+du musst dann nicht nur spring so der auch cglib importieren von osgi wenn die proxyklasse in deinem modul lebt
+(spring shadet auch deswegen cglib in ihr eigenes modul)
 ////
 
+= Teil 2 - AOP, Instrumentierung und Agenten mit Byte buddy 
 
-Solche Änderungen sind dann nur möglich, wenn Klassen entweder im Buildprozess oder beim Laden von einem Agenten abgefangen und modifiziert werden (mehr dazu in Teil 2).
+Im ersten Teil der Byte buddy Betrachtungen haben wir uns mit dem Warum und Wieso von Bytecode-Generierung und den Grundlagen der Byte buddy API befasst.
+Die Erzeugung von Subklassen oder Modifikation von existierenden Klassen und Methoden war genauso Thema wie Classloading.
 
-Java Agents
+Während die Generierung von Bytecode zum Compile- und Buildzeitpunkt sinnvoll ist, kann es aus verschiedenen Gründen hilfreich sein, Code erst beim Laden zu instrumentieren:
 
-Java Agent: 
+* Code der nicht benutzt wird, muss nicht voreilend modifiziert werden, zusätzliche Klassen werden nicht generiert
+* Klassen und Bibliotheken auf deren Buildprozess man keinen Einfluss hat, und die ggf. vom Nutzer dynamisch hinzugefügt werden, sind im Buildprozess noch nicht verfügbar
+* Verschiedene Anwendungsfälle, die dynamisch aktiviert werden sollen, z.B. Monitoring/Profiling müssen nicht stets aktiv sein
+* die Entscheidung auf welche Implementierung zugegriffen wird, kann konfigurativ oder via Vorhandensein von Klassen gesteuert werden
 
-Implementiert in einer Klasse mit einer `premain(arguments, instrumentation)` Methode, die mittels `-javaagent:agent.jar` der JVM übergeben wird und beim Starten der JVM aufgerufen wird.
+Daher kann es sinnvoll sein, Klassen erst beim Laden zu modifizieren, um den Anforderungen der Anwendung dynamisch gerecht zu werden.
 
-In `premain` kann dann der Ladeprozess für Klassen instrumentiert werden, wie im Listing Xxx gezeigt.
-Sogar Bootstrap Klassen der JVM können (mit etwas mehr mehr Aufwand) instrumentiert werden.
+Das läuft im Allgemeinen so ab:
 
+1. Java-Agent wird in der JVM installiert
+2. Agent registriert sich zur Instrumentierung von Klassen beim Laden
+3. Klassen werden geladen und den vom Agenten registrierten Transformatoren übergeben
+4. Transformator modifiziert ggf. den Bytecode der Klassen z.B. mit Bytebuddy
+5. Modifizierter Code wird an den ClassLoader zurückgegeben und in der JVM bereitgestellt
+6. Alle nachfolgenden Zugriffe auf die Klasse benutzen den modifizierten Bytecode
 
-Dabei wird jeder Typ der mit der `@ToString` Annotation markiert ist, mit einer Methode `toString() { return "transformed"; }` versehen.
+Wir wollen uns heute mit den verschiedenen Schritten in dieser Reihenfolge beschäftigen.
+
+== Java Agenten registrieren
+
+Java Agenten sind spezielle Klassen, die der JVM separat bekannt gemacht und im JVM-Lebenszyklus vor der Ausführung der `main` Methode der Hauptklasse ausgeführt werden.
+
+Ein Agent wird in einer Klasse implementiert die eine statische `premain` Methode beinhaltet, die entweder ein oder zwei Argumente entgegennehmen kann.
+Zum einen einen String mit den Kommandozeilenargumenten `options` und zum anderen eine Instanz von `Instrumentation`, die für Eingriffe in den Mechanismus zum Laden von Klassen notwendig ist, also für unseren Anwendungsfall.
+In `premain` können alle Operationen ausgeführt werden, die *vor dem Start* der Anwendung mittels ihrer `main`-Methode passieren müssen.
+
+Sowohl Konfigurationen (z.B. von System-Properties), Monitoring der JVM oder Installation eines SecurityManagers können erfolgen.
+
+Die Agenten-Klasse muss in einem Jar vorliegen, dass mittels `-javaagent:hello-agent.jar[=options]` der JVM übergeben wird, und dem weitere Optionen mitgegeben werden können.
+Falls mehrere Agenten geladen werden sollen, kann die Option mehrmals angegeben werden, dann ist die Kommandozeilenreihenfolge maßgebend für die Aufrufreihenfolge.
+
+====
+Agenten werden vom System-ClassLoader geladen (genau wie die Main-Klasse) und sind Teil seines namenlosen Moduls.
+Minimal sind nur Boot-Classpath und System-Klassloader Klassen und Module sichtbar, wenn weitere Module benötigt werden, müssen sie via `--add-modules` hinzugefügt werden.
+====
+
+Im Manifest der Jar Datei in `META-INF/MANIFEST.MF` muss dann entsprechend ein Eintrag für `Premain-Class` und/oder `Agent-Class` vorliegen, siehe Listing 1.
+
+.Listing 1 META-INF/MANIFEST.MF
+[source,manifest]
+----
+Manifest-Version: 1.0 
+Premain-Class: de.jexp.agent.HelloAgent
+# Für Laden nach JVM Start
+Agent-Class: de.jexp.agent.HelloAgent
+----
+
+In unserem Hello-World Beispiel in Listing 2 wird eine System-Property gesetzt, die dann von der Hauptklasse ausgegeben wird.
+
+.Listing 2
+[source,java]
+----
+package de.jexp.agent;
+
+class HelloAgent {
+  public static premain(String options, Instrumentation instrumentation) {
+      System.setProperty("agent",options);
+      System.err.println("premain "+options);
+  }
+  public static agentmain(String options, Instrumentation instrumentation) {
+      System.err.println("agentmain ");
+  }
+}
+
+public class Hello {
+  public static main(String...args) {
+      System.err.println("Hello.main, from Agent: "+System.getProperty("agent"));
+  }
+}
+----
+
+Agenten können auch dynamisch mittels der `VirtualMachine`-API in eine fremde JVM geladen werden, siehe Listing 2.
+Seit Java 9 kann das nicht mehr innerhalb der JVM ausgeführt werden, die den Agenten laden soll, man kann aber aus der JVM immer noch eine kurzlebige zweite VM starten die diesen Code dann ausführt.
+
+Wenn der Agent mittels der VM API geladen wurde, wird die `agentmain`-Methode relevant, die *nach* der Initialisierung der JVM und Anwendung ausgeführt wird, dann muss im Manifest das `Agent-Class` Attribut genutzt werden.
+
+.Listing 2 dynamisches Laden von Agenten
+[source,java]
+----
+VirtualMachine vm = VirtualMachine.attach(vmProzessId);
+vm.loadAgentLibrary("hello-agent.jar", "options");
+vm.detach();
+----
+
+Als dritte Option kann in einem ausführbaren Jar, ein Manifest mit `Launcher-Agent-Class` angeben, welche Klasse des Jars als Agent geladen werden soll und ihre `agentmain` Methode aufgerufen.
+
+== Detektion ob Klassen modifiziert werden müssen
+
+Ein Vorteil von Agenten ist wie schon erwähnt der Fakt dass nur Klassen modifiziert werden müssen, die auch wirklich geladen werden.
+Gerade bei größeren Systemen mit vielen Transformationskandidaten kann somit die Build- und Startup-Zeit minimiert werden, die Transformation wird dann auf den Ladezeitpunkt verschoben.
+
+Um festzulegen welche Klassen zu modifizieren sind, kann sowohl auf Klassen, oder Paketnamen zurückgegriffen werden, ebenso ist der Test auf die Existenz von bestimmten Superklassen, Interfaces, Methoden oder Feldern möglich.
+In ByteBuddy erfolgt es mittels der schon erwähnten `ElementMatchers`-API.
+
+Oft wird mittels Annotationen oder Meta-Annotationen (Annotationen auf Annotationen) das Ziel von Modifikationen markiert.
+Das ist auch ein Ansatz der z.B. von Lombok präferiert wird.
+
+== Modifikation des Bytecodes mittels Byte buddy
+
+=== Instrumentierung
+
+Für die Modifikationen von Klassen beim Laden ist die *Instrumentierungs-API* wichtig, die wir als 2. Parameter in unseren Agent-Aufrufen erhalten können.
+
+Diese enthält Methoden um:
+
+* `ClassFileTransformer` zu registrieren, die Klassen beim Laden anpassen
+* alle geladenen (initialisierten) Klassen zu erhalten
+* Objektgrößen zu ermitteln
+* Modifizierbarkeit von  Klassen und Modulen zu testen
+* Erlaubnis der Redefinition und Transformation von Klassen festzustellen
+* Klassen bzw. Module neu zu definieren
+* Transformation von Klassen zu veranlassen
+
+All diese Methoden können vom Agenten beim Aufruf seiner Methoden bzw. jederzeit danach, auch von separaten Threads genutzt werden. 
+Hauptsächlich werden aber `ClassFileTransformer` registriert und ggf. schon geladene Klassen redefiniert.
+
+Weitere Attribute des Manifests werden jetzt für uns auch relevant:
+
+* `Can-Redefine-Classes:true/false`: Schon geladene Klassen können neu definiert werden, dann muss der Bytecode für die Klasse aus einer anderen Quelle, z.B. Generator kommen.
+* `Can-Retransform-Classes:true/false`: Klassen können beim Laden transformiert werden, und auch nach einer Redefinition.
+* `Boot-Class-Path:path`: Zusätzliche Pfade für um für den Agenten Klassen zu finden, relative Pfade werden zum Verzeichnis des Agenten-Jars aufgelöst
+
+// * `Can-Set-Native-Method-Prefix: true/false`: Präfix für native Methoden kann gesetzt werden
+// 
+////
+A list of paths to be searched by the bootstrap class loader. Paths represent directories or libraries (commonly referred to as JAR or zip libraries on many platforms). These paths are searched by the bootstrap class loader after the platform specific mechanisms of locating a class have failed. Paths are searched in the order listed. Paths in the list are separated by one or more spaces. A path takes the syntax of the path component of a hierarchical URI. The path is absolute if it begins with a slash character ('/'), otherwise it is relative. A relative path is resolved against the absolute path of the agent JAR file. Malformed and non-existent paths are ignored. When an agent is started sometime after the VM has started then paths that do not represent a JAR file are ignored. This attribute is optional.
+////
+
+Der Agent bestimmt, wie der Ladeprozess für Klassen instrumentiert wird, wie im Listing 3 und 4 gezeigt.
+// Sogar Bootstrap Klassen der JVM können (mit etwas mehr mehr Aufwand) instrumentiert werden.
+
+In diesem Beispiel wird jeder Typ der mit der `@ToString` Annotation markiert ist, mit einer Methode `toString() { return "transformed"; }` versehen, d.h. die Implementierung wird bedingungslos hinzugefügt.
 
 ////
 Note that it is also possible to instrument classes that were loaded by the bootstrap class loader when using an agent. However, this requires some preparation. First of all, the bootstrap class loader is represented by the null value which makes it impossible to load a class in this class loader using reflection. This is however sometimes necessary to load helper classes into the instrumented class's class loader to support the class's implementation. In order to load classes into the bootstrap class loader, Byte Buddy can create jar files and add these files to the bootstrap class loader's load path. To make this possible, it is however required to save these classes to disk. A folder for these classes can be specified using the enableBootstrapInjection command which also takes an instance of the Instrumentation interface in order to append the classes. Note that all user classes that are used by the instrumented class are also required to be put on the bootstrap search path which is possible using the Instrumentation interface.
 ////
 
-.ToString.java
+Die `AgentBuilder` API entspricht der `ByteBuddy` API, bietet aber einige zusätzliche Methoden zur Definition von Transformationen und Interaktion mit der Instrumentierungs-API.
+
+.Listing 3 ToString.java
 [source,java]
 ----
-cat ToString.java 
+package de.jexp.agent;
+
 import java.lang.annotation.*;
 
 @Retention(RetentionPolicy.RUNTIME)
 public @interface ToString {}
 ----
 
-.ToStringAgent.java
+.Listing 4 ToStringAgent.java
 [source,java]
 ----
-// javac -cp ... ToString.java
-// jar -c -f tostring.jar -m tostring.mf ToStringAgent*class
+package de.jexp.agent;
+
 public class ToStringAgent {
+  // premain Methode des Agenten wird von der JVM vor main-Methode ausgeführt
   public static void premain(String arguments, Instrumentation instrumentation) {
-    new AgentBuilder.Default()
+    new AgentBuilder.Default() // anderer Einstiegspunkt bei Agenten
+        // Matcher, hier für die ToString Annotation
         .type(isAnnotatedWith(ToString.class))
+        // Definition des Transformers, kann auch mittels Lambda erfolgen
         .transform(new AgentBuilder.Transformer() {
             public DynamicType.Builder transform(DynamicType.Builder builder,
                                               TypeDescription typeDescription,
-                                              ClassLoader classloader) {
+                                              ClassLoader classloader, 
+                                              Module module) {
+                // fügt neue toString Methode hinzu bzw. überschreibt existierende
                 return builder.method(named("toString"))
                           .intercept(FixedValue.value("transformed"));
             }
-        }).installOn(instrumentation);
+        })
+        // wird als ClassFileTransformer auf Instrumentation registiert
+        .installOn(instrumentation); 
   }
 }
+/*
+javac -cp ... ToString*.java
+jar -c -f tostring.jar -m tostring.mf ToStringAgent*class
+
+tostring.mf 
+Premain-Class: example.ToStringAgent
+Can-Redefine-Classes: true
+Can-Retransform-Classes: true
+*/
 ----
 
+////
+TODO Delegation mit Annotations-Parametern
+
+.Listing 5 - Ersetzen von Instanzfeldern
+[source,java]
+----
+class ByteCode { public String library = "ASM"; };
+
+var newField = new ByteBuddy()
+        .redefine(ByteCode.class)
+        .field(ElementMatchers.named("library"))
+        .value("ByteBuddy")
+        .make()
+        .load(ClassLoader.getSystemClassLoader())
+        .getLoaded();
+
+
+Field field = newField.getDeclaredField("library");
+assertEquals(String.class, field.getGenericType());
+assertEquals("ByteBuddy", field.get(newField.newInstance()));
+----
+////
+
+////
 * A Java agent is implemented as a simple jar file with an entry point that is specified in this jar file's manifest file as it is described under the linked resource. Using Byte Buddy, the implementation of such an agent is straight forward by using an AgentBuilder. Assuming that we previously defined a simple annotation named ToString, it would be trivial to implement toString methods for all annotated classes simply by implementing the Agent's premain method as follows:
 
 
@@ -731,9 +988,16 @@ TODO RELOADING
 * usually classes are already loaded / also takes loaded classes as argument
 * but there is jvm hotswap
 * ClassReloadingStrategy
+////
 
-need jar: https://search.maven.org/remotecontent?filepath=net/bytebuddy/byte-buddy-agent/1.12.10/byte-buddy-agent-1.12.10.jar
-.AgentTests
+// Im ersten Artikel hatte ich darauf hingewiesen, dass schon geladene Klassen mittels nur mittels eines Agenten neu definiert werden können.
+
+Mittels des `ByteBuddyAgent`, den die Bibliothek schon mitbringt, kann das auch direkt in Laufzeitcode erfolgen, wie in Listing 5 zu sehen.
+
+Dazu wird das `byte-buddy-agent` Jar benötigt, dass man der JVM via `-javaagent` übergibt.
+
+// need jar: https://search.maven.org/remotecontent?filepath=net/bytebuddy/byte-buddy-agent/1.12.10/byte-buddy-agent-1.12.10.jar
+.Listing 5 Redefinieren von Klassen mittels ByteBuddyAgent
 [source,java]
 ----
 import net.bytebuddy.*;
@@ -752,6 +1016,7 @@ public class AgentTest {
 
     public static void main(String[] args) {
         ByteBuddyAgent.install();
+        // Klasssen schon geladen
         Foo foo = new Foo();
         Bar bar = new Bar();
         new ByteBuddy()
@@ -765,8 +1030,9 @@ public class AgentTest {
 }
 ----
 
-Redefinitionen von Klassen funktionieren leider in JShell nicht, aber wenn man die Java Klasse regulär compiliert und ausführt, gibt es keine Probleme.
+NOTE: Redefinitionen von Klassen funktionieren leider in JShell nicht, aber wenn man die Java Klasse regulär compiliert und ausführt, gibt es keine Probleme.
 
+////
 TODO Details API von Bytebuddy
 
 * Default name as inner class of overriden class, same package, so package protected members are visible, but only if injected into original CL
@@ -782,14 +1048,6 @@ Annotation based
 * ClassLoadingStrategy.Default.INJECTION
 
 
-@Origin type
-@
-@SuperCall Callable<?> superMethod,
-@Origin Method method - die gerade ausgeführte Methode
-@SuperMethod - überschriebene Methode der Superklasse
-@SuperCall ?
-@Morph
-////
 This annotation instructs Byte Buddy to inject a proxy class that calls a method's super method with explicit arguments. 
 
 I.e. offers to wrap arbitrary super-methods in the same call API
@@ -798,18 +1056,353 @@ For this, the Morph.Binder needs to be installed for an interface type that take
 
 This is an alternative to using the SuperCall or DefaultCall annotations which call a super method using the same arguments as the intercepted method was invoked with.
 
+You can use the @SuperMethod annotation, if you want to get hold of the original. It is however more recommended to use the @SuperCall or @Morph annotations.
+////
+
+////
+== Delegation mit Zusatzparametern
+
+In Listing 6 wird gezeigt, wie die delegierte Methode Zugriff auf mehr Informationen über den Aufruf erhalten kann.
+
+Mittels zusätzlicher Annotationen kann vorgegeben werden, welche Kontextinformationen von Bytebuddy an die Zielmethode übergeben werden.
+
+.Bytebuddy Delegierungs Annotationen (net.bytebuddy.implementation.bind.annotation)
+[%autowidth,opts=header,cols="m,a"]
+|===
+| Annotation | Beschreibung
+| @Origin Method | die gerade delegierte Methode
+| @Origin Class<?> | die gerade delegierte Klasse
+| @SuperCall Callable<?>| 
+| @SuperMethod Method | überschriebene Methode der Superklasse
+| @AllArguments Object[] | originale Aufrufparameter
+| @This
+|===
+////
+
+== Byte Buddy, Advices und AOP
+
+Aspektorientierte Programmierung mittels AspectJ ist zwar nicht mehr im breiten Einsatz, ihre Konzepte sind aber immer noch aktuell.
+Querschnittsfunktionalitäten wie Logging, Tracing, Security, Caching, Injection und Implementierung von Proxies werden immer noch in den meisten Anwendungsframeworks und Anwendungen benötigt.
+Oft wird die Funktionalität heute direkt mittels Instrumentierung hinzugefügt.
+Auch Byte Buddy besitzt eine Aspekt-Orientierte API rund um die Klasse `Advice`.
+
+Diese wird vor allem mittels Annotationen gesteuert.
+So gibt es `@Advice.OnMethodEnter` und `@Advice.OnMethodExit`, die statische Hilfsmethoden markieren, die am Anfang bzw. Ende von modifizierten Methoden eingefügt (Bytecode wird in Methode kopiert) oder aufgerufen werden sollen.
+Diese Methoden können dann u.a. die eigentliche Methode überspringen (basierend auf dem Rückgabewert der Advice-Methode), den Rückgabewert ändern oder den Aufruf wiederholen (retry).
+
+Diese Advices können auch mittels eines AgentBuilders angewandt werden.
+// In Listing 8 ist ein Beispiel zu sehen, wie ein Cache von Rückgabewerten realisiert werden kann.
+In Listing 6 ist ein Beispiel zu sehen, wie Advices auf eine Methode angwandt werden können, um Laufzeit von Methoden zu messen.
+Dabei kann die Laufzeit sowohl mittels des Rückgabewertes der `OnMethodEnter` Methode, als auch mit einer `lokalen Variable` mittels `@Advice.Local` realisiert werden.
+Bei `@Advice.Local("zeit") long zeit` Parameter auf beiden Advice-Methoden, wird in `OnMethodEnter` die Startzeit zugewiesen und in `OnMethodExit` ausgelesen.
+Bytebuddy generiert dann für diesen Parameter eine entsprechende lokale Variable mit dem angegebenen Namen.
+
+Das bisher genutzte `intercept` überschreibt die Methode (auch wenn sie nicht deklariert ist) mit der Advice.
+Wohingegen `visit` ein klassisches AOP-Advice nur auf existierende Methoden anwendet, was wir ja eigentlich wollen.
+Nur im `rebase`-Modus wird ja der Code der Originalmethode kopiert und somit derselbe Effekt erreicht.
+
+.Listing 6 - Beispiel für AOP Advice zur Laufzeitmessung
+[source,java]
+----
+package example;
+
+import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.asm.Advice;
+import net.bytebuddy.matcher.ElementMatchers;
+
+import java.lang.instrument.Instrumentation;
+
+public class LaufzeitAgent {
+    static class LaufzeitAdvice {
+        @Advice.OnMethodEnter
+        static long vorher(@Advice.Origin String methode,
+                           @Advice.Local("zeit") long zeit) {
+            System.err.println("Vorher: " + methode);
+            zeit = System.nanoTime();
+            return zeit;
+        }
+
+        @Advice.OnMethodExit
+        static void nachher(@Advice.Origin String methode,
+                            @Advice.Enter long startZeit,
+                            @Advice.Return Object ergebnis,
+                            @Advice.Local("zeit") long zeit) {
+            long jetzt = System.nanoTime();
+            System.err.println("Nachher: " + (jetzt-zeit));
+            System.err.println("Zeitmessung " + methode + " Ergebnis "+ergebnis+
+                               "  benötigte " + (jetzt - startZeit) + " ns.");
+        }
+    }
+
+    public static void premain(String arguments, Instrumentation instrumentation) {
+        System.err.println("Running premain");
+        Advice advice = Advice.to(LaufzeitAdvice.class);
+        ElementMatcher matcher = ElementMatchers.nameContainsIgnoreCase("ermittle");
+        new AgentBuilder.Default()
+                .type(ElementMatchers.any())
+                .transform((builder, type, cl, modul) -> builder
+                // nur existierende Methoden modifizieren
+                   .visit(advice.on(matcher))
+                // würde je nach Matcher auch neue Methoden implementieren
+                // .method(matcher).intercept(advice)
+                )
+                .installOn(instrumentation);
+    }
+}
+
+package example;
+
+public class ByteBuddyTest {
+    public static void main(String[] args) {
+        ermittleWert();
+    }
+
+    public static void ermittleWert() {
+        double sum = 0;
+        for (int i = 0; i<100000; i++) {
+          sum += Math.sin(i*Math.PI);
+        }
+    }
+}
+/*
+javac -cp byte-buddy-1.12.10.jar src/example/*.java -d out
+cd out
+jar -c -v -f laufzeit.jar -m ../laufzeit.mf example/LaufzeitAgent*
+java -javaagent:laufzeit.jar -cp ../byte-buddy-1.12.10.jar:. example.ByteBuddyTest
+Running premain
+Vorher: public static double example.ByteBuddyTest.ermittleWert()
+Nachher: 4386083
+Zeitmessung public static double example.ByteBuddyTest.ermittleWert() 
+   Ergebnis 1.8120283056583197  benötigte 4386083 ns.
+result = 1.8120283056583197
+*/
+----
+
+In Tabelle 1 sind noch einmal die für Advices relevanten Annotationen aufgelistet.
+
+[caption=]
+.Tabelle 1 Byte Buddy Advice Annotationen (net.bytebuddy.asm.Advice.*)
+[%autowidth,opts=header, cols="m,a"]
+|===
+| Annotation | Beschreibung
+| @Advice.OnMethodEnter | Aufruf am Anfang der modifizierten Methode
+| @Advice.OnMethodExit | Aufruf am Ende der modifizierten Methode
+| @Advice.AllArguments | Alle Argumente des originalen Methodenaufrufs
+| @Advice.Argument(n,readonly,optional) | n-ter Aufrufparameter der Methode
+| @Advice.This | `this` Referenz der modifizierten Methode
+| @Advice.Return | Rückgabewert der modifizierten Methode, Standardwert bei Exception
+| @Advice.Enter | Rückgabewert der `OnMethodEnter` Methode
+| @Advice.Exit | vorheriger Rückgabewert der `OnMethodExit` Methode
+| @Advice.Thrown | geworfene Exception (für OnMethodExit)
+| @Advice.Local | "lokale", geteilte, schreibbare Variablen-Paramter für Advice-Methoden
+| @Advice.FieldValue | Parameter für den Wert eines sichbaren Feldes
+| @Advice.Origin | String, Methode, Klasse oder Constructor für die modifizierten Methode
+// | @Morph OverrideCallable | OC ist ein Interface mit call(Object[])
+|===
+
+
+Für die Transformation von schon geladenen Klasse, kann auch ein nachträglich installierter (mittels `VirtualMachine.load`) Java-Agent genutzt werden.
+
+Dessen `agentmain` Methode wird dann aufgerufen und kann dann ebenso einen Transformer installieren wie in Listing 4 gezeigt.
+Zusätzlich wird der Test auf Änderungen im Klassenformat abgeschaltet und die `RETRANSFORMATION` Strategie angewandt.
+
+////
+// (alternativ kann die `REDEFINITION` Strategie genutzt werden).
+// TypeStrategy
+
+TODO
+visit dekoriert die methode, also klassische advice
+aber nur wenn sie deklariert ist
+intercept wendet die advice als Implementierung an, überschreibt also die methode, auch wenn sie nicht deklariert ist
+mit "rebase" wird die originalmethode dann ja kopiert und es hst den gleichen effekt
+aber es nimmt eben auch supermethoden mit
+gleichzeitig funktioniert rebase nicht bei redefinition von klassen
+
+transform is per default wie rebase
+aber ein agent der redefiniert soll die class shape nicht ändern, sonst streikt die vm
+das ist ne Einschränkung, jep 159. ewig alt, nie realisiert
+kannst mal dynamic code evolution vm googlen
+drum fahren die meisten Agenten "disableClassFormatChanges"
+und dann geht rebase nicht mehr
+drum lieber advice als visit. das macht such keine neuen frames und ist daher unsichtbar
+sonst hätten vms mit Agenten neue exception stacks
+das wollen viele nicht
+bb schreibt auch die line number offsets um damit alles unsichtbar bleibt
+////
+
+.Listing 4 Retransformation von Klassen
+[source,java]
+----
+Agentmain-Class: example.RetransformAgent
+Can-Retransform-Classes: true
+
+package example;
+
+public class RetransformAgent {
+    public static void agentmain(String argument,
+                                 Instrumentation instrumentation) {
+        Advice advice = Advice.to(LaufzeitAgent.LaufzeitAdvice.class);
+        new AgentBuilder.Default()
+                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                .disableClassFormatChanges()
+                .type(ElementMatchers.any())
+                .transform((DynamicType.Builder<?> builder,
+                            TypeDescription type,
+                            ClassLoader loader,
+                            JavaModule module) -> {
+                    return //... transformation ...;
+                }).installOn(instrumentation);
+    }
+}
+----
+
+////
+@Origin type
+@
+@SuperCall Callable<?> superMethod,
+@Origin Method method - die gerade ausgeführte Methode
+@SuperMethod - überschriebene Methode der Superklasse
+@SuperCall ?
+@Morph
+
 @AllArguments Object[] allArguments, 
 @net.bytebuddy.implementation.bind.annotation.Morph OverrideCallable superInstance ??? (OC ist ein Interface mit call(Object[]))
 @Origin Class<?> type
 
-You can use the @SuperMethod annotation, if you want to get hold of the original. It is however more recommended to use the @SuperCall or @Morph annotations.
-////
+TODO
+== Generate Java Agents?
+
+For the creation of Java agents, Byte Buddy offers a convenience API implemented by the AgentBuilder. The API wraps a ByteBuddy instance and offers agent-specific configuration opportunities by integrating against the Instrumentation API.
 
 
+https://sergiomartinrubio.com/articles/java-code-manipulation-with-byte-buddy/
 
 
+Java Agents
+Byte Buddy also provides an API for creating Java agents with new AgentBuilder(). Therefore we can perform byte code manipulation at runtime.
 
-== Existierende Klassen redefinieren
+This API has similar features to what AOP (Aspec Oriented Programming) libraries like AspectJ provides. Some of the features provided by the Byte Buddy Java Agent API are:
+
+Intercept the method execution and perform additional logic. You can use annotations like @Advice.OnMethodEnter, @Advice.OnMethodExit , @Advice.Origin or @Advice.Enter.
+Get method fields: @Advice.AllArguments
+Add fields and methods to classes: @Advice.FieldValue
+In the following example we are going to show how to use the Agent builder with an agent that will intercept the method execution before and after the method is called.
+
+The Main class contains the target method invokeCustomMethod.
+
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello from main method!");
+        invokeCustomMethod();
+    }
+
+    public static void invokeCustomMethod() {
+        System.out.println("Hello from custom method!");
+    }
+}
+Remember to create the MANIFEST.MF file under resources/META-INF/ with something like:
+
+Manifest-Version: 1.0
+Main-Class: com.sergiomartinrubio.bytebuddyclient.Main
+In a separate project we can create our Java Agent with ByteBuddy. First we can define the “advice” class that will intercept the calls before and after a method is executed:
+
+public class HelloAdvice {
+    @Advice.OnMethodEnter
+    static long invokeBeforeEnterMethod(
+            @Advice.Origin String method) {
+        System.out.println("Method invoked before enter method by: " + method);
+        return System.currentTimeMillis();
+    }
+
+    @Advice.OnMethodExit
+    static void invokeAfterExitMethod(
+            @Advice.Origin String method,
+            @Advice.Enter long startTime
+    ) {
+        System.out.println("Method " + method + " took " + (System.currentTimeMillis() - startTime) + "ms");
+    }
+}
+
+another example
+public class MyAdvices {
+    @Advice.OnMethodEnter(suppress = Throwable.class)
+    static long enter(@Advice.This Object thisObject,
+                      @Advice.Origin String origin,
+                      @Advice.Origin("#t #m") String detaildOrigin,
+                      @Advice.AllArguments Object[] ary,
+                      @Advice.FieldValue(value = "name", readOnly = false) String nameField){
+        
+        System.out.println("Inside enter method . . .  ");
+        
+        if(ary != null) {
+            for(int i =0 ; i < ary.length ; i++){
+                System.out.println("Argument: " + i + " is " + ary[i]);
+            }
+        }
+
+        System.out.println("Origin :" + origin);
+        System.out.println("Detailed Origin :" + detaildOrigin);
+        
+        nameField = "Jack";
+        return System.nanoTime();
+    }
+
+    @Advice.OnMethodExit(suppress = Throwable.class, onThrowable = Throwable.class)
+    static void exit(@Advice.Enter long time){
+        System.out.println("Inside exit method . . .");
+        System.out.println("Method Execution Time: " + (System.nanoTime() - time) + " nano seconds");
+    }
+}
+
+The method annotated with @Advice.OnMethodEnter will be executed before the intercepted method. @Advice.Origin gives you information about the intercepted method. On the other hand, @Advice.OnMethodExit will be executed after the intercepted method. @Advice.Enter contains the value returned by the method annotated with @Advice.OnMethodEnter so we can do things like the method execution time.
+
+Finally we can define our “agent”:
+
+class Agent {
+    public static void premain(String arguments, Instrumentation instrumentation) {
+        new AgentBuilder.Default()
+                .type(ElementMatchers.any())
+                .transform((builder, typeDescription, classLoader, module) -> builder
+                        .method(ElementMatchers.nameContainsIgnoreCase("custom"))
+                        .intercept(Advice.to(HelloAdvice.class)))
+                .installOn(instrumentation);
+    }
+}
+All classes are targeted: .type(ElementMatchers.any()).
+Methods which name contain custom are targeted: .method(ElementMatchers.nameContainsIgnoreCase("custom")).
+Select advice class: .intercept(Advice.to(HelloAdvice.class))).
+Creates and install the agent builder into a given Instrumentation.
+As part of the Java Agent .jar you need to specify the location of the premain method. You can use the maven plugin maven-shade-plugin.
+
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-shade-plugin</artifactId>
+      <version>3.1.0</version>
+      <executions>
+        <execution>
+          <phase>package</phase>
+          <goals>
+            <goal>shade</goal>
+          </goals>
+          <configuration>
+            <transformers>
+              <transformer
+                           implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                <manifestEntries>
+                  <Premain-Class>com.sergiomartinrubio.adviceagent.Agent</Premain-Class>
+                </manifestEntries>
+              </transformer>
+            </transformers>
+          </configuration>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+Byte Buddy offers many other features that are not covered on this article, like intercepting methods marked by a particular annotation, more granular element matchers for classes and methods, constructor interceptors…
+
 
 Agenten können Klassen modifizieren nachdem sie geladen, aber bevor sie ausgeführt werden.
 
@@ -819,31 +1412,15 @@ set values for static final fields
 f you want to set the value of an instance field you can do it by defining a constructor:
 
 // ByteBuddy().redefine(...).defineConstructor(...) add constructor
+////
 
-[source,java]
-----
-class ByteCode { public String library = "ASM"; };
-
-var newField = new ByteBuddy()
-        .redefine(ByteCode.class)
-        .field(ElementMatchers.named("library"))
-        .value("ByteBuddy")
-        .make()
-        .load(ClassLoader.getSystemClassLoader())
-        .getLoaded();
-
-
-Field field = newField.getDeclaredField("library");
-assertEquals(String.class, field.getGenericType());
-assertEquals("ByteBuddy", field.get(newField.newInstance()));
-----
 
 
 ////
 Although we have been working with dynamically created classes, we can work with already loaded classes as well. This can be done by redefining (or rebasing) existing classes and using ByteBuddyAgent to reload them into the JVM.
 
 First, let's add ByteBuddyAgent to our pom.xml:
-////
+
 
 <dependency>
     <groupId>net.bytebuddy</groupId>
@@ -869,7 +1446,6 @@ Foo f = new Foo();
 assertEquals(f.sayHelloFoo(), "Hello Foo Redefined");
 ----
 
-////
 Invoking the sayHelloFoo() will invoke the sayHelloBar() accordingly.
 
 How does ByteBuddy know which method in Bar.class to invoke? It picks a matching method according to the method signature, return type, method name, and annotations.
@@ -905,7 +1481,8 @@ We created a class with the name MyClassName that is a subclass of Object.class.
 Just like we did in previous examples, we implemented our method by intercepting calls to it and delegating them to Bar.class that we created earlier in this tutorial.
 ////
 
-== Proxies
+////
+=== Proxies
 
 https://mydailyjava.blogspot.com/2022/02/using-byte-buddy-for-proxy-creation.html
 
@@ -936,7 +1513,9 @@ Class<?> type = new ByteBuddy()
   .load(Sample.class.getClassLoader())
   .getLoaded();
 ----
+////
 
+////
   By default, Byte Buddy mimics all constructors that the super class is declaring. In the above case, a default constructor will be made available as Sample also declares one.
 
   Note that Byte Buddy always requires a specification of the methods to intercept. If multiple matchers are specified, each their delegation target would be considered in the reverse order of their specification. 
@@ -944,7 +1523,7 @@ Class<?> type = new ByteBuddy()
 -> abstract methods -> just return default value (@Empty -> default value for return type)
 
 -> keep state not in interceptor but in a new field of the class that's proxied
-Within the interceptor, this InterceptorState is accessible via an additional parameter with the FieldValue annotation which accepts the field’s name as its property. Doing so, the generated class itself remains stateless and can remain cached.
+Within the interceptor, this InterceptorState is accessible via an additional parameter with the FieldValue annotation which accepts the field's name as its property. Doing so, the generated class itself remains stateless and can remain cached.
 
 -> constructors can automatically call specific super-constructors with default arguments
 
@@ -952,8 +1531,20 @@ Within the interceptor, this InterceptorState is accessible via an additional pa
 Neben Subklassen und Interfaces zu implementieren kann auch existierender Code transformiert werden.
 
 Mit Java-Agenten kann ByteBuddy Code zur Laufzeit transformieren, wenn dieser geladen wird, wie wir an einem Beispiel sehen werden.
+////
+////
 
-= Teil 2 - AOP, Agenten, ASM, Instrumentierung
+=== Klassen Laden
+
+- by default new class loader -> isolation but expensive
+- can use existing CL
+- Java 9 -> API for class injection via MethodHandles.Lookup
+- with modules instance must be created by module that owns the package of proxied type
+- ClassLoadingStrategy
+- ClassLoadingStrategy.UsingLookup.withFallback(() -> MethodHandles.lookup());
+-> should be sufficient for most cases
+
+=== Zugriff auf die Klassen
 
 == AOP mit ByteBuddy
 
@@ -966,7 +1557,6 @@ Hier das klassische Hello-World für AOP - Ausgabe der Laufzeit einer Methode.
 
 Zum einen muss die 
 
-////
 
 @asm.Advice....
 https://www.programcreek.com/java-api-examples/firestore/?class=net.bytebuddy.asm.Advice&method=Origin
@@ -1090,9 +1680,7 @@ public class PreMainClass {
 }
 ////
 
-== Lambda / Closures
-
-Wo wird es in PowerMock genutzt?
+////
 
 == Java-Agent
 
@@ -1137,21 +1725,6 @@ public class Agent {
 A Java agent can also be registered during the runtime of a Java application. In this case, the instrumentation API allows for the redefinition of already loaded classes, a feature that is known as “HotSwap”. Unfortunately, redefining loaded classes is limited to replacing method bodies. No members may be added or removed, and no types or signatures may change when redefining a class. This limitation does not apply when a class is loaded for the first time, and in those cases the classBeingRedefined parameter is set to null.
 
 
-
-
-
-
-
-== Klassen Laden
-
-- by default new class loader -> isolation but expensive
-- can use existing CL
-- Java 9 -> API for class injection via MethodHandles.Lookup
-- with modules instance must be created by module that owns the package of proxied type
-- ClassLoadingStrategy
-- ClassLoadingStrategy.UsingLookup.withFallback(() -> MethodHandles.lookup());
--> should be sufficient for most cases
-
 == Build Time Instrumentation
 
 - AOT/native image makes it harder to do runtime instrumentation
@@ -1189,114 +1762,14 @@ Class<?> type = cache.findOrInsert(Sample.class.getClassLoader(), Sample.class, 
     .getLoaded();
 });
 
+////
 
 
-== Generate Java Agents?
+== "Achtung Bauarbeiten - Eltern haften für ihre Kinder"
 
-For the creation of Java agents, Byte Buddy offers a convenience API implemented by the AgentBuilder. The API wraps a ByteBuddy instance and offers agent-specific configuration opportunities by integrating against the Instrumentation API.
+Diese zwei Artikel waren vor allem geeignet, um zu verdeutlichen, was in modernen Bibliotheken wie Spring, Powermock oder Micronaut hinter den Kulissen passiert.
 
-
-https://sergiomartinrubio.com/articles/java-code-manipulation-with-byte-buddy/
-
-
-Java Agents
-Byte Buddy also provides an API for creating Java agents with new AgentBuilder(). Therefore we can perform byte code manipulation at runtime.
-
-This API has similar features to what AOP (Aspec Oriented Programming) libraries like AspectJ provides. Some of the features provided by the Byte Buddy Java Agent API are:
-
-Intercept the method execution and perform additional logic. You can use annotations like @Advice.OnMethodEnter, @Advice.OnMethodExit , @Advice.Origin or @Advice.Enter.
-Get method fields: @Advice.AllArguments
-Add fields and methods to classes: @Advice.FieldValue
-In the following example we are going to show how to use the Agent builder with an agent that will intercept the method execution before and after the method is called.
-
-The Main class contains the target method invokeCustomMethod.
-
-public class Main {
-    public static void main(String[] args) {
-        System.out.println("Hello from main method!");
-        invokeCustomMethod();
-    }
-
-    public static void invokeCustomMethod() {
-        System.out.println("Hello from custom method!");
-    }
-}
-Remember to create the MANIFEST.MF file under resources/META-INF/ with something like:
-
-Manifest-Version: 1.0
-Main-Class: com.sergiomartinrubio.bytebuddyclient.Main
-In a separate project we can create our Java Agent with ByteBuddy. First we can define the “advice” class that will intercept the calls before and after a method is executed:
-
-public class HelloAdvice {
-    @Advice.OnMethodEnter
-    static long invokeBeforeEnterMethod(
-            @Advice.Origin String method) {
-        System.out.println("Method invoked before enter method by: " + method);
-        return System.currentTimeMillis();
-    }
-
-    @Advice.OnMethodExit
-    static void invokeAfterExitMethod(
-            @Advice.Origin String method,
-            @Advice.Enter long startTime
-    ) {
-        System.out.println("Method " + method + " took " + (System.currentTimeMillis() - startTime) + "ms");
-    }
-}
-The method annotated with @Advice.OnMethodEnter will be executed before the intercepted method. @Advice.Origin gives you information about the intercepted method. On the other hand, @Advice.OnMethodExit will be executed after the intercepted method. @Advice.Enter contains the value returned by the method annotated with @Advice.OnMethodEnter so we can do things like the method execution time.
-
-Finally we can define our “agent”:
-
-class Agent {
-    public static void premain(String arguments, Instrumentation instrumentation) {
-        new AgentBuilder.Default()
-                .type(ElementMatchers.any())
-                .transform((builder, typeDescription, classLoader, module) -> builder
-                        .method(ElementMatchers.nameContainsIgnoreCase("custom"))
-                        .intercept(Advice.to(HelloAdvice.class)))
-                .installOn(instrumentation);
-    }
-}
-All classes are targeted: .type(ElementMatchers.any()).
-Methods which name contain custom are targeted: .method(ElementMatchers.nameContainsIgnoreCase("custom")).
-Select advice class: .intercept(Advice.to(HelloAdvice.class))).
-Creates and install the agent builder into a given Instrumentation.
-As part of the Java Agent .jar you need to specify the location of the premain method. You can use the maven plugin maven-shade-plugin.
-
-<build>
-  <plugins>
-    <plugin>
-      <groupId>org.apache.maven.plugins</groupId>
-      <artifactId>maven-shade-plugin</artifactId>
-      <version>3.1.0</version>
-      <executions>
-        <execution>
-          <phase>package</phase>
-          <goals>
-            <goal>shade</goal>
-          </goals>
-          <configuration>
-            <transformers>
-              <transformer
-                           implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                <manifestEntries>
-                  <Premain-Class>com.sergiomartinrubio.adviceagent.Agent</Premain-Class>
-                </manifestEntries>
-              </transformer>
-            </transformers>
-          </configuration>
-        </execution>
-      </executions>
-    </plugin>
-  </plugins>
-</build>
-Byte Buddy offers many other features that are not covered on this article, like intercepting methods marked by a particular annotation, more granular element matchers for classes and methods, constructor interceptors…
-
-== Baustelle - Eltern haften für ihre Kinder - move to the end
-
-Dieser Artikel ist vor allem geeignet, um zu verdeutlichen, was in modernen Bibliotheken wie Spring, Powermock oder Micronaut hinter den Kulissen passiert.
-
-Wir selbst sollten fast nie die Notwendigkeit sehen Bytecodegenerierung in unseren Anwendungen einzusetzen, das ist eher in Bibliotheken notwendig, die entweder bestimmten Leistungs- oder Umgebungsanforderungen genügen müssen.
+Wir selbst sollten fast nie die Notwendigkeit sehen, Bytecodegenerierung in unseren Anwendungen einzusetzen, das ist eher in Bibliotheken notwendig, die entweder bestimmten Leistungs- oder Umgebungsanforderungen genügen müssen.
 
 ////
 Anders als regulär erzeugte Objekte werden Klassen nicht vom Garbage Collector entsorgt wenn sie nicht benutzt sind.
@@ -1307,33 +1780,34 @@ Oft wird daher pro neuer Klasse ein neuer Child-Classloader erzeugt, um das Mana
 Daher sollte man mit der Bytecodegenerierung bedacht umgehen.
 Zum Beispiel hatten wir in Neo4j einmal ein Speicherproblem, als zuviele Abfrage-Fragmente als Bytecode compiliert wurden und dann in Execution-Plan Caches vorgehalten wurden und nicht vom Garbage Collector bereinigt werden konnten.
 
-
 == Fazit
 
-ByteBuddy ermöglicht einen leichteren Einstieg in ByteCode Generierung als z.B. ASM.
-Die dynamische Laufzeit mittels eines Java-Agenten ist w
+Bei aller Mächtigkeit und Komplexität die die JVM auf dem Bytecode-Level bietet, ist Byte buddy eine Bibliothek, die sowohl den Einstieg erleichtert als auch für komplexere Anwendungsfälle mitwächst.
+Durch den Fokus auf eine saubere API und Delegation bleibt der eigentliche Generator-Code übersichtlich, verständlich und wartbar. 
+Sowohl für die Generierung zur Compilezeit also auch wie hier gezeigt zur Laufzeit ist Byte buddy gut geeignet.
 
 == Referenzen
 
 * [ByteBuddy] https://bytebuddy.net
+* [Hun12] JS X/12? AOP
 * [BB-GitHub] https://github.com/raphw/byte-buddy
-* [BB-Dokumentation] https://bytebuddy.net/#/tutorial
 * [BB-JavaDoc] https://javadoc.io/doc/net.bytebuddy/byte-buddy/latest/index.html
-* [BB-Email] Mailing list https://groups.google.com/forum/#!forum/byte-buddy
-* [Hun15] JS 6/15 "Code"-Generierung in Java
-* [BB-Resourcen] https://github.com/raphw/byte-buddy/wiki/Web-resources
-* [BB-Projekte] https://github.com/raphw/byte-buddy/wiki/Projects-using-Byte-Buddy
-* [Baeldung] https://www.baeldung.com/byte-buddy
 * [BB-Proxies] https://mydailyjava.blogspot.com/2022/02/using-byte-buddy-for-proxy-creation.html
-
-
-
 * [InfoQ] https://www.infoq.com/articles/Easily-Create-Java-Agents-with-ByteBuddy/
+* [BaeldungInstrumentation] https://www.baeldung.com/java-instrumentation
+* https://blogs.oracle.com/javamagazine/post/runtime-code-generation-with-byte-buddy
+* [BB-Agent-Video] https://www.youtube.com/watch?v=o9NVLXKRKeY
+* [VideoWinterhalterAgenten] https://www.youtube.com/watch?v=oflzFGONG08
+* [WhatIsAJavaAgent] https://www.developer.com/design/what-is-java-agent/
+* [BB-Advice] https://medium.com/@lnishada/introduction-to-byte-buddy-advice-annotations-48ac7dae6a94
+* [Instrumentation-API] https://docs.oracle.com/en/java/javase/18/docs/api/java.instrument/java/lang/instrument/package-summary.html
+* [VirtualMachine-Attach-API] https://docs.oracle.com/en/java/javase/18/docs/api/jdk.attach/com/sun/tools/attach/VirtualMachine.html
+* [AgentsIntro] https://www.javaadvent.com/2019/12/a-beginners-guide-to-java-agents.html
+
+////
 * [MethodDelegation] https://javadoc.io/static/net.bytebuddy/byte-buddy/1.12.10/net/bytebuddy/implementation/MethodDelegation.html#method.summary
 * [ByteBuddyTutorial] https://chowdera.com/2022/03/202203030247314611.html
 * [BBPowerMock] https://github.com/raphw/byte-buddy/issues/296
 // * [BB-JRebel] https://www.jrebel.com/blog/using-byte-buddy-for-annotation-driven-java
-* [BaeldungInstrumentation] https://www.baeldung.com/java-instrumentation
-* [Instrumentation] https://docs.oracle.com/javase/8/docs/api/java/lang/instrument/package-summary.html
-* https://blogs.oracle.com/javamagazine/post/runtime-code-generation-with-byte-buddy
-* [BB-Agent-Video] https://www.youtube.com/watch?v=o9NVLXKRKeY
+
+////
