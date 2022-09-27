@@ -1,5 +1,5 @@
 == Projekt Loom - Ein roter Faden
-:img: ../../img
+:img: https://github.com/jexp/blog/raw/gh-pages/img
 :figure-caption: Abbildung
 :listing-caption: Listing
 
