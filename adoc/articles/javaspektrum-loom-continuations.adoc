@@ -1,0 +1,504 @@
+== Projekt Loom - Ein roter Faden
+:img: ../../img
+:figure-caption: Abbildung
+:listing-caption: Listing
+
+Seit meiner letzten Kolumne zum Thema Loom [Hun0521] ist mehr als ein Jahr vergangen.
+
+Mit der Veröffentlichung von Java 19 am 20. Sept 2022 gibt es Grund zum Feiern, ein Release näher an der generellen Verfügbarkeit und Langzeitsupport in Java 21.
+
+image::https://images.unsplash.com/photo-1643766883802-be314eb4d339[]
+
+Virtuelle Threads [JEP-425] haben weitere Updates erfahren und auch bei der Strukturierten Nebenläufigkeit (Structured Concurrency) [JEP-428] gibt es einen neuen Ansatz.
+
+Ich habe beim JUG Saxony Day [JSD2022] einen Vortrag zu dem Thema gehalten.
+Da er so gut angekommen ist, wollte ich Ihnen die Neuigkeiten nicht vorenthalten.
+
+In der ersten Kolumne habe ich die Geschichte von Nebenläufigkeit und paralleler Ausführung in Java und Beispiele für die damalige API dargestellt.
+
+Hier möchte ich etwas mehr auf die darunterliegende Implementierung eingehen und welche Aspekte zu berücksichtigen sind.
+
+Für eine leicht verständliche Erklärung und wirklich gut gemachte Videos möchte ich auf José Paumard's JEP Café [JEPCafe] hinweisen.
+Loom wurde in Episoden 12 und 13 tiefergehend behandelt.
+
+=== Los gehts
+
+Mit Java 19 ist Loom weiter fortgeschritten, wir können es mittels JShell schnell ausprobieren.
+
+Zur Zeit sind virtuelle Threads immer noch ein Preview-Feature, d.h. die JVM muss mit `--enable-preview` gestartet worden sein, um die APIs zu nutzen.
+
+.Erster Loom Test
+[source,shell]
+----
+sdk install java 19-open
+jshell --enable-preview
+
+var threads = IntStream.range(0,10)
+    .mapToObj(i -> Thread.ofVirtual().start(
+        () -> {
+            System.out.printf("Hello %d. %s%n",i,Thread.currentThread());
+        }
+    ))
+    .toList();
+
+for (var t : threads) t.join();
+
+Hello 0. VirtualThread[#44]/runnable@ForkJoinPool-1-worker-2
+Hello 2. VirtualThread[#46]/runnable@ForkJoinPool-1-worker-9
+Hello 1. VirtualThread[#45]/runnable@ForkJoinPool-1-worker-10
+Hello 3. VirtualThread[#47]/runnable@ForkJoinPool-1-worker-10
+Hello 4. VirtualThread[#48]/runnable@ForkJoinPool-1-worker-10
+Hello 6. VirtualThread[#50]/runnable@ForkJoinPool-1-worker-9
+Hello 5. VirtualThread[#49]/runnable@ForkJoinPool-1-worker-10
+Hello 9. VirtualThread[#54]/runnable@ForkJoinPool-1-worker-9
+Hello 7. VirtualThread[#51]/runnable@ForkJoinPool-1-worker-9
+Hello 8. VirtualThread[#52]/runnable@ForkJoinPool-1-worker-9
+----
+
+Wir können in der Ausgabe des Listings 1 sehen, dass die virtuellen Threads asynchron ausgeführt werden.
+Desweiteren wird ersichtlich, dass ein virtueller Thread an einem Platform-Thread in einem Fork-Join-Pool gebunden wird.
+Hier sind für die 10 virtuellen Threads, 3 Pool-Threads verwendet worden.
+
+Auch wenn Millionen von virtuellen Threads ausgeführt werden, werden vom darunterliegenden Fork Join Pool (nicht der CommonPool der Parallel-Streams, sondern eine separate Instanz) nur so viele Platformthreads bereitgestellt wie CPUs vorhanden sind (konfigurierbar mittels `-Djdk.defaultScheduler.parallelism=N`).
+
+.Bindung an Platform-Threads
+[source,java]
+----
+var t = Thread.ofVirtual().unstarted(
+    () -> {
+        System.out.println(Thread.currentThread());
+        try {
+            Thread.sleep(1000);
+        } catch(InterruptedException e) {}
+        System.out.println(Thread.currentThread());
+    }
+);
+
+t.start();
+t.join();
+// VirtualThread[#57]/runnable@ForkJoinPool-1-worker-12
+// VirtualThread[#57]/runnable@ForkJoinPool-1-worker-13
+----
+
+In Listing 2 wird der virtuelle Thread pausiert, der Aufruf dieser blockierenden Operation führt dazu, dass er vom Carrier-Thread entfernt wird und sein Zustant gespeichert.
+Nach der Pause wird der Zustand wieder restauriert und (ggf.) auf einen anderen Platform-Thread gebunden.
+Dieses Konzept der "Continuation" werden wir noch detaillieren.
+
+.eine Million virtuelle Threads
+[source,java]
+----
+long count = 1_000_000;
+long start = System.currentTimeMillis();
+var threads = java.util.concurrent.ConcurrentHashMap.newKeySet(100);
+try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+    for (int i=0;i<count;i++) {
+        exec.submit(() -> {
+            threads.add(Thread.currentThread().toString().split("@")[1]);
+            try {
+                Thread.sleep(1000);
+            } catch(InterruptedException e) {}
+            threads.add(Thread.currentThread().toString().split("@")[1]);
+        });
+    }
+}
+System.out.printf(
+    "Executing %d virtual threads took %d ms and %d platform threads",
+    count, System.currentTimeMillis()-start, threads.size()
+    );
+// Executing 1000000 virtual threads took 30215 ms and 10 platform threads.
+----
+
+Mittels virtuellen Threads können wir auch eine Million Aufgaben innerhalb einiger Sekunden ausführen, wobei nur 10 Platform Threads genutzt wurden.
+
+Dabei ist das rein rechnerisch viel weniger als die eine Million Sekunden, die die Threads gewartet haben.
+Bei regulären Threads wäre das anders gewesen, wie in Listing 4 ersichtlich.
+
+.eintausend Platform Threads
+[source,java]
+----
+long count = 1_000;
+long start = System.currentTimeMillis();
+var threads = java.util.concurrent.ConcurrentHashMap.newKeySet(100);
+try (var exec = Executors.newFixedThreadPool(10)) {
+    for (int i=0;i<count;i++) {
+        exec.submit(() -> {
+            threads.add(Thread.currentThread().getName());
+            try {
+                Thread.sleep(1000);
+            } catch(InterruptedException e) {}
+            threads.add(Thread.currentThread().getName());
+        });
+    }
+}
+System.out.printf(
+    "Executing %d platform threads took %d ms and %d platform threads",
+    count, System.currentTimeMillis()-start, threads.size()
+    );
+// Executing 1000 platform threads took 100412 ms and 10 platform threads
+----
+
+=== Nebenläufigkeit und Parallelität
+
+Sind Nebenläufigkeit und Parallelität eigentlich dasselbe?
+
+Nein, korrekterweise drücken sie folgendes aus (siehe auch Abbildung 1):
+
+* Nebenläufigkeit: Mindestens zwei Aufgaben werden so ausgeführt dass alle voranschreiten. 
+* Parallele Ausführung: Mehr als eine Aufgabe werden auf mehr als einer CPU parallel, gleichzeitig ausgeführt.
+* Parallelität: Eine Aufgabe wird in Teilaufgaben zerlegt die dann parallel ausgeführt werden.
+* Nebenläufigkeit und Parallelität: Aufgaben werden parallel so ausgeführt dass sie alle voranschreiten und Resourcen effizient ausgenutzt werden.
+
+.Gegenüberstellung Nebenläufigkeit und Parallelität
+image::{img}/nebenlaeufig-parallel.svg[]
+
+=== Unter der Haube
+
+Unter der Haube ist im JDK für Loom viel passiert, wer tiefer eintauchen möchte dem sei der Pull-Request zu Loom [LoomPR] im OpenJDK ans Herz gelegt.
+Dort wurden 1333 Dateien modifiziert, um den aktuellen Stand von Loom zu implementieren.
+
+In allen blockierenden Operationen wurde versucht die Implementierung für virtuelle Threads so umzustellen, dass statt den Thread zu blockieren/pausieren, die Kontrolle über eine sogenannte Continuation abgegeben wird.
+
+Am Beispiel der Aufrufkette von `Thread.sleep` können wir nachvollziehen was hier passiert, für den Fall dass unser Thread ein virtueller Thread ist.
+In Listing 5 sind einige Quell
+
+1. Thread.sleep()
+2. VirtualThread.sleepNanos()
+3. VirtualThread.doSleepNanos()
+4. VirtualThread.parkNanos()
+5. VirtualThread.yieldContinuation()
+6. VirtualThread.unmount() 
+7. Continuation.yield()
+
+.VirtualThread.sleep Implementierung
+[source,java]
+----
+void parkNanos(long nanos) {
+    assert Thread.currentThread() == this;
+...
+    // park the thread for the waiting time
+    if (nanos > 0) {
+        long startTime = System.nanoTime();
+
+        boolean yielded;
+        Future<?> unparker = scheduleUnpark(nanos);
+        setState(PARKING);
+        try {
+            yielded = yieldContinuation();
+        } finally {
+...
+            cancel(unparker);
+        }
+... park on carrier thread when pinned ...
+    }
+}
+
+static final ContinuationScope VTHREAD_SCOPE = 
+    new ContinuationScope("VirtualThreads");
+
+@ChangesCurrentThread
+private boolean yieldContinuation() {
+    boolean notifyJvmti = notifyJvmtiEvents;
+
+    // unmount
+    if (notifyJvmti) notifyJvmtiUnmountBegin(false);
+    unmount();
+    try {
+        return Continuation.yield(VTHREAD_SCOPE);
+    } finally {
+        // re-mount
+        mount();
+        if (notifyJvmti) notifyJvmtiMountEnd(false);
+    }
+    ...
+}
+
+private void unmount() {
+    // set Thread.currentThread() to return the platform thread
+    Thread carrier = this.carrierThread;
+    carrier.setCurrentThread(carrier);
+    // break connection to carrier thread, synchronized with interrupt
+    synchronized (interruptLock) {
+        setCarrierThread(null);
+    }
+    carrier.clearInterrupt();
+}
+----
+
+=== Was sind eigentlich Continuations
+
+Continuations sind Konstrukte einer Sprache oder Runtime, die es erlauben den aktuellen Zustand einer Aufgabe (Computation) zu speichern, die Kontrolle abzugeben und später wieder den Zustand zu restaurieren und fortzusetzen.
+In einigen (funktionalen) Sprachen werden Continuations explizit eingesetzt, in anderen werden sie unter der Haube genutzt.
+
+Im JDK [ContinuationJDK] sind sie kein Teil der öffentlichen API, sondern im `jdk.internal.vm` Paket enthalten, für das wir explizit den Zugriff erlauben müssen, um es zu benutzen.
+
+In Listing 6 sehen wir einen `ContinuationScope` (wie schon beim `VirtualThread`), der verschiedene Contiuation Instanzen strukturiert.
+
+Dann wird die Continuation mit dem Scope und einenm `Runnable` erzeugt, und wird dann später mittels `run( )` aufgerufen.
+Im Unterschied zu einem Runnable ist es in einer Continuation möglich, die Ausführung immer wieder mit `Continuation.yield(scope)` zu unterbrechen.
+In dem Fall geht die Kontrolle zurück an den Aufrufer und es muss wieder `run( )` genutzt werden um bis zum nächsten `yield( )` fortzufahren.
+Das Ganze läuft so lange, bis der `continuation.isDone( )` Aufruf wahr wird.
+
+
+.Continuation Beispiel
+[source,java]
+----
+// https://gist.github.com/sabonii/b0aea87fede2647cb3e0d8fd3fa1ce7d
+// javac --enable-preview --source 19 --add-exports java.base/jdk.internal.vm=ALL-UNNAMED  Loom.java
+// java --enable-preview --add-exports java.base/jdk.internal.vm=ALL-UNNAMED  Loom
+
+import jdk.internal.vm.Continuation;
+import jdk.internal.vm.ContinuationScope;
+
+public class Loom {
+    public static void main(String[] args) throws Exception {
+var scope = new ContinuationScope("scope");
+
+var c = new Continuation(scope, () -> {
+    System.out.println("Started");
+    Continuation.yield(scope);
+    System.out.println("Running");
+    Continuation.yield(scope);
+    System.out.println("Still running");
+});
+
+System.out.println("Start");
+int i=0;
+while (!c.isDone()) {
+    c.run();
+    System.out.println("Running "+i+" result "+c.isDone());
+    i++;
+}
+System.out.println("End");
+    }
+}
+/*
+Start
+Started
+Running 0 result false
+Running
+Running 1 result false
+Still running
+Running 2 result true
+End
+*/
+----
+
+.Ablauf Continuation
+image::{img}/continuation-loom.svg[]
+
+Was passiert in `yield` wenn eine Continuation die Kontrolle abgibt?
+
+Zum einen wird der aktuelle Inhalt des Stacks auf den Heap kopiert um ihn später restaurieren zu können (siehe Abbildung 2).
+Desweiteren wird der aktuelle Träger-(Carrier-)Thread vom virtuellen Thread befreit und wieder an den Pool zurückgegeben (`unmount`).
+Beim Fortsetzen der Continuation läuft die entgegengesetzte Aktion ab.
+
+Und genau das passiert in den meisten blockierenden Operationen auf die ein virtueller Thread trifft.
+
+=== Die Ausnahme ist die Regel
+
+Leider wäre es viel zu schön, wenn diese Anpassung komplett und ohne Problem umgesetzt werden könnte.
+
+Das Kopieren des Stacks geht leider nicht, wenn im Abschnitt des Threads C-Code (wie zum Beispiel Systemaufrufe) ausgeführt werden oder wenn physische Speicheradressen auf dem Stack vorliegen, da diese beim Fortsetzen wahrscheinlich nicht mehr aktuell wären.
+
+Dann bleibt der virtuelle Thread and den Trägerthread gebunden (pinned) und kann diesen nicht freigeben.
+Falls es dadurch zu einer Verknapppung von Threads im Pool kommt, werden temporäre Zusatzthreads erzeugt, um die notwendige Kapazität bereitzustellen.
+Das kann mittels `-Djdk.tracePinnedThreads=full` ausgegeben werden.
+
+Daher können `synchronized` Blöcke nicht von virtuellen Thread profitieren, und sollten wenn möglich mit `ReentrantLocks` ersetzt werden.
+Dasselbe gilt für Datei-Operationen deren C-Code noch nicht ersetzt werden kann, es wird zumindest für Linux auf `io_uring` gewartet.
+
+Andere Bestandteile des JDK wie Netzwerkoperationen, Locks, multi-threaded Datenstrukturen und Sleep wurden umgestellt, bestimmte Infrastruktur wie `java.lang.reflect.Method` von C-Code auf Java-Code mit `MethodHandle` refaktoriert.
+
+=== Beispiele
+
+Von Elliot Barlas gibt es einige gute Beispiele für Anwendungen von Loom, die ich im folgenden kurz vorstellen möchte.
+
+==== Loom Micro-Services
+
+Ein klassisches Beispiel ist ein Web-Server, dessen Controller mehrere Services aufrufen, um eine Anfrage abzuarbeiten, zum Beispiel Authentifizierung, Autorisierung und die eigentliche Geschäftsoperation.
+
+.Sequenzdiagramm Aufruf Services
+image::https://github.com/ebarlas/project-loom-comparison/raw/main/docs/sequence-threads.png[]
+
+Elliot hat das exemplarisch für Platform- und virtuelle Threads, sowie für asynchrone API mittels `CompletableFuture` umgesetzt. 
+Dabei pausieren die via HTTP aufgerufenen Dienste nur für 333 Millisekunden.
+
+Dabei ist in Listing 7 sehr schön zu sehen, dass für virtuelle Threads, nur der Executor ausgetauscht werden musste, ansonsten aber keine Quellcodeänderung nötig war.
+
+.Microservice Backend Implementierung
+[source,java]
+----
+public void handle(Request request, Consumer<Response> callback) {
+    executorService.execute(() -> callback.accept(doHandle(request)));
+}
+Response doHandle(Request request) {
+    var token = request.header("Authorization");
+    var authentication = sendRequestFor("/authenticate?token=" + token, …);
+    var authorization = sendRequestFor("/authorize?id=" + authentication.userId(), …);
+    var meetings = sendRequestFor("/meetings?id=" + authentication.userId(), …);
+    var headers = List.of(new Header("Content-Type", "application/json"));
+    return new Response(200, "OK", headers, Json.toJson(meetings));
+}
+<T> T sendRequestFor(String endpoint, Class<T> type) 
+    throws IOException, InterruptedException {
+    URI uri = URI.create("http://%s%s".formatted(backend, endpoint));
+    var request = HttpRequest.newBuilder().uri(uri).GET().build();
+    HttpResponse<String> response = httpClient.send(request, 
+                                        HttpResponse.BodyHandlers.ofString());
+    if (response.statusCode() != 200) {
+        throw new RuntimeException("error occurred contacting "+endpoint);
+    }
+    return Json.fromJson(response.body(), type);
+}
+----
+
+Im Vergleich zeigen virtuelle Threads schon jetzt eine bessere Latenz, Durchsatz, Speichernutzung und CPU-Auslastung, was wirklich beeindruckend ist, wie in Abbildung 4 ersichtlich.
+
+.Ergebnisse Web
+image::https://github.com/ebarlas/project-loom-comparison/raw/main/docs/comparison-plots.png[]
+
+==== Game of Life
+
+Ein interessanter Ansatz, viele leichtgewichtige Prozesse zu demonstrieren ist es die Automaten-Simulation "Game of Life" so umzusetzen, dass jede Zelle einen Thread darstellt, der sich mit seinen Nachbarn über Kommunikationskanäle austauscht.
+
+Dieses Programmierungsparadigma wird auch als Communicating Sequential Processes (CSP) bezeichnet.
+
+In der Implementierung von Elliot Barlas werden thread-sichere `LinkedBlockingQueue` für die Kommunkation genutzt, davon werden aber sehr viele benötigt, 8 für die Nachbarn und jeweils 1 für Takt und Information über Lebendigkeit der Zelle.
+
+Also bei einem 1000 x 1000 Grid sind das eine Million Threads und 10 Millionen Kanäle.
+Ziemlich beeindruckend.
+
+Mit virtuellen Threads kann damit ein Durchsatz von 30 Berechnungen pro Sekunde erreicht werden.
+
+Der Code für die Berechnung des nächsten Zustands ist auch sehr übersichtlich, wie in Listng 8 zu sehen.
+Dabei ist jede `take`, `put` Operation blockierend, also im virtuellen Thread eben gerade nicht.
+
+Die `alive` Instanzvariable wird nur lokal im der Zelle vorgehalten, der Rest der Evolution passiert über die Kommunikation.
+
+.Game of Life
+[source,java]
+----
+private void run() {
+    while (true) {
+        tickChannel.take(); // wait for tick stimulus
+
+        // announce liveness to neighbors
+        outChannels.forEach(ch -> ch.put(alive)); 
+        
+        // receive liveness from neighbors
+        int neighbors = inChannels.stream()
+            .map(Channel::take)
+            .mapToInt(b -> b ? 1 : 0).sum(); 
+
+        // calculate next state based on game of life rules
+        alive = alive && neighbors == 2 || neighbors == 3;
+
+        // announce resulting next state
+        resultChannel.put(alive); 
+    }
+}
+----
+
+==== Helidon Níma
+
+Auch von Helidon Projekt gibt es eine erste Alpha Version von Níma, einer Reimplementierung von HTTP Server APIs (HTTP 1 und 2) mittels virtuellen Threads für die Bearbeitung der Anfragen
+In ersten Tests im Vergleich zur existierenden Helidon Framework liefer Níma 10x mal mehr Durchsatz und zieht fast mit einer Netty Implementierung gleich, wie in Abbildung 5 zu sehen.
+
+.Performance Vergleich Helidon Níma
+image::https://miro.medium.com/max/1400/1*f48UVvEz2CtCpJ_mtsGRKg.png[]
+
+Auch die Entwickler von Quarkus evaluieren wie sie virtuelle Threads in das Framework integrieren [LoomQuarkus]
+
+=== Strukturen schaffen
+
+****
+Launching Millions of Threads is no better than GOTO
+-- Nathaniel Smith
+****
+
+Ich hatte in der letzten Kolumne zum Thema ja Structured Concurrency [JEP-428] schon angesprochen, damals war das Thema zwar schon auf dem Schirm, aber noch zu vage.
+
+Jetzt gibt es mit dem `StructuredTaskScope` eine API (noch nicht im JDK), die erlauben sollen, die Koordinierung vieler Threads zu erleichtern.
+
+Dieser Scope verhält sich etwas wie ein `ExecutorService`, er ist auch `AutoCloseable`.
+Statt `submit` werden `Runnables` mittels `fork` übergeben, man erhält ein `Future<T>` zurück.
+Danach wird mit `scope.join( )` auf den Durchlauf (oder Fehlschlagen) aller Aufgaben gewartet.
+
+Im Anschluss müsste für alle Futures der Zustand überprüft, und ggf. Ergebnisse extrahiert werden (`future.resultNow()` bzw `future.exceptionNow( )`).
+
+Wie auch in Listing 9 ersichtlich ist das eine ziemliche Zeremonie.
+
+.Anwendung StructuredTaskScope
+[source,java]
+----
+import jdk.incubator.concurrent.*;
+try ( var scope = new StructuredTaskScope<String>() ) {
+    var future1 = scope.fork(task1);
+    var future2 = scope.fork(task2);
+    scope.join();
+    return switch (future1.state()) {
+        case Future.SUCCESS -> future1.resultNow();
+        case Future.FAILED -> future1.exceptionNow();
+    } 
+} 
+----
+
+Daher gibt es für konkrete Anwendungsfälle spezielle Subklassen von `StructuredTaskScope` wie `StructuredTaskScope.ShutdownOnSuccess<T>` ("Erster im Ziel gewinnt") oder `StructuredTaskScope.ShutdownOnFailure<T>` ("Fail fast").
+
+Diese implentieren dann eine konkrete Strategie, die alle Aufgaben (Task) und deren Futures in den verschiedenen Zuständen korrekt behandelt und ggf. auch unterbricht.
+
+Hier ein Beispiel von `StructuredTaskScope.ShutdownOnSuccess` in Listing 10.
+
+.Beispiel für StructuredTaskScope.ShutdownOnSuccess
+[source,java]
+----
+import jdk.incubator.concurrent.*;
+try ( var scope = new StructuredTaskScope.ShutdownOnSuccess<String>() ) {
+    IntStream.range(0,10).forEach(i -> 
+ scope.fork(() -> String.valueOf(i)));
+    scope.join();
+    // first returning wins, exception if none did
+    System.out.println(scope.result());
+}
+----
+
+Es ist angedacht, dass eigene Subklassen für Strategien für die eigene Logik für das koordinierte Ausführen von parallelen Aufgaben implementiert werden sollen.
+Dann muss die `handleComplete(Future<T>)` Methode überschrieben werden, die asynchron! immer dann aufgerufen wird, wenn ein Task fertig oder abgebrochen wurde.
+In dieser muss dann threadsicher die Strategie des Zustandssystems und eine etwaige Abspeicherung von Ergebnissen bzw. Fehlern vorgenommen werden.
+In einer eigenen Rückgabemethode für Ergebnisse oder Fehler, werden die aufgesammelten Informationen dann aggregiert und zurückgegeben.
+
+
+Persönlich finde ich die API noch nicht so gelungen, vor allem, da mit `fork` und `join` Aspekte aus der Implementierung (Fork-Join-Pool) in die Geschäftlogik leaken.
+
+Desweiteren ist die korrekte Implementierung einer `StructuredTaskScope` Subklasse nicht trivial, da alle `Future` Zustände berücksichtigt werden und alle Interaktionen mit `handleCompletion` threadsafe sein müssen.
+
+Ich hoffe das es entweder im JDK oder in entsprechenden Bibliotheken häufige Muster für koordinierte Ausführung (wie in Aktorsystemen) korrekt implementiert werden.
+Es ist auch noch nicht klar, wie Beziehungen solche Scopes untereinander bzw. zu ihren Aufgaben konkret realisiert werden, um auch Hierarchien von parallelen Ausführungseinheiten korrekt zu handhaben.
+
+=== Fazit 
+
+Loom hat einige wichtige Schritte genommen auf dem Weg zur allgemeinen Verfügbarkeit.
+Die Beibehaltung der Thread API wird vielen Projekten den Test und die Adoption leichter machen.
+Wir sehen schon die ersten Frameworks die Test-Implementierungen von massiv parallelen Aspekten ihrer Infrastruktur mit Loom demonstrieren.
+
+Für Structured Concurrency wünsche ich mir eine weniger technische API und SPI bzw. mehr Implementierungen gängiger Muster von hierarisch verteilten Aufrufketten.
+
+=== Referenzen
+
+* [Hun0521] JavaSpektrum 05/21 Project Loom
+* [JEP425] https://openjdk.org/jeps/425
+* [JEP428] https://openjdk.org/jeps/428
+* [LoomWiki] https://wiki.openjdk.org/display/loom
+* [JSD2022] https://www.slideshare.net/jexp/looming-marvelous-virtual-threads-in-java
+* [InsideLoom] https://inside.java/tag/loom
+helidon-n%C3%ADma-helidon-on-virtual-threads-130bb2ea2088
+* [JEPCafe] https://www.youtube.com/watch?v=2nOj8MKHvmw
+* [LoomLab] https://github.com/nipafx/loom-lab
+* [ContinuationJDK] https://github.com/openjdk/loom/blob/fibers/src/java.base/share/classes/jdk/internal/vm/Continuation.java#L238
+* [LoomPR] https://github.com/openjdk/jdk/pull/8166/files
+* [StructuredConcurrency] https://vorpus.org/blog/notes-on-structured-concurrency-or-go-statement-considered-harmful/
+* [GitHubBarlas] https://github.com/ebarlas
+* [HelidonNima] https://medium.com/helidon/
+* [LoomQuarkus] https://developers.redhat.com/devnation/tech-talks/integrate-loom-quarkus
+* [ContinuationSource] https://github.com/openjdk/loom/blob/fibers/src/java.base/share/classes/jdk/internal/vm/Continuation.java#L238
+* [StructuredTaskScopeAPI] https://download.java.net/java/early_access/loom/docs/api/jdk.incubator.concurrent/jdk/incubator/concurrent/StructuredTaskScope.html
