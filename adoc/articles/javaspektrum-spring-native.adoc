@@ -58,6 +58,7 @@ Hier noch einmal eine kurze Zusammenfassung wie der Prozess der native-Image Gen
 Der Java-Code der Anwendung, des JDK, der in Java geschriebenen Substrate JVM, werden zusammen betrachtet.
 
 Vom aggressiven Graal Compiler wird diese Menge Klassen vom Eintrittspunkt der Anwendung in vielen Phasen (30+) optimiert und minimiert, so dass zum Schluss nur die minimale, effiziente Essenz unseres Programms und genau der Infrastruktur-Implementierung (nicht einmal Klassen, Objekte oder Methoden) die es benötigt, übrig bleibt.
+
 Alles was nicht offensichtlich erreichbar ist, wird entfernt.
 
 Diese wird dann in Maschinencode für die Zielplatform übersetzt, und dann komplett eigenständig als statisch oder dynamisch gelinktes Binärfile bereitgestellt.
@@ -65,7 +66,8 @@ Diese wird dann in Maschinencode für die Zielplatform übersetzt, und dann komp
 Währed des Prozesses wurden schon "sicheren" Klassen statisch initialisiert ihre Metadaten geladen und effizient in das Programm integriert. Sichere Klassen sind alle JDK Klassen, Klassen die keine nativen Programme aufrufen und in keiner Vererbungshierarchie mit unsicheren Klassen stehen.
 Damit ist kein dynamisches Klassloading mehr nötig und möglich und kein Speicher (ehemals Metasspace) mehr dafür benötigt.
 
-Falls die statische Analyse für Dateien und Klassen nicht mit Sicherheit ermitteln kann, ob diese Ressourcen genutzt werden, kann diese Information als separate "Reachability"-Metadaten beigesteuert werden. Das bedeutet, dass Reflection und Zugriff auf dynamische Resourcen zwar grundsätzlich funktioniert, aber in vielen Fällen Nacharbeit erforderlich ist. In statischen Initialisierungen hingegen dürfen keine Laufzeitoperationen passieren.
+Falls die statische Analyse für Dateien und Klassen nicht mit Sicherheit ermitteln kann, ob diese Ressourcen genutzt werden, kann diese Information als separate "Reachability"-Metadaten beigesteuert werden. Das bedeutet, dass Reflection und Zugriff auf dynamische Resourcen zwar grundsätzlich funktioniert, aber in vielen Fällen Nacharbeit erforderlich ist. 
+In statischen Initialisierungen hingegen dürfen keine Laufzeitoperationen passieren.
 
 Man kann davon aber Ausnahmen definieren und einiges auf die Laufzeit verlagern, verliert für diese Teile dann aber einige der Vorteile des Ansatzes.
 Auch diese Details müssen in den Metadaten für den native Image Buildprozesse bereitgestellt werden.
@@ -120,7 +122,7 @@ Mit diesen Annahmen, kann der Spring-Buildprozess folgendes generieren:
 
 Bean Definitionen aus der Spring Konfiguration (Listing {counter:listing}), Spring Factories und von Annotations-Analyse werden zum Build-Zeitpunkt generiert und Aufrufe von @Bean-Methoden z.b. für Injection ebenso direkt als Quellcode ausgeneriert (Listing {counter:listing}).
 
-.Listing {listing} Beispiel aus den Spring Docs - Konfigurationsklasse
+.Listing 1 Beispiel aus den Spring Docs - Konfigurationsklasse
 [source,java]
 ----
 @Configuration(proxyBeanMethods = false)
@@ -183,7 +185,7 @@ Genauso wird der Quelltext für die Ausführung von Injections (Constructor und 
 
 Für die Initialisierung des `ApplicationContext` wird Code in einem `ApplicationContextInitializer` erzeugt.
 
-Der erzeugte Code ist zwar umfangreich, aber gut lesbar (siehe Listing Y) und kann also auch für das Debuggen von Problemen genutzt werden, er ist in `target/spring-aot/main/sources` zu finden.
+Der erzeugte Code ist zwar umfangreich, aber gut lesbar (siehe Listing {listing}) und kann also auch für das Debuggen von Problemen genutzt werden, er ist in `target/spring-aot/main/sources` zu finden.
 
 Für den Fall dass Graal nicht feststellen kann ob eine Methode oder Klasse zur Laufzeit genutzt wird, kann Spring in den generierten Metadaten mitgeben, dass diese benötigt werden.
 Ein Beispiel war Annotationen an privaten Methoden, die per Reflection aufgerufen werden müssen.
@@ -299,6 +301,7 @@ Direct driver instance 1975371131 created for server address localhost:7687
 Started JavaspektrumNativeApplication in 0.057 seconds (process running for 0.062)
 
 curl http://localhost:8080/
+
 [ { "name": "Spring" },
   { "name": "Summer" },
   { "name": "Fall"   },
@@ -319,6 +322,7 @@ In Spring Boot 3 wurde Java EE 8 mit Jakarta EE 9 APIs ersetzt, ausser (`javax.s
 
 
 Die `spring-native` Erweiterung und auch das `spring-aot-maven-plugin` Maven Plugin werden nicht mehr benötigt.
+
 Nur der reguläre Spring Boot Parent Starter, in Version 3.0.0 (oder später siehe Listing {counter:listing}).
 
 .Listing {listing} Spring Boot Parent Starter
