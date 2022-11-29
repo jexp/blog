@@ -502,3 +502,4 @@ helidon-n%C3%ADma-helidon-on-virtual-threads-130bb2ea2088
 * [LoomQuarkus] https://developers.redhat.com/devnation/tech-talks/integrate-loom-quarkus
 * [ContinuationSource] https://github.com/openjdk/loom/blob/fibers/src/java.base/share/classes/jdk/internal/vm/Continuation.java#L238
 * [StructuredTaskScopeAPI] https://download.java.net/java/early_access/loom/docs/api/jdk.incubator.concurrent/jdk/incubator/concurrent/StructuredTaskScope.html
+
