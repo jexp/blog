@@ -1,0 +1,513 @@
+== Dicht gepackt - Native Images mit Spring Boot 3
+
+:imagesdir: ../../img/
+
+image::green-boots-running.png[]
+
+Das Thema Native Image mit GraalVM beschäftigt mich ja schon eine ganze Weile. 
+Neben der raschen Weiterentwicklung der GraalVM mit stetig neuen Verbesserungen, jetzt in 22.3 mit Support für Java 19,  JLink Unterstützung, neue Monitoring Features, und new Native Image APIs. 
+GraalVM's Graal JIT Kompiler und die native-image Werkzeuge werden Teil des OpenJDK.
+
+In den letzten Jahren sind einige Java Frameworks entstanden, die unter anderem einen Fokus auf kleine und schnell startende Container-Images haben.
+Über Quarkus, Micronaut und Helidon und ihre Vorteile für Cloud-Deployment, hatte ich ja in der Vergangenheit schon berichtet:
+
+* schnelle Startzeit (meist < 50 ms)
+* kleinere Container-Images, da JVM, JDK und Anwendung aggressiv ausgedünnt und zu effizienten Maschinencode transformiert werden
+* weniger Speicherverbrauch für Klasseninformationen und dynamische Mechanismen
+* keine Bibliotheks-Abhängigkeiten (statisch gelinkt), kann als Image ohne Betriebssystem (distroless) erzeugt werden
+
+Aber auch die Nachteile wurden diskutiert:
+
+* Aufwand für die Konfiguration und Erzeugung der native Images
+* Nur Serial-GC in GraalVM Community Edition
+* Etwas schlechtere Performance für langlaufende Prozesse da kein Hotspot Kompiler optimieren kann
+* Kein dynamisches Laden von Klassen und Reflection, Klassenpfad ist fixiert
+
+Jetzt ziehen die Spring-Teams nach und mit dem Erscheinen von Spring Boot 3 und Spring Framework 6 hat die Unterstützung für Native Images in Spring die Beta- und Testphase verlassen und ist allgemein verfügbar.
+
+Spring Boot 3 wechselt auch die Basis Java Version auf Java 17 (LTS long term supported version), das ist ggf. relevant für Änderungen im JDK, Bibliotheken und Deployments (wenn man keine Native Images nutzt).
+Auch Java EE 8 wurde von Jakarta EE 9 abgelöst, das verändert einige Paketnamen für Importe.
+Spring Boot 3 entfernt auch alle "deprecated" APIs der Spring Boot 2.x Versionen.
+
+Seit seinem ersten Erscheinen im Jahr 2002 erlaubte Spring die dynamische Konstruktion von Backend-Anwendungen, indem Depedency Injection, Controller, Komponenten, Services, Repositories, Transaktions-Proxies und vieles mehr dynamisch mittels Reflection erzeugt wurden.
+
+Das ist im Ansatz der Ahead-of-Time (AOT) Analyse und Kompilierung durch GraalVM nicht mehr möglich, so dass im SpringFramework eine Menge Änderungen vorgenommen werden mussten, um dieses Setup zu unterstützen.
+
+Im Allgemeinen müssen diese Informationen und Konfigurationen von der Laufzeit (beim Start der Anwendung) auf den Build-Zeitpunkt migriert werden.
+
+////
+The fact that GraalVM Native Images are produced ahead-of-time means that there are some key differences between native and JVM based applications. The main differences are:
+
+Static analysis of your application is performed at build-time from the main entry point.
+
+Code that cannot be reached when the native image is created will be removed and won’t be part of the executable.
+
+GraalVM is not directly aware of dynamic elements of your code and must be told about reflection, resources, serialization, and dynamic proxies.
+
+The application classpath is fixed at build time and cannot change.
+
+There is no lazy class loading, everything shipped in the executables will be loaded in memory on startup.
+
+There are some limitations around some aspects of Java applications that are not fully supported.
+////
+
+== GraalVM Native Image
+
+Hier noch einmal eine kurze Zusammenfassung wie der Prozess der native-Image Generierung funktioniert.
+
+Der Java-Code der Anwendung, des JDK, der in Java geschriebenen Substrate JVM, werden zusammen betrachtet.
+
+Vom aggressiven Graal Compiler wird diese Menge Klassen vom Eintrittspunkt der Anwendung in vielen Phasen (30+) optimiert und minimiert, so dass zum Schluss nur die minimale, effiziente Essenz unseres Programms und genau der Infrastruktur-Implementierung (nicht einmal Klassen, Objekte oder Methoden) die es benötigt, übrig bleibt.
+Alles was nicht offensichtlich erreichbar ist, wird entfernt.
+
+Diese wird dann in Maschinencode für die Zielplatform übersetzt, und dann komplett eigenständig als statisch oder dynamisch gelinktes Binärfile bereitgestellt.
+
+Währed des Prozesses wurden schon "sicheren" Klassen statisch initialisiert ihre Metadaten geladen und effizient in das Programm integriert. Sichere Klassen sind alle JDK Klassen, Klassen die keine nativen Programme aufrufen und in keiner Vererbungshierarchie mit unsicheren Klassen stehen.
+Damit ist kein dynamisches Klassloading mehr nötig und möglich und kein Speicher (ehemals Metasspace) mehr dafür benötigt.
+
+Falls die statische Analyse für Dateien und Klassen nicht mit Sicherheit ermitteln kann, ob diese Ressourcen genutzt werden, kann diese Information als separate "Reachability"-Metadaten beigesteuert werden. Das bedeutet, dass Reflection und Zugriff auf dynamische Resourcen zwar grundsätzlich funktioniert, aber in vielen Fällen Nacharbeit erforderlich ist. In statischen Initialisierungen hingegen dürfen keine Laufzeitoperationen passieren.
+
+Man kann davon aber Ausnahmen definieren und einiges auf die Laufzeit verlagern, verliert für diese Teile dann aber einige der Vorteile des Ansatzes.
+Auch diese Details müssen in den Metadaten für den native Image Buildprozesse bereitgestellt werden.
+
+Als Garbage Collector stellt GraalVM in der Community Edition leider nur den Serial GC (klein und leichtgewichtig für kleinere Heaps) bereit und in GraalVM Enterprise optional G1.
+
+Weitere Einschränkungen sind in [NativeImageCompat] erläutert.
+
+////
+When you use GraalVM Native Image to build a native executable, it only includes the elements reachable from your application entry point, its dependent libraries, and the JDK classes discovered through static analysis. However, the reachability of some elements (such as classes, methods, or fields) may not be discoverable due to Java’s dynamic features, including reflection, resource access, dynamic proxies, and serialization.
+
+If an element is not reachable, it is not included in the generated executable, which can lead to run time failures. To include elements whose reachability is undiscoverable, the Native Image builder requires externally provided reachability metadata.
+
+This repository provides reachability metadata for libraries that do not support GraalVM Native Image.
+
+Reachability metadata is enabled for native image build by default. For each library included in the native image, the plugin native-maven-plugin will automatically search for GraalVM reachability metadata in the repository that was released together with the plugin.
+////
+
+== Spring Boot für Native Images
+
+Die Arbeit an der Unterstützung von Native Images im Spring Framework ist jetzt schon seit mindestens 3 Jahren im Gange.
+
+Am Anfang gab es `spring-fu` eine deklarative Bean-Definition, in Kotlin und Scala, die auf Reflection verzichtete.
+
+Danach wurde in "Spring GraalVM Native" als Alpha Version die ersten Prototypen und Tests vorgenommen (Sébastien Deleuze, Stephane Nicoll).
+
+Die erste Spring-Native Beta version wurde im März 2021 veröffentlicht [SpringNativeBeta] und war dann auch zum Testen auf dem Spring-Intializer verfügbar, dort wurden die `spring-native` und `spring-aot-maven-plugin` (Brian Clozel) eingeführt und genutzt.
+
+Andy Clement entwickelte mit seiner Erfahrung aus AspectJ die Inferenz-Engine die Spring Konfigurationen so analysierte dass das Laufzeitverhalten simuliert werden kann, um die korrekten Metadaten und Quelltext für GraalVM zu generieren, wobei letzteres die bessere Wahl darstellt.
+
+Damals gab es auch noch `@NativeHint` und `@TypeHint` Annotationen, die jetzt durch bessere Analyse bzw. den `RuntimeHintsRegistrar` ersetzt wurden.
+
+Im ganzen Prozess wurde eng mit dem GraalVM, Spring Core, aber auch Redhat (Hibernate) und Tomcat, Jetty, Netty und anderen Teams zusammegearbeitet.
+
+Wie schon erwähnt ist die Spring Boot Infrastruktur traditionell auf den dynamischen Zustand und Informationen des Laufzeitsystems angewiesen um mittels Auto-Konfiguration die notwendigen Spring-Beans, Umgebungen, Injections, Konfiguration und Initialisierungen vorzunehmen.
+
+Da diese Mechanismen stark auf Reflection, dynamisches Laden von Klassen, Proxies und Scan des Klassenpfades beruhen, müssen sie für Native Images eingeschränkt werden.
+
+Es wird eine "closed-world" ohne Dynamik angenommen und auf dieser Basis wurde das Framework angepasst.
+Einige Annotationen sind in dieser Welt nicht funktional, z.B. `@Profile` und `@ConditionalOnProperty`. 
+
+Mit diesen Annahmen, kann der Spring-Buildprozess folgendes generieren:
+
+* Java Quellcode
+* JVM Bytecode (z.b. für Proxies)
+* Metadata für den Graal Compiler
+* Metainformationen für Ressourcen (`resource-config.json`)
+* Metainformationen für Reflection (`reflect-config.json`)
+* Metainformationen für Serialisierung (`serialization-config.json`)
+* Metainformationen für Java Proxies (`proxy-config.json`)
+* Metainformationen für JNI (`jni-config.json`)
+
+Bean Definitionen aus der Spring Konfiguration (Listing {counter:listing}), Spring Factories und von Annotations-Analyse werden zum Build-Zeitpunkt generiert und Aufrufe von @Bean-Methoden z.b. für Injection ebenso direkt als Quellcode ausgeneriert (Listing {counter:listing}).
+
+.Listing {listing} Beispiel aus den Spring Docs - Konfigurationsklasse
+[source,java]
+----
+@Configuration(proxyBeanMethods = false)
+public class MyConfiguration {
+
+    @Bean
+    public MyBean myBean() {
+        return new MyBean();
+    }
+
+}
+----
+
+.Listing {listing} Beispiel aus den Spring Docs - Generierte Bean-Definitionen
+[source,java]
+----
+/**
+ * Bean definitions for {@link MyConfiguration}.
+ */
+public class MyConfiguration__BeanDefinitions {
+
+    /**
+     * Get the bean definition for 'myConfiguration'.
+     */
+    public static BeanDefinition getMyConfigurationBeanDefinition() {
+        Class<?> beanType = MyConfiguration.class;
+        RootBeanDefinition beanDefinition = new RootBeanDefinition(beanType);
+        beanDefinition.setInstanceSupplier(MyConfiguration::new);
+        return beanDefinition;
+    }
+
+    /**
+     * Get the bean instance supplier for 'myBean'.
+     */
+    private static BeanInstanceSupplier<MyBean> getMyBeanInstanceSupplier() {
+        return BeanInstanceSupplier.<MyBean>forFactoryMethod(
+                MyConfiguration.class, "myBean").withGenerator(
+                (registeredBean) -> registeredBean.getBeanFactory()
+                .getBean(MyConfiguration.class).myBean());
+    }
+
+    /**
+     * Get the bean definition for 'myBean'.
+     */
+    public static BeanDefinition getMyBeanBeanDefinition() {
+        Class<?> beanType = MyBean.class;
+        RootBeanDefinition beanDefinition = new RootBeanDefinition(beanType);
+        beanDefinition.setInstanceSupplier(getMyBeanInstanceSupplier());
+        return beanDefinition;
+    }
+
+}
+----
+
+Dieser Quelltext kann dann vom Graal Kompiler korrekt ausgewertet werden. Die Literale für Klassennamen werden nicht für die Erzeugung der Instanzen benutzt, nur für das Auffinden in einer Map.
+
+Während dieser Phase wird die Anwendung nur so weit initialisiert, wie es für die Generierung der Bean-Definitionen notwendig ist, nicht bis zur Erzeugung der Spring-Beans.
+
+Genauso wird der Quelltext für die Ausführung von Injections (Constructor und `@Autowired`) erstellt.
+
+Für die Initialisierung des `ApplicationContext` wird Code in einem `ApplicationContextInitializer` erzeugt.
+
+Der erzeugte Code ist zwar umfangreich, aber gut lesbar (siehe Listing Y) und kann also auch für das Debuggen von Problemen genutzt werden, er ist in `target/spring-aot/main/sources` zu finden.
+
+Für den Fall dass Graal nicht feststellen kann ob eine Methode oder Klasse zur Laufzeit genutzt wird, kann Spring in den generierten Metadaten mitgeben, dass diese benötigt werden.
+Ein Beispiel war Annotationen an privaten Methoden, die per Reflection aufgerufen werden müssen.
+
+Statt den weitverbreiteten dynamic Proxies werden jetzt konkrete Proxy-Klassen als Bytecode mittels `cglib` erzeugt.
+Diese sind dann in `target/spring-aot/main/classes` zu finden und müssen ggf. decompiliert werden.
+In einigen Spring Modulen, wie in Spring Data wurde das auch schon für Instanziierung von Entitäten gemacht.
+
+Die generierten Klassen können auch in einem nicht-native-Image Ausführung genutzt werden um eine möglichst nahe Ausführungsumgebung z.b. für Tests und Debugging zu erhalten.
+Aber auch im Allgemeinen gibt es Vorteile von Code-Generierung zum Buildzeitpunkt gegenüber Laufzeitverhalten, wie zum Beispiel Micronaut seit Anfang an deutlich macht.
+
+== Minimalbeispiel
+
+Um zu zeigen, wie das mit einem Minimalbeispiel funktioniert, habe ich bei start.spring.io ein Projekt mit folgenden Dependencies zusammengestellt:
+
+* Spring Native
+* Spring Web
+* Spring Data Neo4j
+* Testcontainers
+
+image::[]
+
+Netterweise kann man das sich das ganze auch mittels `curl` vom Spring Initializr herunterladen, siehe Listing {counter:listing}.
+
+.Listing {listing} - curl Kommando um Spring Starter Projekte herunterzuladen
+[source,shell]
+----
+curl https://start.spring.io/starter.tgz \
+  -d dependencies=data-neo4j,native,testcontainers,web \
+  -d type=maven-project \
+  -d language=java \
+  -d packaging=jar \
+  -d jvmVersion=17 \
+  -d bootVersion=3.0.0 \
+  -d groupId=de.jexp \
+  -d artifactId=native \
+  -d packageName=de.jexp.native \
+  -d name=javaspektrum-native | tar -xzvf -
+----
+
+Dieses habe ich heruntergeladen, die Neo4j-Konfiguration für den Server in `application.properties` eingetragen und folgende Teile zur `JavaspektrumNativeApplication` hinzugefügt (siehe Listing {counter:listing}).
+
+* Spring Data Neo4j annotiertes Java Record für `Season` (Jahreszeit)
+* `SeasonRepository` Interface 
+* einen `RestControler` - `SeasonController` der in `index()` die vorhandenen Jahreszeiten auflistet
+* `CommandLineRunner.run` um die 4 Jahreszeiten initial zur Datenbank hinzuzufügen
+
+.Listing {listing} JavaspektrumNativeApplication mit minimaler Implementierung
+[source,java]
+----
+@SpringBootApplication
+@EnableNeo4jRepositories(considerNestedRepositories=true)
+public class JavaspektrumNativeApplication 
+        implements CommandLineRunner {
+
+	public static void main(String[] args) {
+		SpringApplication.run(
+            JavaspektrumNativeApplication.class, args);
+	}
+
+    @Node
+    public record Season(@Id String name) {}
+
+    public interface SeasonRepository 
+            extends Neo4jRepository<Season, String> {
+    }
+
+    @RestController
+    public static class SeasonController {
+        @Autowired SeasonRepository repo;
+        @GetMapping("/")
+        public List<Season> index() {
+            return repo.findAll();
+        }
+    }
+
+    @Autowired SeasonRepository repo;
+
+    public void run(String...args) {
+        List.of("Spring","Summer","Fall","Winter").stream()
+        .map(Season::new).forEach(repo::save);
+    }
+}
+----
+
+Wir können unsere Anwendung mittels `./mvnw spring-boot:run` ausführen, dann werden die Daten in die Datenbank eingefügt und der Controller liefert sie wieder auf `http://localhost:8080/` aus.
+
+Der native Image Buildprozess benötigt zur Zeit GraalVM 22.3, wir müssen das also zuerst installieren, bevor wir das native Docker Image bzw. die ausführbare Datei erzeugen können (Listing {counter:listing}).
+
+.Listing {listing} Erzeugung des Native Docker Images
+[source,shell]
+----
+sdk install java 22.3.r17-grl
+./mvnw -Pnative spring-boot:build-image
+./mvnw -Pnative native:compile
+----
+
+Wenn wir dann unsere Native Image Anwendung ausführen, startet sie in 57 Millisekunden und stellt dann den REST-Endpunkt zur Verfügung (Listing {counter:listing}).
+
+.Listing {listing} - Native Image ausführen
+[source,shell]
+----
+# Native Executable ausführen
+target/native
+...
+
+Starting AOT-processed JavaspektrumNativeApplication using Java 17.0.5 with PID 9535 
+...
+Root WebApplicationContext: initialization completed in 15 ms
+...
+Direct driver instance 1975371131 created for server address localhost:7687
+...
+Started JavaspektrumNativeApplication in 0.057 seconds (process running for 0.062)
+
+curl http://localhost:8080/
+[ { "name": "Spring" },
+  { "name": "Summer" },
+  { "name": "Fall"   },
+  { "name": "Winter" } ]
+----
+
+////
+The easiest way to start a new native Spring Boot project is to go to start.spring.io, add the “GraalVM Native Support” dependency and generate the project. The included HELP.md file will provide getting started hints.
+start.spring.io (add native)
+////
+
+== Migration von Spring Boot 2.7
+
+Ist zumeist eine Migration von Spring Boot 2 zu 3 (siehe [GlantzSB3Upgrade], [SB3UpgradeGuide])
+
+Java 17 als LTS (long term support) Release ist die neue Baseline Version für Spring Framework 6 und Spring Boot 3.
+In Spring Boot 3 wurde Java EE 8 mit Jakarta EE 9 APIs ersetzt, ausser (`javax.sql` und `javax.crypto`) müssen die Paktimporte von `javax.*` nach `jakarta.*` umgestellt werden.
+
+
+Die `spring-native` Erweiterung und auch das `spring-aot-maven-plugin` Maven Plugin werden nicht mehr benötigt.
+Nur der reguläre Spring Boot Parent Starter, in Version 3.0.0 (oder später siehe Listing {counter:listing}).
+
+.Listing {listing} Spring Boot Parent Starter
+[source,xml]
+----
+<parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.0.0</version>
+</parent>
+----
+
+Dafür gibt es jetzt darin ein `native` Maven Profil, das mittels `mvn clean -Pnative spring-boot:build-image` genutzt werden kann.
+
+////
+As the BeanFactory is fully prepared at build-time, conditions are also evaluated. This has an important difference compared to what a regular Spring Boot application does at runtime. For instance, if you want to opt-in or opt-out for certain features, you need to configure the environment used at build time to do so. !!! The process-aot goal shares a number of properties with the run goal for that reason.
+////
+
+Was passiert bei der Erzeugung eines Container-Images im nativen Profil [NativeProfile]?
+
+1. `process-aot` wird vom Spring Boot Maven Plugin (`spring-boot-maven-plugin`) ausgeführt
+2. Konfiguration `build-image` um ein native Image zu erzeugen (ohne das Profil wird ein reguläres Docker Image gebaut)
+3. Konfiguration des GraalVM Native Build Tools Maven Plugins (`native-maven-plugin`)
+** GraalVM Version, 
+** Ereichbarkeits(Reachability)-MetaDaten-Download, 
+** Klassenpfad und nicht das repaketierte `main.jar`
+
+Daher sollten die beiden Plugins in der `pom.xml` der Anwendung definiert werden (siehe Listing {counter:listing})
+// TODO: sollte das nicht das native profile mitbringen?
+
+.Listing {listing}
+[source,xml]
+----
+<plugin>
+    <groupId>org.graalvm.buildtools</groupId>
+    <artifactId>native-maven-plugin</artifactId>
+</plugin>
+<plugin>
+   <groupId>org.springframework.boot</groupId>
+   <artifactId>spring-boot-maven-plugin</artifactId>
+</plugin>
+----
+
+////
+== CI/CD
+
+Da das Erstellen eines native Image ziemlich viel Zeit in Anspruch nimmt, ist es nicht sinnvoll das bei jedem CI/CD Lauf (zum Beispiel bei Commits oder Pull-Requests) durchzuführen.
+
+Dort können entweder reguläre Images erstellt und getestet und für die native Images separate, geplante oder manuelle Integrations-Testläufe genutzt werden.
+
+* Cloud-Native Buildpacks
+* Native Build Tools
+
+
+TODO: GitHub Actions
+Buildpacks / CNCF
+
+Größeneinsparung um die 50%
+////
+
+== Troubleshooting
+
+Die Hauptprobleme ergeben sich in den folgenden Szenarien.
+
+Eine genutzte Bibliothek oder deren Abhängigkeit ist noch nicht für native Image Generierung vorbereitet.
+Oft hilft es die aktuellste Version zu nutzen oder auf den Issue-Trackern der Bibliothek nach dem Thema zu suchen.
+
+Falls es unabdingbar ist, können eigene Metadaten für erstellt werden, die es auch ohne Zutun der Autoren ermöglichen, GraalVMs native Images zu nutzen.
+Darin werden Ausnahmen, zusätzliche Resourcen und Dateien, Alternativ-Implementierungen für Reflection-Zugriff usw. mitgeteilt.
+
+Für die eigene Anwendung werden solche Metadaten aus der statischen Analyse ermittelt, die aber nicht immer komplette Ergebnisse liefert.
+Dann ist es möglich mittels eines Agenten und einigen Test-Läufen mit realistischem Verhalten die relevanten Klassen und Dateien zu ermitteln, die dem GraalVM Buildprozess bekannt gemacht werden.
+
+Diese werden dann im angegebenen Verzeichnis gespeichert und können vom Graal-Compiler genutzt werden.
+
+* jni-config.json, 
+* reflect-config.json, 
+* proxy-config.json, 
+* resource-config.json, 
+* predefined-classes-config.json, 
+* serialization-config.json
+
+////
+This directory (or any of its subdirectories) is searched for files with the names jni-config.json, reflect-config.json, proxy-config.json, resource-config.json, predefined-classes-config.json, serialization-config.json which are then automatically included in the build process.
+////
+
+Für wiederholte Ausführungen mit verschiedenen Nutzungsprofilen kann mittels `-agentlib:native-image-agent=config-merge-dir=src/main/resources/META-INF/native-image` angegeben werden, wo die Informationen zu vorherigen Läufen gespeichert worden die mit der aktuellen Ausführung vereinigt werden sollen (siehe Listing {counter:listing}).
+
+.Listing {listing} Native Image Agent
+[source,shell]
+----
+java -Dspring.aot.enabled=true \
+  -agentlib:native-image-agent=config-output-dir=src/main/resources/META-INF/native-image \
+  -jar .\target\myservice-0.0.1-SNAPSHOT.jar
+----
+
+
+Alternativ können die notwendigen Infromationen mittels des `RuntimeHintsRegistrar` APIs von Spring Boot 3 deklariert werden.
+Dazu müssen in Implementierungen der Methode `RuntimeHintsRegistrar.registerHints` Klassen, Konstruktoren, Methoden, Dateien usw. angemeldet werden, die entweder berücksichtigt, analysiert oder mit in das native Image kopiert werden müssen.
+Diese Informaitonen landen dann zumeist in `resource-config.json` (siehe Listing {counter:listing}).
+
+////
+All we need to do is to create a class that implements the RuntimeHintsRegistrar interface, then make appropriate calls to the provided RuntimeHints instance. We can then use @ImportRuntimeHints on any @Configuration class to activate those hints. See below my implementation in CustomerController class.
+
+Line 3: activate the hints by @ImportRuntimeHints.
+Line 29–41: create a class named CustomerControllerRuntimeHints that implements RuntimeHintsRegistrar. Particularly pay attention to lines 38 and 39, where those two Liquibase configuration files are being “hinted.”
+////
+
+.Listing {listing} - Definition von RuntimeHints mittels Implementierung von RuntimeHintsRegistrar
+[source,java]
+----
+class SeasonControllerRuntimeHints implements RuntimeHintsRegistrar {
+
+    @Override
+    public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
+        hints.reflection()
+                .registerConstructor(
+                        SeasonController.class.getConstructors()[0], ExecutableMode.INVOKE)
+                .registerMethod(ReflectionUtils.findMethod(
+                        SeasonController.class, "index"), ExecutableMode.INVOKE);
+        hints.resources().registerPattern("config/my-config.json");
+    }
+}
+----
+
+Diese Informationen können dann mittels der `@ImportRuntimeHints` Annotation für die jeweiligen Klassen bekanntgemacht werden (siehe Listing {counter:listing}).
+
+.Listing {listing} - Nutzung von RuntimeHints mittles @ImportRuntimeHints
+[source,java]
+----
+@RestController
+@ImportRuntimeHints(SeasonControllerRuntimeHints.class)
+public class SeasonController {
+
+    private final SeasonRepository repo;
+
+    public MyController(SeasonRepository repo) {
+        this.repo = repo;
+    }
+
+    @GetMapping
+    public List<Season> index() {
+        return repo.findAll();
+    }
+}
+----
+
+Mittels `mvn clean -Pnative spring-boot:build-image -Dmaven.test.skip` kann die Verarbeitung der RuntimeHints ausgelöst werden.
+
+=== Limitierungen und Fazit
+
+Obwohl die native Image Unterstützung von Spring Boot 3 schon weit vorangeschritten ist, gibt es noch einige Einschränkungen, siehe auch die Dokumentation ([SB3NativeLimitations]) und das dedierte Wiki [SBGraalWMWiki].
+
+Zur Zeit gab es Einschränkungen bei:
+
+* signierten Jars
+* Mockito Unterstützung
+* offizielle Buildpacks für ARM (nur inoffiziell)
+* WebJars wegen ihres dynamischen Ressourcenladens (stattdessen direkt der Front-End-Anwendung bereitstellen)
+
+Wie schon erwähnt sind das vor allen Bibliotheken, deren Autoren noch keine "Reachability" Metadata beisteuern, so dass die GraalVM Community das selbst leisten muss.
+Deshalb gibt es das GraalVM "Reachability Metadata" Projekt [GraalVMMetadata], in der die Metadaten für viele quelloffene Bibliotheken gesammelt werden, die dann von den GraalVM Native Build Tools ab Version 0.9.13 genutzt werden können.
+
+////
+GraalVM native images are an evolving technology and not all libraries provide support. The GraalVM community is helping by providing reachability metadata for projects that don’t yet ship their own. Spring itself doesn’t contain hints for 3rd party libraries and instead relies on the reachability metadata project.
+
+If you encounter problems when generating native images for Spring Boot applications, please check the Spring Boot with GraalVM page of the Spring Boot wiki. You can also contribute issues to the spring-aot-smoke-tests project on GitHub which is used to confirm that common application types are working as expected.
+
+If you find a library which doesn’t work with GraalVM, please raise an issue on the reachability metadata project.
+
+
+The GraalVM Reachability Metadata Repository enables Native Image users to share and reuse metadata for libraries and frameworks in the Java ecosystem, and thus simplify maintaining third-party dependencies. The repository is integrated with GraalVM Native Build Tools beginning with version 0.9.13: you can enable automatic use of the metadata repository for Gradle projects or for Maven projects.
+////
+
+== Referenzen
+
+* [SpringBoot3Release] https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-3.0-Release-Notes
+* [SpringBoot3ReleaseBlog] https://spring.io/blog/2022/11/24/spring-boot-3-0-goes-ga
+* [SpringNativeImageDocs] https://docs.spring.io/spring-boot/docs/3.0.0/reference/html/native-image.html#native-image
+* [GlantzNativeSB3] https://betterprogramming.pub/going-native-with-spring-boot-3-ga-4e8d91ab21d3
+* [GlantzNativeSB2] https://betterprogramming.pub/how-to-integrate-spring-native-into-spring-boot-microservices-add2ece541b8
+* [GlantzSB3Upgrade] https://betterprogramming.pub/notes-on-spring-boot-3-upgrade-a15e16f84862
+* [SB3UpgradeGuide] https://spring.io/blog/2022/05/24/preparing-for-spring-boot-3-0
+* [NativeProfile] https://docs.spring.io/spring-boot/docs/current/maven-plugin/reference/htmlsingle/#_using_the_native_profile
+* [GraalVMNativeBuildTools] https://graalvm.github.io/native-build-tools/latest/index.html
+* [SBMavenPlugin] https://docs.spring.io/spring-boot/docs/current/maven-plugin/reference/htmlsingle/#aot
+* [Spring6Heise] https://www.heise.de/hintergrund/Spring-Framework-6-verarbeitet-Native-Images-und-baut-auf-Jakarta-EE-9-oder-10-7342050.html
+* [SB3NativeLimitations] https://docs.spring.io/spring-boot/docs/current/reference/html/native-image.html#native-image.advanced.known-limitations
+* [GraalVMMetadata] https://github.com/oracle/graalvm-reachability-metadata
+* [SBGraalWMWiki] https://github.com/spring-projects/spring-boot/wiki/Spring-Boot-with-GraalVM
+* [NativeImageCompat] https://www.graalvm.org/latest/reference-manual/native-image/metadata/Compatibility/
+* [SpringNativeBeta] https://spring.io/blog/2021/03/11/announcing-spring-native-beta
