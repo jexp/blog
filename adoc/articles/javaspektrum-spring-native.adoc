@@ -1,6 +1,7 @@
 == Dicht gepackt - Native Images mit Spring Boot 3
 
 :imagesdir: ../../img/
+:imagesdir: https://raw.githack.com/jexp/blog/gh-pages/img/
 
 image::green-boots-running.png[]
 
@@ -206,7 +207,7 @@ Um zu zeigen, wie das mit einem Minimalbeispiel funktioniert, habe ich bei start
 * Spring Data Neo4j
 * Testcontainers
 
-image::[]
+image::start-spring-io.png[]
 
 Netterweise kann man das sich das ganze auch mittels `curl` vom Spring Initializr herunterladen, siehe Listing {counter:listing}.
 
