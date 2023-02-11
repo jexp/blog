@@ -1,0 +1,648 @@
+== Herr der IO Ringe: IO_Uring im Linux Kernel und in Java
+
+:img: ../../img
+
+Bild: Kaffeversand oder Kaffeetheke mit Bestellung
+
+Teaser:
+Wie wir in dieser Kolumne schon oft diskutiert haben, sind blockierende Operationen auf Systemen mit limitierter Anzahl von Ausführungseinheiten (CPUs, Threads) eine Krux.
+Für IO betrifft das zwar im Endeffekt unsere Programme, hat aber die Ursache in der Kernarchitektur des Betriebsystems.
+Für Linux wird seit einiger Zeit an einer Lösung "io_uring" für asynchrone IO gearbeitet, die es ermöglicht viele dieser Operationen auszuführen, ohne den Aufrufer zu blockieren.
+
+In diese Kolumne wollen wir uns das ganze mal etwas im Detail anschauen, und herausfinden ob, wann und wie das für die Java Entwicklung relevant wird.
+
+=== Einführung 
+
+Blockierendes Verhalten ist sowohl gewollt, wie z.B. Synchronisierung, als auch der Physik geschuldet, wie die Latenz von Netzwerk, Speichermedien, Datenbanken. 
+In Systemen mit begrenzter Parallelität wird das zum Problem, weil die endliche Zahl von (wirklich) ausführenden Einheiten irgendwann komplett blockiert ist, und dann keine weitere Arbeit aufgenommen werden kann.
+Dabei warten sie alle nur auf das Ende der Blockierung, also meist auf die Antwort eines angefragten Systembestandteils und könnten eigentlich während dieser Zeit sinnvolle Aufgaben ausführen.
+
+Das trifft sowohl für den User-Space zu, in dem für Programmiersprachen bisher Lösungen wie reaktive Programmierung (Rx, callbacks, promises) oder Continuations (async-await, Fibers, Loom) innerhalb der Sprache und Laufzeitumgebung vorangetrieben worden.
+
+Wie schon in den Kolumnen zu virtuellen Threads [HunXxxx] diskutiert, gibt es dafür verschiedene Lösungsansätze.
+
+Auf einen besseren Ansatz für Datei-Eingabe- und Ausgabeoperationen (IO) wird schon lange gewartet, bisher haben diese den Aufrufer hart blockiert und konnten nicht ohne weiteres effizient und nicht-blockierend gemacht werden.
+
+=== Geschichte
+
+Historisch gibt es viele verschiedene Linux Kernel APIs für IO von `read/write` bis zu `preadv2`
+Linux hat schon länger eine asynchrone Schnittstelle für asynchrone IO, namens AIO, die sich nur für direkte (nicht-gecachte, also `O_DIRECT`) Operationen asynchron verhält.
+Leider ist diese eher historisch gewachsen, hat sehr viele, wenig dokumentierte Stellschrauben, ist nicht speichereffizient und hat ein inkonsistentes Verhalten [AIO_SO].
+Korrekte Nutzung bleibt daher einer sehr kleinen Menge von Spezialisten vorbehalten, es ist eher wie schwarze Magie, und dann kann man sich nicht einmal darauf verlassen, dass die Schnittstelle im konkreten Fall wirklich asynchron arbeitet.
+Anwendungen und Bibliotheken mit hohen Leistungsanforderungen müssen oft eigene asynchrone Implementierungen auf der existierenden synchronen Kernel-API bereitstellen, was weder zu deren Wartbarkeit noch Robustheit beiträgt.
+
+Besonders mit aktuellen Speichern, die hohe Transferraten und Latenzen von weniger als 10 Mikrosekunden haben, wird die Notwendigkeit eines guten IO-Subsystem immer deutlicher.
+
+Initial sollte das AIO System verbessert werden, aber es stellte sich heraus dass es zu viele Design- und Implementierungsprobleme hatte.
+
+IO_uring erschien wurde im Januar 2019 [IOU_LWN19] vorgestellt und erste Implementierung zuerst im Kernel 5.1 [Kernel51] umgesetzt.
+
+Diese Designziele für ein neues IO Subsystem wurden aufgestellt:
+
+* einfach zu verstehen und zu benutzen
+* erweiterbar, auch für neue IO Klassen
+* umfassend in Bezug auf Features/Capabilities
+* effizient, bes. in Bezug auf Overhead, geringe Latenz
+* skalierbar mit hohem Durchsatz
+
+Also prinzipiell das perfekte System. Wie wurden diese dann umgesetzt?
+
+=== IO-Uring unter der Haube
+
+Das Kernprinzip für io_uring war Effizienz, d.h kein Overhead für Anfragen und Ergebnisse.
+Daraus leitet sich eine geteilte Datenstruktur ab, meist ein Ringpuffer wie bei [Hunger-JS-Disruptor].
+
+Synchronisierung zwischen Kernel- und Userspace ist teuer, daher sind wie beim LMAX Disruptor Offsets und Speicherbarrieren vorzuziehen.
+
+Dass heisst alle Schreib- auf einer Seite müssen der anderen Seite atomar sichtbar gemacht werden, und zwar erst genau dann wenn sie auch abgeschlossen sind.
+Ebenso muss für die Leseoperationen sichergestellt werden, dass sie keine "phantom reads" vornehmen, von Informationen die mittlerweile aktualisiert wurden bzw. zu zeitig lesen.
+
+Dieses Thema wurde in [Hunger-JS-Java-Memory-Model] viel stärker im Detail besprochen als in diesem Artikel möglich.
+
+Es gibt zwei fundamentale Operationen/Ereignisse, *die Anfrage (Submission)* von der Anwendung als Produzent und dem Kernel als Konsument, und *die Fertigstellung (Completion)* in der die Rollen umgekehrt sind.
+
+Daraus ergeben sich zwei Ringpuffer - "Submission Queue" (SQ) und "Completion Cueue" (CQ).
+Der SQ-Ring enthält keine Datenstrukturen, sondern nur Indexe für ein separat alloziertes Array von Anfrage-Datenstrukturen.
+Diese werden gefüllt und ihr Index in den SQ-Ringpuffer geschrieben.
+
+image::{img}/io-uring.png[]
+
+Also Grund dafür werden angegeben:
+
+* die komplexere und unterschiedliche Struktur der SQ-Events
+* die Möglichkeit das Array unabhängig von Ringpuffer zu vergrößern
+* bessere CPU-Cache-Effizienz
+* die von der Bereitstellungsreihenfolge unabhängige Fertigstellung und Freigabe der SQ-Events
+* Zugriff auf die Inhalte der Array-Einträge mittels Memory-Mapping
+
+Die beiden Datenstrukturen (64 byte aligned) sind durch einen `user_data` Wert miteinander verknüpft, siehe Listing 1 und 2.
+
+.Listing 1 Completion Queue Event
+[source,c]
+----
+struct io_uring_cqe {
+    // zeigt auf Information aus dem Request
+    __u64 user data; 
+    // Ergebnis, number of bytes, oder negativer Fehler
+    __u32 res;
+    // Metadaten
+    __u32 flags;
+}
+----
+
+.Listing 2 - Submission Queue Event
+[source,c]
+----
+struct io_uring_sqe {
+    // Operations-Typ
+    // z.B IORING_OP_READV - vectored Read
+    __u8    opcode;         
+    // Priorität         
+    __u16   ioprio;
+    // File Descriptor
+    __s32   fd;    
+    // File Offset
+    __u64   off;            
+    // Pufferaddresse
+    // für vectored IO - iovecs Array
+    __u64   addr;           
+    // Größe Puffer oder Anzahl iovecs
+    __u32   len;            
+    // Identifikation
+    __u64   user_data;      
+    __u8    flags;          
+    // Opcode Flags, und andere Details
+    // z.B. preadv Flags für vectored read
+    // extra Platz am Ende für Erweiterungen 
+    // wie Prüfsummen oder Attribute
+    // unions anderer Datenstrukturen
+};
+----
+
+Die Ringpuffer sind Felder (Größen in Zweierpotenzen) die die gezeigten Datenstrukturen enthalten bzw. darauf verweisen und sowohl von Kernel als auch Anwendungslevel zugreifbar sind.
+Typischerweise gibt es zwei vorzeichenlose 32-bit Indizes - `head` auf die nächste Leseposition und `tail` äquivalent zum Schreiben, jeweils maskiert mit der Ringgröße.
+Falls die Werte eine Differenz aufweisen, gibt es so viele neue Einträge zum Lesen. 
+In Listing 3 kann man ein Beispiel für das Lesen aus dem CQE Puffer sehen, wichtig sind dabei die Speicherbarrieren auf den Lese- und Schreibindexen.
+
+.Listing 3 - Beispiel zum Lesen der Fertigstellungsereignisse
+[source,c]
+----
+unsigned head;
+head = *cqring->head;
+// read barrier & test auf differenz
+if (head != atomic_load_acquire(cqring->tail)) {
+
+    unsigned index = head & (cqring->mask);
+    struct io_uring_cqe *cqe;
+    cqe = &cqring->cqes[index];
+
+    // Verarbeitung des Eintrags
+    process_cqe(cqe);
+    
+    // als gelesen markieren
+    head++;
+}
+// write barrier
+atomic_store_release(cqring->head, head);
+----
+
+Je nach Richtung ist der Schreibzugriff ausschliesslich dem Produzenten vorbehalten.
+
+Für einen neuen Event werden die Informationen des Eintrags auf den der `tail`-Index steht geschrieben, dann wird der Index inkrementiert.
+
+Für die Handhabung von SQE Events durch den Kernel wären die Rollen dann umgekehrt, hier ist aber zusätzlich die Nutzung des SQE-Arrays zu sehen, dessen Index in den Puffer eingetragen wird, siehe Listing 4.
+
+.Listing 4 - Schreiben von Anforderungen durch die Anwendung
+[source,c]
+----
+struct io_uring_sqe *sqe;
+unsigned tail, index;
+tail = *sqring->tail;
+// offset im array, maskiert mit Ringgröße
+index = tail & (*sqring->ring_mask);
+sqe = &sqring->sqes[index];
+// IO Request Parameter einfüllen
+describe_io(sqe);
+// Array Index in Puffer eintragen
+sqring->array[index] = index;
+// nächster Offset
+tail++;
+// memory barrier release für tail
+atomic_store_release(sqring->tail, tail);
+----
+
+Sobald ein Eintrag konsumiert ist, kann er überschrieben werden, da geregelt ist, dass der Konsument, selbst wenn die eigentliche Bearbeitung des Inhalts noch nicht abgeschlossen ist, eine stabile Kopie davon hat.
+
+Die Anwendungen müssen darauf achten, dass die höhere Schreibrate auf die Request-Ringpuffer nicht dazu führt dass der - schon doppelt so große (konfigurierbar mit `IORING_SETUP_CQSIZE`) - Ergebnis-Puffer überladen wird, es gäbe dann einen Überlauffehler.
+
+// TODO Since the SQ ring is an index of values into the sqe array, the sqe array must be mapped separately by the application.
+
+Nachdem der Kernel die IO Operation abgeschlossen hat, werden die Fertigstellung-Einträge erzeugt, die den Inhalt des `user_data` Felds vom Anfrage-Eintrag übernehmen, sie können aber in beliebiger Reihenfolge erscheinen.
+
+Falls nötig, kann aber die Reihenfolge der Bearbeitung sichergestellt werden, dazu später mehr.
+
+=== Low-level API von IO_uring
+
+Zuerst müssen die Ringpuffer aufgesetzt und initialisiert werden.
+Das erfolgt mittels `int io_uring_setup(unsigned entries, struct io_uring_params *params)`, deren Signatur ist:
+
+- Anzahl Einträge (`entries`) muss eine Zweierpotenz zwischen 1 und 4096 sein.
+- `params` ist eine Rückgabestruktur, wird vom Kernel gefüllt, mit Größe der Puffer, Addressen, Flags, CPU und Idle-Time Parameter.
+- Desweiteren enthalten sie Offset-Strukturen für beide Ringe, damit die Anwendung die verschiedenen Ring-Bestandteile (Puffer, head, tail, Maske, Array) in ihren Anwendungspeicher mappen kann, das geschieht mittels des File-Descriptors und der Offsets.
+- Rückgabewert der Funktion ist ein File-Descriptor für diese io_uring Instanz.
+
+Nach dem Setup kann die Anwendung durch diese io_uring Instanz asynchron mit dem Kernel kommunzieren, siehe Listing 5.
+
+Zuerst müssen die Anforderungen (Submission Events) in den Buffer geschrieben und der `tail` entsprechend weitergesetzt werden.
+
+Dann kann `int io_uring_enter(ring_fd, to_submit, min_complete, int flags)` benutzt werden um den Kernel über die neuen Einträge zu benachrichtigen.
+
+Dieses erlaubt auch eine blockierende Anfrage für `min_complete` Operationen, dazu gibt es zusätzlich das `IORING_ENTER_GETEVENTS` Flag.
+Für asynchrone Verarbeitung kann im `tail` des Completion Rings überprüft werden, ob neue Ergebnisse zur Verfügung stehen.
+
+.Listing 5 - Methode zum Eintragen von Submission Events
+[source,c]
+----
+int submit_to_sq(int fd, int op) {
+    unsigned  tail = *sring_tail;
+    unsigned index = tail & *sring_mask;
+
+    // SQE Struktur aus dem Feld benutzen
+    struct io_uring_sqe *sqe = &sqes[index];
+    // Op Code, File-Descriptor für Operation eintragen
+    sqe->opcode = op;
+    sqe->fd = fd;
+    sqe->off = offset;
+    
+    // Lese/Schreibpuffer bereitstellen
+    sqe->addr = (unsigned long) buff;
+    if (op == IORING_OP_READ) {
+        memset(buff, 0, sizeof(buff));
+        sqe->len = BLOCK_SZ;
+    }
+    else { sqe->len = strlen(buff); }
+
+    // Array Index aktualisieren
+    sring_array[index] = index;
+    // tail update inkl Speicher-Barriere
+    tail++;
+    io_uring_smp_store_release(sring_tail, tail);
+
+    int submissions = 1;
+    int wait_for = 1;
+    // Notifikation für Kernel, Anzahl der Events
+    // Aktives Warten auf Fertigstellung von 1 Event
+    return io_uring_enter(ring_fd, submissions , 
+               wait_for, IORING_ENTER_GETEVENTS);
+}
+----
+
+Effektiverweise wären die IO-Events der Anwendung voneinander unabhängig, so dass auch maximale Paralellität ausgenutzt werden kann.
+
+Bei Operationen die der Datenintegrität dienen, wie z.B. das `fsync` nach einer Reihe von Schreiboperationen, muss aber die Reihenfolge gewährleistet sein.
+Zum einen kann das durch Auslösen aller Schreiboperationen, Warten auf deren Fertigstellung und einen nachfolgende `fsync` Eintrag durch die Anwendung erreicht werden. 
+
+In io_uring wird auch unterstützt, dass erst einmal alle Events in der Submission Queue ausgeführt wurden bevor das aktuelle Operation ausgelöst wird (mittels des Flags `IOSQE_IO_DRAIN`).
+Damit muss es nicht vorbestimmt werden, sondern kann im Nachgang passieren.
+Je nach Nutzung der io_uring Instanz in der Anwendung hat das aber Auswirkungen auf alle anderen Nutzer und Konsumenten.
+
+Für feingranularere Kontrolle kann auch durch fortwährende Setzen des Flag `IOSQE_IO_LINK` erzwungen werden dass SQEs in einer Kette nacheinander ausgeführt werden müssen.
+Das ist nützlich wenn z.B. bei Kopieroperationen der Lese/Schreibpuffer geteilt wird oder aus anderen Gründen die Einhaltung der Reihenfolge wichtig ist.
+
+Neben Schreiben und Lesen gibt es Kommandos für fsync, und auch Timeouts die nach einer Zeit bzw. Anzahl erfolgreicher Operationen triggern.
+
+// image::https://blog.cloudflare.com/content/images/2022/02/image3-8.png[Copyright Cloudflare 2022]
+
+// TODO SQ Ring Array (Bild)
+
+////
+Lese / Schreib Speicherbarrieren
+
+read/write_barrier()
+
+////
+
+=== io_uring Bibliothek und Beispiel
+
+Da die unterliegende API und Mechanismen im Vergleicht mit einem einfachen `read()` schon etwas aufwändig sind und leicht falsch genutzt werden können, gibt es eine höherelevelige, vereinfachte Bibliothek namens `liburing`.
+
+Damit entfällt das Setup und der Umgang mit den Ringpuffern und die Beachtung der Speicherbarrieren durch die Anwendung.
+
+Das Setup erfolgt mit einer vorgegebenen Struktur `io_uring`, die man immer wieder weiterreicht.
+
+// Am besten können wir die die API Bibliothek am Beispiel in Aktion sehen.
+
+////
+.Listing X - liburing Initialisierung
+[source,c]
+----
+struct io_uring {
+    struct io_uring_sq sq;
+    struct io_uring_cq cq;
+    unsigned flags;
+    int ring_fd;
+};
+
+struct io_uring ring;
+int io_uring_queue_init(ENTRIES, &ring, FLAGS);
+----
+////
+
+// === Beispiel: `cat`
+
+Auf [IOU-Examples] gibt es diverse Beispiele sowohl für die low-level API von io_uring als auch für die `liburing`.
+In Listing X ist die Essenz für die Implementierung von `cat` mit `liburing` [IOU-cat] zu sehen.
+
+.Listing X - Ausschnitte der Implementierung von `cat`
+[source,c]
+----
+// Initialisierung
+struct io_uring ring;
+io_uring_queue_init(QUEUE_DEPTH, &ring, 0);
+
+// Zugriff auf SQE
+struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+// Lesepuffer anhand Dateigröße erzeugen
+// READV Leseoperation mit Lesepuffern `iovecs` setzen
+io_uring_prep_readv(sqe, file_fd, fi->iovecs, blocks, 0);
+// user_data setzen & übergeben
+io_uring_sqe_set_data(sqe, fi);
+io_uring_submit(ring);
+
+// Warten auf den CQE mit user_data Eintrag des zuletzt
+// übergebenen SQE
+struct io_uring_cqe *cqe;
+int ret = io_uring_wait_cqe(ring, &cqe);
+// Zugriff auf das Ergebnis mit den Lesepuffern
+struct file_info *fi = io_uring_cqe_get_data(cqe);
+// Ausgabe auf Konsole
+output_to_console(
+    fi->iovecs[i].iov_base, 
+    fi->iovecs[i].iov_len);
+// Verarbeitung abgeschlossen & Freigabe
+io_uring_cqe_seen(ring, cqe);
+
+// anwendung beenden
+io_uring_queue_exit(&ring);
+----
+
+////
+TODO Kürzen
+
+.Listing X - Anfordern des nächsten Blöcke für für "cat"
+[source,c]
+----
+int submit_read_request(char *file_path, struct io_uring *ring) {
+    int file_fd = open(file_path, O_RDONLY);
+    if (file_fd < 0) { return 1; }
+    off_t file_sz = get_file_size(file_fd);
+    off_t bytes_remaining = file_sz;
+    off_t offset = 0;
+    int current_block = 0;
+    int blocks = (int) file_sz / BLOCK_SZ;
+    if (file_sz % BLOCK_SZ) blocks++;
+    struct file_info *fi = malloc(sizeof(*fi) +
+                                          (sizeof(struct iovec) * blocks));
+    char *buff = malloc(file_sz);
+    if (!buff) {
+        return 1;
+    }
+
+    /*
+     * For each block of the file we need to read, we allocate an iovec struct
+     * which is indexed into the iovecs array. This array is passed in as part
+     * of the submission. If you don't understand this, then you need to look
+     * up how the readv() and writev() system calls work.
+     * */
+    while (bytes_remaining) {
+        off_t bytes_to_read = bytes_remaining;
+        if (bytes_to_read > BLOCK_SZ)
+            bytes_to_read = BLOCK_SZ;
+
+        offset += bytes_to_read;
+        fi->iovecs[current_block].iov_len = bytes_to_read;
+        void *buf;
+        if( posix_memalign(&buf, BLOCK_SZ, BLOCK_SZ)) {
+            return 1;
+        }
+        fi->iovecs[current_block].iov_base = buf;
+
+        current_block++;
+        bytes_remaining -= bytes_to_read;
+    }
+    fi->file_sz = file_sz;
+
+    // 
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    // READV Operation Eintragen und Pufferblöcke bereitstellen
+    io_uring_prep_readv(sqe, file_fd, fi->iovecs, blocks, 0);
+    // User_data zur Reidentifikation des Events
+    io_uring_sqe_set_data(sqe, fi);
+    // Übertragung an den Puffer
+    io_uring_submit(ring);
+    return 0;
+}
+----
+
+.Listing X - Auslesen der Ergebnisse für "cat"
+[source,c]
+----
+// Erwarten der Erfolgsereignisse und Ausgabe auf Stdout
+// Vereinfacht
+int get_completion_and_print(struct io_uring *ring) {
+    struct io_uring_cqe *cqe;
+    // warten auf Rückmeldung
+    int ret = io_uring_wait_cqe(ring, &cqe);
+    if (ret < 0 || cqe->res < 0) {
+        return 1;
+    }
+    // Rückgabedaten auf file_info struct mappen
+    struct file_info *fi = io_uring_cqe_get_data(cqe);
+    int blocks = (int) fi->file_sz / BLOCK_SZ;
+    if (fi->file_sz % BLOCK_SZ) blocks++;
+    // Blöcke ausgeben
+    for (int i = 0; i < blocks; i ++)
+        output_to_console(
+            fi->iovecs[i].iov_base, 
+            fi->iovecs[i].iov_len);
+
+    // Ring-Zähler erhöhen, 
+    // könnte auch eher passieren wenn rauskopiert
+    io_uring_cqe_seen(ring, cqe);
+    return 0;
+}
+----
+////
+
+
+
+=== Kritik
+
+Eine Kritik [IOU_CF_WorkerPool] an io_uring ist, dass es nicht nur eine neue asynchrone IO API darstellt sondern eine komplette Laufzeitumgebung mit Threadpools, Warteschlange, Aufgabenverteilung.
+Dessen muss man sich bewusst sein, da je nach dem Typ der genutzten IO (Datei, Netzwerk, Speicher) sind verschiedene Konfigurationen für die Infrastruktur notwendig.
+
+Für limitierte (Dateien und Blockdevices) und unlimitierte Aufgaben (Netzwerk und Spezialdevices) gelten unterschiedliche Grenzen für Threads, ersteres wird von der Größe des SQ-Ringes und Anzahl der vorhandenen CPUs und letzeres von `RLIMIT_NPROC` begrenzt.
+
+Sockets können gepollt werden wenn keine Daten vorliegen, kann der Kernel sich mit `io_async_wake` benachrichtigen lassen, wenn sich das ändert.
+Damit werden nur dann Threads genutzt wenn es auch wirklich nötig ist, z.b. wenn mittels `IOSQE_ASYNC` eine asynchrone Abarbeitung erzwungen wird.
+Für jeden Request der übergeben wird, ist dann ein Thread verantwortlich, solange Arbeit in der Warteschlange ist, was im Extremfall explodieren kann.
+
+Daher ist es sinnvoll dies zu begrenzen z.B: mittels:
+
+Minimierung der aktiven IO Submissions oder Ringgröße, das minimiert aber auch das mögliche Zusammenausführen (Batching) der Anfragen.
+
+Konfigurationsoptionen wie `IORING_REGISTER_IOWQ_MAX_WORKERS` (per NUMA Node) und `RLIMIT_NPROC` (per (frische) user-id UID).
+Wenn das Limit für den User schon verbraucht ist, versucht io_uring es trotzdem zu erreichen und läuft im Kreis.
+Daher funktioniert es nur sinnvoll als Limit mit einer separaten User-Id, die nicht schon Prozesse laufen hat.
+Das `cgroups` Prozesslimit hat denselben negativen Effekt, sollte man also nicht verwenden.
+
+Wenn in unserem Programm mehrere io_uring Ringe benutzt werden, werden die Limit-Konfigurationen pro Thread angwandt, d.h. unabhängige Ringe erzeugt in verschiedenen Threads erhalten separate Thread-Pools und Limits.
+
+////
+Calling io_uring just an asynchronous I/O API doesn’t do it justice, though. Underneath the API calls, io_uring is a full-blown runtime for processing I/O requests. One that spawns threads, sets up work queues, and dispatches requests for processing. All this happens “in the background” so that the user space process doesn’t have to, but can, block while waiting for its I/O requests to complete.
+
+A runtime that spawns threads and manages the worker pool for the developer makes life easier, but using it in a project begs the questions:
+
+1. How many threads will be created for my workload by default?
+
+2. How can I monitor and control the thread pool size?
+
+And while a recent enough io_uring man page touches on the topic:
+
+By default, io_uring limits the unbounded workers created to the maximum processor count set by RLIMIT_NPROC and the bounded workers is a function of the SQ ring size and the number of CPUs in the system.
+… it also leads to more questions:
+
+3. What is an unbounded worker?
+
+4. How does it differ from a bounded worker?
+
+trace-points
+
+bpftrace -l 'tracepoint:io_uring:*'
+or
+perf list 'io_uring:*'
+
+List of pre-defined events (to be used in -e):
+
+  io_uring:io_uring_complete                         [Tracepoint event]
+  io_uring:io_uring_cqring_wait                      [Tracepoint event]
+  io_uring:io_uring_create                           [Tracepoint event]
+  io_uring:io_uring_defer                            [Tracepoint event]
+  io_uring:io_uring_fail_link                        [Tracepoint event]
+  io_uring:io_uring_file_get                         [Tracepoint event]
+  io_uring:io_uring_link                             [Tracepoint event]
+  io_uring:io_uring_poll_arm                         [Tracepoint event]
+  io_uring:io_uring_poll_wake                        [Tracepoint event]
+  io_uring:io_uring_queue_async_work                 [Tracepoint event]
+  io_uring:io_uring_register                         [Tracepoint event]
+  io_uring:io_uring_submit_sqe                       [Tracepoint event]
+  io_uring:io_uring_task_add                         [Tracepoint event]
+  io_uring:io_uring_task_run                         [Tracepoint event]
+
+sudo perf stat -e io_uring:io_uring_submit_sqe -- timeout 1 ./target/debug/udp-read
+
+ Performance counter stats for 'timeout 1 ./target/debug/udp-read':
+
+             4,096      io_uring:io_uring_submit_sqe                                   
+
+       1.017914958 seconds time elapsed
+
+       0.001925000 seconds user
+       0.015095000 seconds sys
+
+
+////
+
+
+=== IO-Uring in Java / Virtual Threads
+
+But Apache Tomcat and almost any other JVM application that needs to implement a network server uses the Java APIs in java.nio.channels package. That is, the JDK provides the respective implementation for your OS. For example for NIO (New Input Output, introduced in JDK 1.4):
+
+* EPollSelectorProvider for Linux — based on epoll system call
+* KQueueSelectorProvider for BSDs (including MacOS) — based on kqueue
+* PollSelectorProvider for any other Unix-es — based on poll
+* WindowsSelectorProvider for Windows — based on IOCP.
+
+For NIO2 (introduced in JDK 1.7) the provider classes are:
+
+* LinuxAsynchronousChannelProvider for Linux (epoll)
+* BsdAsynchronousChannelProvider for BSD/MacOS (kqueue)
+* WindowsAsynchronousChannelProvider for Windows (IOCP)
+
+Martin Grigorov shared his idea with the Apache Tomcat team since they have a lot of experience with these Java APIs but it seems there is no much interest in the community at the moment. Actually the Tomcat team wants to get rid of the native code in Tomcat (the APR connector) and don’t want to add a new one. The best would be the OpenJDK team to do the integration but I guess this won’t happen soon.
+
+
+In der Vorstellung von Virtuellen Threads (JEP-xxx) wird zur Zeit stets darauf hingewiesen, dass bestimmte blockierende Operationen in der JVM noch nicht mittels Continuations reimplementiert wurden.
+Zum einen ist es `synchronized`, weil die Addresse des Monitor-Objekts auf dem Stack liegt, und nicht garantiert werden kann, dass diese nach der Rückkehr unversehrt ist.
+
+Zum anderen Dateisystem-Operationen, deren Mehrzahl wird trotz NIO(2) immer noch synchron ausgeführt, da die Kernel-Systemaufrufe blockierend sind.
+In diese Fällen, blockiert Loom auch, erhöht aber kurzfristig die Anzahl der Threads die im genutzten Fork-Join-Pool verfügbar sind.
+
+.State of Loom
+====
+File I/O is problematic. Internally, the JDK uses buffered I/O for files, which always reports available bytes even when a read will block. On Linux, we plan to use io_uring for asynchronous file I/O, and in the meantime we’re using the ForkJoinPool.ManagedBlocker mechanism to smooth over blocking file I/O operations by adding more OS threads to the worker pool when a worker is blocked.
+====
+
+=== Netty
+
+Das Netty Projekt war eines der ersten Projekte im Java Umfeld dass ein Inkubator-Projekt [Netty-Incubator-IOU] für eine Transportschicht mittels io_uring gestartet hat.
+Mittlerweile gibt es schon 17 Releases des Projekts.
+
+Da Netty ja eine Netzwerkbibliothek ist, werden auch nur io_uring Operationen implementiert, die dafür Relevanz haben.
+Also Socket Accept, Timeout, Poll,  Paket Versand und Empfang usw. leider keine IO-Operationen für Dateisysteme.
+
+Der Quellcode ist gut lesbar und folgt den Ansätzen die wir schon diskutiert haben.
+
+. Implementierung nativer C-Wrapper um die Kernel Funktionen in `netty_io_uring_native.c` z.B. ``
+. Bereitstellung der nativen Kernel Funktionen mittels JNI in `NativeStaticallyReferencedJniMethods`
+. Übergreifender Event Loop (`IOUringEventLoop.run()`)
+. io_uring Setup mit Ringgrößen, 
+. Erzeugen der Ringpuffer (`Native.createRingBuffer`)
+. Schreiben von SQE (`IOUringSubmissionQueue.enqueueSqe`)
+. höherlevelige Operationen (z.B. `addRead(), addWrite(), addPoll()`) die `enqueueSqe` benutzen
+. Handhabung von Fehlern z.b. voller Puffer 
+. Lesen von CQE (`IOUringCompletionQueue.process(callback)`)
+. Verabeitung mittels Callback (`IOUringCompletionQueueCallback.handle(fd, res, flags, op, data)`)
+
+Q:
+* in `process` the callback is run synchronously with the data, doesn't that block queue processing?
+* how does actual data transfer work, e.g. buffers to read into / write from? metadata reads and updates?
+
+Benchmark 100% improvment when 
+
+Norman Maurer: can say for now is that we see some significant performance improvements once the connection count increases. I verified this by two different tools ... tcpkali and the rust_echo_bench. We talking about 100% perf win when using tcpkali as client and even more when using rust_echo_bench here. That said this is for a throughput benchmark and I still need to do some latency benchmarks.
+
+saving multiple system calls and also multiple JNI calls -> oversized impact
+
+epoll: Speed: 80820 request/sec, 80820 response/sec
+io_uring: Speed: 267371 request/sec, 267370 response/sec
+
+// TODO discussion Chris Vest (vacation)
+
+Native.java
+
+https://github.com/netty/netty-incubator-transport-io_uring/blob/main/transport-classes-io_uring/src/main/java/io/netty/incubator/channel/uring/Native.java
+
+=== Fazit
+
+Performance / Möglichkeiten
+Anwendungfälle
+
+* File IO
+* Proxy / Transformationen
+* Network server
+
+Java / Loom 
+
+// image::https://blog.cloudflare.com/content/images/2022/02/image2-3.png[Copyright Cloudflare 2022]
+
+=== Notes
+
+* IOU - async IO SQE? im Kernelmodus, CQE? bei Fertigstellung
+* syscalls haben overhead durch moduswechsel User <-> Kernel, 20x zu "normalen userland aufrufen"
+* mehr durch spectre/meltdown schutz, 
+* Lösungen: Anwendungsfallorientierte Aufrufe (bsp. sendfile()) oder Sammelaufrufe ()
+* Works for: O_DIRECT, buffered IO, network, socket
+* Extra features: pre-register `io_uring_register` file-descriptor or pre-mapped direct-buffers set and the planned operations for a ring, so the kernel doesn't have to fetch/map them time and again -> array index instad of fd, 64k large arrays now, also file-set-updates
+* for low latency/high iops, polled io instead of interrupt for completion -> application will ask for completion events (IORING_SETUP_IOPOLL) -> no CQE events / tail, needs to poll via io_uring_enter and blocking for 0..n events
+* kernel polling, privileged/root operation, no more need for `io_uring_enter`, just fill in sqe and update tail ( IORING_SETUP_SQPOLL) / separate kernel thread / can have CPU affinity configured, 
+* 1.7M 4k IOPS (polling), 1.2M (non-polling) on test box of io_uring dev (still being optimized as the app<->kernel interface is no longer the bottleneck) comp with aio at 608k, with no-op command 20M messages/s
+* io_uring page-cache-hit - data directly copied into CQE when SQE returns
+* newer accept, sendmsg and recvmsg for networking, execute inline if possible otherwise background
+* timeout - number of events or time (in CQ), can be removed earlier
+* cancel async (read/write on files are blocked and uncalleable)
+* future: open
+* eventfd notifications on the CQ-ring itself
+
+
+=== Ressourcen
+
+* [IOU_NEW_PDF] https://kernel.dk/axboe-kr2022.pdf
+* [IOU_PDF] https://kernel.dk/io_uring.pdf
+* [IOU_RocksDB] https://openinx.github.io/ppt/io-uring.pdf
+* [IOU_TUDO] https://www.betriebssysteme.org/wp-content/uploads/2021/09/FGBS_Herbst2021_Folien_Tuneke.pdf
+* [IOU_CF_WorkerPool] https://blog.cloudflare.com/missing-manuals-io_uring-worker-pool/
+* [NIO_IOU] https://github.com/bbeaupain/nio_uring
+* [JAsyncIO] https://github.com/ikorennoy/jasyncfio
+* [Kernel51] https://kernelnewbies.org/Linux_5.1#High-performance_asynchronous_I.2FO_with_io_uring
+* [IOU_LWN19] https://lwn.net/Articles/776703/
+* [IOU_Netty_Announce] https://netty.io/news/2020/11/16/io_uring-0-0-1-Final.html
+* [Netty-Incubator-IOU] https://github.com/netty/netty-incubator-transport-io_uring
+* [IOU_SO] https://stackoverflow.com/questions/65075339/how-io-uring-internally-works
+* [AIO_SO] https://stackoverflow.com/questions/13407542/is-there-really-no-asynchronous-block-i-o-on-linux/57451551#57451551
+* [Netty-Performance] https://github.com/netty/netty/issues/10622#issuecomment-701241587
+* [IOU_Backend_DZone] https://dzone.com/articles/the-backend-revolution-or-why-io-uring-is-so-impor
+* [IOU-Git] https://git.kernel.dk/cgit/liburing/
+* [IOU-Docs] https://man.archlinux.org/listing/extra/liburing/
+* [IOU-LordOfTheURing] https://unixism.net/loti/
+* [IOU-Examples] https://unixism.net/loti/tutorial/index.html
+* [IOU-cat] https://unixism.net/loti/tutorial/cat_liburing.html
+* [NIO-Uring] https://github.com/bbeaupain/nio_uring
+////
+https://github.com/shuveb/loti-examples
+
+https://man.archlinux.org/man/extra/liburing/io_uring.7.en
+https://github.com/axboe/liburing Man pages 
+https://lwn.net/Articles/810414/ The rapid growth of io_uring
+https://lwn.net/Articles/776703/ Ringing in a new asynchronous I/O API
+https://kernelnewbies.org/Linux_5.1#High-performance_asynchronous_I.2FO_with_io_uring
+https://stackoverflow.com/questions/65075339/how-io-uring-implementation-is-different-from-aio
+https://stackoverflow.com/questions/13407542/is-there-really-no-asynchronous-block-i-o-on-linux/57451551#57451551
+
+
+Java
+https://cr.openjdk.java.net/~rpressler/loom/loom/sol1_part1.html
+https://github.com/bbeaupain/nio_uring
+https://github.com/ikorennoy/jasyncfio
+https://github.com/netty/netty/issues/10622#issuecomment-701241587 Netty Benchmark
+https://martin-grigorov.medium.com/jvm-network-servers-backed-by-io-uring-244fea58bb19
+https://github.com/martin-g/http2-server-perf-tests/tree/feature/io_uring-SelectorProvider/java/tomcat/src/main/java/info/mgsolutions/tomcat/uring
+My second idea was to implement it as a custom java.nio.channels.SelectorProvider! This way any Java application could use it! Tomcat could use it with its Http11NioProtocol implementation. All one has to do it to register the custom SelectorProvider before Tomcat tries to create its ServerSocketChannel, e.g. by using the special system property -Djava.nio.channels.spi.SelectorProvider=… or by using the ServiceLoader API, i.e. by having /META-INF/services/java.nio.channels.spi.SelectorProvider in the classpath.
+
+https://medium.com/oracledevs/an-introduction-to-the-io-uring-asynchronous-i-o-framework-fad002d7dfc1
+https://dzone.com/articles/the-backend-revolution-or-why-io-uring-is-so-impor
+https://dev.to/siy/data-dependency-analyses-in-backend-applications-27pp
+https://www.alibabacloud.com/blog/io-uring-vs--epoll-which-is-better-in-network-programming_599544
+https://openjdk.org/jeps/423
+
+////
