@@ -1,6 +1,6 @@
 == Herr der IO Ringe: IO_Uring im Linux Kernel und in Java
 
-:img: ../../img
+:img: https://raw.githubusercontent.com/jexp/blog/gh-pages/img
 
 Bild: Kaffeversand oder Kaffeetheke mit Bestellung
 
