@@ -1,0 +1,521 @@
+== Passt das? Reguläre Ausdrücke in Java
+
+Nein, es ist kein alter Hut, reguläre Ausdrücke gibt es zwar schon sehr lange, sie sind aber ein wichtiges Mittel in der Arbeit mit Text.
+
+Mit regulären Ausdrücken kann man komplexe Muster von Textbestandteilen ausdrücken, zum Beispiel `\[[A-Z]\w+\d*\]` für Referenzen in JavaSpektrum Artikeln, wie [Hun19].
+
+Die Ursprünge liegen bestimmt schon länger zurück, aber mit "regular expression" Notation hatte der Mathematiker Stephen Kleene in 1951 eine nützliche Form gefunden, komplexe Muster auszudrücken [History].
+
+Eine ähnliche Notation wurde von Ken Thompson 1968 in den Unix Editor `QED` (später `ed`) für die Suche nach Textstellen integriert, von da aus trat das Konzept seinen Siegeszug durch die Tools (sed, awk, grep, vi) und Programmiersprachen an (Perl, PCRE, Ruby, PHP, Python, Java).
+
+Ursprünglich hatte Java keine Unterstützung für reguläre Ausdrücke, es wurden Bibliotheken wie `regexp` von Jonathan Locke genutzt, diese wurde 2000, an die Apache Foundation [JakartaRegexp] gestiftet.
+
+Mit Java 1.4 wurde Unterstützung für reguläre Ausdrücke bereitgestellt, mit den `Pattern` und `Matcher` APIs und Methoden in `String` wie `split`, `replaceAll`, `find`, die über die Jahre weitere Verbesserungen erfuhren.
+
+Mit Java 20 wurden einige Neuerungen in diesem Bereich veröffentlicht,
+die für mich den Anlass bildeten, dieses Thema mal wieder aufzugreifen.
+
+=== Reguläre Ausdrücke
+
+Die Anforderung, Texte nach bestimmten Mustern zu durchsuchen gibt es schon seit den Anfängen der Informationsverarbeitung.
+
+Ein minimaler Ansatz um einen String zu finden, ist es den String als Byte- oder Charakter-Feld Element für Element zu durchsuchen, bis man das erste Zeichen des Suchstrings gefunden hat, um dann die weiteren Zeichen zu überprüfen.
+Das kann man zwar mit SIMD Operationen optimieren, aber es ist schon ziemlich beschränkt.
+
+Auf der anderen Seite sind komplette Volltext-Indizes wie Lucene zu finden, die eine große Anzahl von Dokumenten tokenisieren, und in speziellen (invertierte oder trigram) Indexstrukturen vorhalten, um dann komplexe, partielle Abfragen über all diese Dokumente vorzunehmen.
+
+Reguläre Ausdrücke sitzen in der Mitte, man kann leicht auf einzelnen oder wenigen Texten, relativ komplexe Ausdrücke für Textmuster finden, und die heutigen Implementierungen dafür sidn auch ziemlich optimiert.
+
+Eine frühe und sehr leistungsfähige Implementierung war in Perl zu finden.
+PCRE (Perl Compatible Regexp Engine) bildet auch heute noch in vielen Programmiersprachen das Backend der API.
+In Java ist das anders, hier wurde die Implementierung neu erstellt (TODO), daher verhalten sich reguläre Ausdrücke in Java anders als in anderen Programmiersprachen.
+
+=== Reguläre Ausdrücke in Java
+
+Wie so oft, nutzen wir wieder `jshell` um unsere Experimente auszuführen und `sdkman` um das JDK zu installieren (Listing 1).
+
+.Listing 1 - Installation von Java 20
+[soure,shell]
+----
+sdk install java 20-open
+jshell
+----
+
+Java hat 2 Besonderheiten, die den Umgang mit regulären Ausdrücken schwieriger gestalten als es sein müsste.
+
+Eine Besonderheit in Java Strings ist, dass literale Backslashes noch einmal escaped werden müssen, und da reguläre Ausdrücke voll davon sind, gibt das eine Backslash Party.
+
+Weiterhin müssen in Java reguläre Ausdrücke immer den ganze String überdecken, damit wird ein Ausdruck für nur einen Teilstring nicht als korrekte Übereinstimmung gewertet.
+
+Die einfachsten Nutzungen sind `String.matches(regexp)` und `String.replaceAll(regexp, text)`, sowie `String.split(regexp)`.
+
+Hier ein paar erste Beispiele in Listing 2, 3 und 4.
+
+.Listing 2 Beispiele mit String.matches
+[source,java]
+----
+"JavaSpektrum".matches("Java")
+// false, da nicht der ganze String abgedeckt wurde
+"JavaSpektrum".matches("Java.+")
+// true, jetzt haben wir den ganze String erfasst
+"JavaSpektrum".matches("Java\\w+")
+// true, der zweite Teil sind alles Wortbestandteile
+"JavaSpektrum".matches("[Ja-v]{4}\\w+")
+// wir können auf Zeichen aus einem Set limitieren, und angeben wieviele es sind
+"JavaSpektrum".matches("[^.Net]{4}\\w+")
+// oder auch das set negieren
+"[Hun19]".matches("\\[[A-Z]\\w+\\d*\\]")
+// true
+"[Hun19]".matches("\\[[A-Z]\\w{2,3}\\d{2}\\]")
+// true, das ganze ist jetzt viel enger gefasst, mit 3-4 Zeichen und 2 Zahlen
+----
+
+.Listing 3 Beispiele mit String.replaceAll
+[source,java]
+----
+"Hello World".replaceAll("[aeiou]","*")
+// "H*ll* W*rld"
+
+"Hello World".replaceAll("\\b","~")
+// "~Hello~ ~World~" Wortgrenzen ersetzen
+----
+
+`String.replaceAll` ist circa äquivalent zu `Pattern.compile(regexp).matcher(string).replaceAll(replacement)`, hat aber ein paar Abkürzungen für kurze Strings, die keine regulären Ausdrücke sind, da die Kompilation des Patterns dann zu teuer wäre.
+
+.Listing 4 Beispiele mit String.split
+[source,java]
+----
+"1-2-3".split("-")
+// String[3] { "1", "2", "3" }
+
+"A-++-,,-B-,-C".split("[+,-]+")
+// String[3] { "A", "B", "C" } - Wiederholungen und mehrere Trennzeichen
+
+"Hi Du Java".split("\\b")
+// String[5] { "Hi", " ", "Du", " ", "Java" } - Split an Wortgrenzen
+
+"Hi Du".split("")
+// String[5] { "H", "i", " ", "D", "u" }
+// Netter Trick um einen String in Einzelzeichen zu zerlegen
+----
+
+`String.split`` ist sehr nützlich um Texte an Trennzeichen aufzusplitten, kann aber nicht zwischen Trennzeichen und Textinhalt unterscheiden.
+Auch hier gibt es in der Implementierung wieder eine Abkürzung für die Nutzung von Einzelzeichen, die keine regulären Muster sind.
+
+
+=== Reguläre Ausdrücke
+
+Komplexe reguläre Ausdrücke zu schreiben, zu lesen und ggf. nach 4 Wochen wieder zu verstehen, ist schon eine Kunst und bedarf einiger Übung.
+
+Ein Monster-Beispiel für einen abschreckenden regulären Ausdruck, den niemand warten möchte ist die "korrekte" Prüfung einer Email Adresse nach RFC 5322 (Listing 5), es gibt davon aber auch mehrseitige Varianten.
+
+.Listing 5 Email Regexp
+----
+(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])
+----
+
+Tabelle 1 stellt nur die minimalen Muster, dar die in allen Implementierungen von regulären Ausdrücken funktionieren.
+
+.Tabelle 1 - Wichtige Bestandteile von Regulären Ausdrücken
+[opts=header,cols="1m,5a"]
+|===
+| Muster | Bedeutung
+| . | Ein beliebiges Zeichen
+| * | beliebig viele Vorkommen
+| + | mindestens ein Vorkommen
+| ? | optionales Vorkommen
+| {3} | n-Vorkommen
+| {2,5} | n bis m Vorkommen
+| +? | minimale Vorkommen, nach einem Qualifikator
+| +? | maximale Vorkommen, nach einem Qualifikator
+| [a-z] | ein Zeichen aus Bereich
+| [^abc] | kein Zeichen aus Set
+| [a-z&&[def]] | Schnittmenge aus beiden Sets
+| (a\|b) | Alternative
+| \\w | Wortbestandteil (`\W` Negation)
+| \\s | Whitespace (`\S` Negation)
+| \\d | Ziffer (`\D` Negation)
+| \\b | Wortbegrenzung (`\B` Negation)
+| ^ | Anfang der Zeile
+| $ | Zeilenende
+| (abc) | Gruppe
+| $1 | Ersetzung für n-te Gruppe
+| xxx | benannte Gruppe
+| $1 | Ersetzung für benannte Gruppe
+| (?i) | Optionen (siehe unten)
+|===
+
+In [JavaPattern] gibt es die komplette Aufstellung, zusätzlich sind vor allem noch die Charakter-Klassen zu nennen, einige davon sind in Tabelle 2 zu finden.
+
+Die POSIX Klassen haben die Struktur `\p{Klasse}` und deren Negation mit `\P{Klasse}`.
+
+.Tabelle 2 - Ausgewählte spezielle Klassen
+[opts=header,cols="1m,5a"]
+|===
+| Muster | Bedeutung
+| \p{Lower} | Kleinbuchstaben (ASCII) 
+| \p{Alpha} | Buchstaben
+| \p{Alnum} | Alphanumerisch
+| \p{Punct} | Interpunktion
+| \p{InGreek} | Griechische Zeichen
+|===
+
+=== Referenzen auf Gruppen
+
+Eine der wichtigsten Eigenschaften von Regulären Ausdrücken ist es ein Teilmuster als Gruppe zu markieren und sich später auf diese zu beziehen.
+Das ist sowohl bei Wiederholungen im Usprungsmuster nützlich, als auch bei Ersetzungen.
+
+Diese Gruppen werden in Klammern eingefasst `(Muster)`, es ist oft ärgerlich dass auch Alternativen in Klammern `(A|B)` gefasst sind und damit automatisch als Gruppen zählen, es sei denn man schliesst sie aus, mittels `(?:A|B)` als "non-capturing group".
+
+Die Referenz darauf ist `\N` wo bei sich das auf die `N-te` Gruppe bezieht.
+
+Leider haben beide eine unterschiedliche Syntax, Rückwärtsreferenzen in Ersetzungen werden mit `$N` bezeichnet, nicht mit `\N`.
+
+.Listing 6 - Referenzen auf Gruppen
+[source,java]
+----
+"DODO".matches("(..)\\1")
+// Bezug auf den ersten Teilstring
+"DODODO".matches("(..)\\1+")
+// Das kann auch beliebig oft wiederholt werden
+"DODODOODODOD".matches("(.)(.)(\\1\\2|\\2\\1)+")
+// Auch in Einzelbezügen
+
+"DODODO".replaceAll("(.)(.)","$2$1")
+// Plätze tauschen
+"DODODO".replaceAll("(.)(.)","$1$2$2$2")
+// Vervielfachen
+"Hello World".replaceAll("(He)(ll.*?\\b)","$1aven")
+// "Heaven World"
+// Komplexeres Muster Ersetzen
+----
+
+Mit Java 1.7 kamen benannte Gruppen hinzu, die das Hantieren mit den index-basierten Bezügen sehr vereinfachen, besonders wenn der Ausdruck modifiziert wird und sich damit die Positionen ändern.
+Dasselbe Problem hat man bei SQL-`ResultSet` Ergebnissen und Feldzugriffen, wenn möglich empfehlen ich dann immer auf die Spaltennamen zuzugreifen bzw. die Felder mittels Konstanten oder Enums zu benutzen.
+
+In Java 20 wurde der Zugriff auf benannte Gruppen innerhalb der Java API noch einmal verbessert.
+
+Die Syntax für benannte Gruppen ist `(?<name>...)` und die Referenzen sind `\k<name>` bzw. `${name}`.
+
+In Listing 7 ist unser Beispiel noch einmal mit benannten Gruppen zu sehen.
+
+.Listing 7 - Referenzen auf benannte Gruppen
+[source,java]
+----
+"DODO".matches("(?<do>..)\\k<do>")
+// Bezug auf den ersten Teilstring
+"DODODO".matches("(?<do>..)\\k<do>+")
+// Das kann auch beliebig oft wiederholt werden
+"DODODOODODOD".matches("(?<d>.)(?<o>.)(\\k<d>\\k<o>|\\k<o>\\k<d>)+")
+// Auch in Einzelbezügen
+
+"DODODO".replaceAll("(?<d>.)(?<o>.)","${o}${d}")
+// Plätze tauschen
+"DODODO".replaceAll("(?<d>.)(?<o>.)","${d}${o}${o}${o}")
+// Vervielfachen
+"Hello World".replaceAll("(?<he>He)(?<ll>ll.*?\\b)","${he}aven")
+// "Heaven World"
+// Komplexeres Muster Ersetzen
+----
+
+////
+=== Lookahead / Lookbehind
+
+(?=X)	X, via zero-width positive lookahead
+(?!X)	X, via zero-width negative lookahead
+(?<=X)	X, via zero-width positive lookbehind
+(?<!X)	X, via zero-width negative lookbehind
+(?>X)	X, as an independent, non-capturing group
+////
+
+=== Matcher Pattern
+
+Die Nutzung von regulären Ausdrücken in den String-Funktionen funktioniert zwar, ist aber nicht besonders effizient, da der Ausdruck bei jedem Aufruf wieder neu für die Verarbeitung übersetzt werden muss.
+
+Mit dem `Pattern.compile(regexp[, optionen])` Aufruf kann dies einmalig geschehen und als Konstante festgehalten werden.
+
+.Listing 8 - Pattern API
+[source,java]
+----
+Pattern p = Pattern.compile("(a*)b");
+Matcher m = p.matcher("aaaaab");
+boolean b = m.matches();
+int start = m.start();
+int end = m.end();
+String group = m.group();
+// true, 0, 6, aaaaab
+
+int start = m.start(1);
+int end = m.end(1);
+String group = m.group(1);
+// true, 0, 5, aaaaa
+
+// äquivalent, macht das Muster nicht verfügbar
+boolean b = Pattern.matches("(a*)b", "aaaaab");
+----
+
+Mit der so gewonnenen `Pattern` Instanz, kann dann Funktionalität wie `split`, `splitAsStream`, `as(Match)Predicate` direkt genutzt werden.
+
+Seit Java 20 gibt es auch `namedGroups()` Methode, die eine `Map` von Gruppenname zu ihrem Index erzeugt.
+
+Die Hauptnutzung in der API ist aber die Erzeugung eines sogenannten `Matcher` für eine `CharSequence`, der die Iteration und Verarbeitung der einzelnen Treffer übernimmt.
+
+Dieser kann über die `matches()` Methode, feststellen ob die ganze `CharSequence` dem Muster entspricht, siehe Listing 8.
+Wenn das der Fall ist, kann die Position als `MatchResult` mit `start()` und `end()` und der aktuelle Treffer mittels `group()` ermittelt werden.
+Diese Methoden haben auch jeweils eine Variante mit Gruppennummer bzw -namen für Gruppen innerhalb des aktuellen Musters.
+
+Viel nützlicher ist aber die inkrementelle Verarbeitung.
+
+Dann muss auch nicht mehr der ganze String zum Muster passen, da das Muster immer wieder ab der aktuellen Position gesucht wird, wie in Listing 9 gezeigt.
+
+.Listing 9 - Matcher API
+[source,java]
+----
+// \\w+?a -> minimaler Wortbestandteil gefolgt von "a"
+Pattern p = Pattern.compile("(?<davor>\\w+?)(a)");
+p.namedGroups();
+// {davor=1}
+var text = "JavaSpektrum herausgegeben von Sigs Datacom";
+Matcher m = p.matcher(text);
+
+while (m.find()) {
+   System.out.printf("Treffer %d-%d - %s%n", 
+        m.start(),m.end(),m.group());
+   System.out.printf("Davor %d-%d - %s%n", 
+        m.start("davor"),m.end("davor"),m.group("davor"));
+   System.out.printf("Gruppe %d-%d - %s%n", 
+        m.start(2),m.end(2),m.group(2));
+}
+/*
+Treffer 0-2 - Ja
+Davor 0-1 - J
+Gruppe 1-2 - a
+Treffer 2-4 - va
+Davor 2-3 - v
+Gruppe 3-4 - a
+Treffer 13-17 - hera
+Davor 13-16 - her
+Gruppe 16-17 - a
+Treffer 36-38 - Da
+Davor 36-37 - D
+Gruppe 37-38 - a
+Treffer 38-40 - ta
+Davor 38-39 - t
+Gruppe 39-40 - a
+*/
+----
+
+=== Optionen
+
+Es gibt einige Optionen (Tabelle 3) die, entweder über die Pattern API als Konstanten oder inline mittels `(?mid-sux)` angeben kann, ihre Deaktivierung erfolgt durch vorangestelltes Minuszeichen.
+
+.Tabelle 3 - Regexp Optionen
+[opts=header, cols="m,m,a"]
+|===
+| Buchstabe | Konstante | Bedeutung
+| i | CASE_INSENSITIVE | Ignoriert Groß-/Kleinschreibung für ASCII
+| m | MULTILINE | `^` und `$` matchen auch Zeilenumbrüche
+|   | LITERAL | Alle 
+| d | UNIX_LINES | Nur `\n` als Zeilenumbruch
+| s | DOTALL | `.` steht auch für Zeilenumbrüche, Muster gilt über Zeilengrenzen hinweg
+| x | COMMENTS | Kommentare mittels `#` bis zum Zeilen ende, Whitespace muss escaped werden
+| u | UNICODE_CASE | Kleinschreibung auch für Unicode
+| U | UNICODE_CHARACTER_CLASS | Unicode Versionen der Klassen werden unterstützt
+|===
+
+=== Suchen & Ersetzen
+
+Die bisherige Nutzung von `replaceFirst` oder `replaceAll` zeigte nur konstante Ersetzungen bzw. die Nutzung von Gruppen.
+
+Die Methode `replaceAll` kann aber auch mit einem Lambda-Ausdruck benutzt werden, der dann für jeden Treffer ausgeführt wird und dynamisch entscheiden kann, was zu tun ist, bzw. womit ersetzt werden soll.
+
+In Listing 10 gibt es ein Beispiel in dem Zahlen durch ihre Zahlworte aus einer Liste ersetzt werden. 
+Die `match` Variable in der Lambda Closure ist ein `MatchResult`, das auch über die schon genutzten Methoden `start`, `end`, `group` in ihren Varianten verfügt.
+
+.Listing 10 - replaceAll Lambda
+[source,java]
+----
+String[] zahlen = {"null", "eins", "zwei", "drei", "vier", 
+        "fünf", "sechs", "sieben", "acht", "neun"};
+
+String text = "4 7 1 1";
+Pattern p = Pattern.compile("\\d");
+Matcher m = p.matcher(text);
+
+var worte = m.replaceAll((match) -> {
+  String zahl = match.group();
+  int index = Integer.parseInt(zahl);
+  return zahlen[index];
+});
+// "vier sieben eins eins"
+----
+
+Unter der Haube wird in der `Matcher` Klasse für `replaceAll` immer noch das klassische `appendReplacement(StringBuilder, "replacement")` und `appendTail(StringBuilder)` benutzt, das es schon seit Java 1.4 gibt (damals nur mit `StringBuffer`).
+Im Listing 11 ist ein Beispiel zu sehen, in dem Länderkürzel durch ihre Flaggen ersetzt werden.
+
+.Listing 11 - Suchen und Ersetzen auf die althergebrachte Variante
+[source,java]
+----
+Pattern p = Pattern.compile("[A-Z]{2}", 
+          Pattern.UNICODE_CHARACTER_CLASS);
+Matcher m = p.matcher("FR UA UK GR");
+StringBuilder sb = new StringBuilder();
+while (m.find()) {
+    var code = m.group();
+    var flag = switch (code) {
+        case "FR" -> "🇫🇷";
+        case "GR" -> "🇬🇷";
+        case "UK" -> "🇬🇧";
+        case "UA" -> "🇺🇦";
+        default -> code;
+    };
+    m.appendReplacement(sb, flag);
+    System.out.printf("%d-%d (%s) - %s%n",
+        m.start(), m.end(), m.group(), sb);
+}
+m.appendTail(sb);
+/*
+0-2 (FR) - 🇫🇷
+3-5 (UA) - 🇫🇷 🇺🇦
+6-8 (UK) - 🇫🇷 🇺🇦 🇬🇧
+9-11 (GR) - 🇫🇷 🇺🇦 🇬🇧 🇬🇷
+*/
+----
+
+////
+=== Scanner
+
+Um reguläre Ausdrücke auf größere Texte anzuwenden, kann `java.util.Scanner` genutzt werden.
+Diese Klasse bietet APIs um strukturierte Texte zu parsen, man kann Trennzeichen (als reguläre Ausdrücke) setzen, sowie für jeden Treffer bestimmen, was im aktuellen Fall geschehen soll.
+
+In Listing 15 ist ein Beispiel zu sehen.
+
+.Listing 15 Scanner
+[source,java]
+----
+import java.util.Scanner;
+
+var text = """
+  <Li>Pattern</li>
+  <LI>Matcher</lI>
+  <li>MatchResult</LI>
+""";
+var LI_START = Pattern.compile("(?i)\\s*<li>");
+var LI_END = Pattern.compile("(?i)</li>\\s*");
+try (Scanner scanner = new Scanner(text)) {
+    scanner.useDelimiter(LI_START);
+    while (scanner.hasNext()) {
+        String listItem = scanner.next();
+        if (!listItem.isBlank()) {
+            System.out.printf("* %s", listItem.trim());
+        }
+        scanner.useDelimiter(LI_END);
+        if (scanner.hasNext()) {
+            System.out.println();
+            scanner.next();
+        }
+        scanner.useDelimiter(LI_START);
+    }
+}
+----
+////
+
+=== Performance
+
+Reguläre Ausdrücke anzuwenden ist eine komplexe Operation die oft in einer Zustandsmaschine realisiert wird.
+Besonders für komplexe Ausdrücke mit exponentiellem Backtracking und sich ausschliessenden, selbst-referenzierten (Teil-)mustern ist der Aufwand zur Auflösung hoch.
+Dort lohnt es sich das Muster zu vereinfachen und dann ggf. in einem zweiten Schritt die Feinauflösung durchzuführen, um inkorrekte Zwischenergebnisse auszufiltern.
+
+Besonders wenn Nutzereingaben als reguläre Ausdrücke ausgeführt werden, sollte es vermieden werden, eine Implementierung mit quadratischer Komplexität zu nutzen.
+Das kann zu Problemen führen entweder indem entweder der Stack nicht ausreicht oder die Berechnung so aufwändig wird, dass ein Denial-Of-Service ([ReDOS]) hervorgerufen wird.
+
+Über die Jahre gab es viele Forschungsbeiträge zur Optimierung und auch geeignete effiziente Bibliotheken, auch in Java ist der [PerformanceJEP] noch offen, der eine Verbesserung der Performanz der Implementierung beitragen soll.
+
+////
+There is an increasing focus on the performance of regular expression matching, and especially the predictability.
+
+regular expression denial of service attacks are sufficiently well known in the industry that the term ReDoS has been coined.
+it is common for web sites to provide a search service for large text corpora with user-provided regexes, and having a reliably efficient (i.e. O(N)) regex evaluation engine may be considered a strict requirement. This was the impetus for Russ Cox's re2 library,.
+it is surprisingly difficult to solve some common software engineering problems efficiently with just a regex. The prime example is detecting and removing trailing whitespace, which is explored in a microbenchmark and was the cause of the famous stackoverflow outage caused by \s+$.. It is not true that careful crafting of regexes to use e.g. possessive quantifiers, by a skilled engineer, can solve a particular regex performance problem.
+The use of Matcher#find (instead of Matcher#matches) is very convenient, but introduces an implicit O(N) loop over the input, or alternatively, a non-possessive "^.*?" prefix in the regex. In order for the entire search operation to not be O(N^2), most of the regex match operations while scanning the input need to be O(1), which may require the use of less-obvious constructs like lookbehind. The use of possessive quantifiers in the regex itself is sadly insufficient.
+The current (jdk16) implementation is a NFA-based backtracking engine. It mitigates but does not eliminate O(2^N) performance. StackOverflowError is a risk.
+
+Goals
+Make it possible to build a ReDoS-safe "regexp search engine" that can safely accept user-provided regexes with O(N) runtime performance, O(1) stack space usage, and as close as possible to O(M) space usage for the compiled regex. It's OK for some regex features like backrefs to be dropped. Users can ask for safety or power; no one knows how to provide both. Of course, we maintain compatibility - the legacy API must remain unsafe.
+////
+////
+=== Bessere Volltext-Indizes
+
+Natürlich sind reguläre Ausdrücke nicht dafür optimiert aus einer großen Menge von Dokumenten die relevanten Fundstellen fü
+r Text 
+////
+
+=== Reguläre Ausdrücke testen
+
+Neben JShell oder der IntelliJ Suche, gibt es diverse Online-Tools [Regex101], [Regexr] mit denen man reguläre Ausdrücke auf verschiedenen Bespielen testen kann.
+Das [RegexpCheatSheet] von RebeLabs (RIP) ist auch sehr praktisch.
+
+Es wäre aber nicht 2023 wenn uns hier ChatGPT nicht weiterhelfen könnte.
+Dort kann man sich sowohl reguläre Ausdrücke erklären, als auch Testdaten generieren lassen.
+
+.Erklärung eines regulären Ausdrucks - ChatGPT-4
+****
+Frage:
+Erkläre den folgenden regulären Ausdruck und wo er genutzt werden könnte:
+^[\w.]+@[\w.]+?\.(com|net|org|de)$
+
+Antwort:
+Dieser reguläre Ausdruck prüft, ob eine Zeichenfolge eine gültige E-Mail-Adresse enthält.
+
+* `^` bedeutet, dass der reguläre Ausdruck am Anfang der Zeichenfolge beginnen soll.
+`[\w.]+` gibt eine oder mehrere Zeichen von alphanumerischen Zeichen und dem Punkt zurück. Dies gilt für den Benutzernamen vor dem "@"-Zeichen.
+* `@` prüft, ob die Zeichenfolge das "@"-Zeichen enthält.
+*`[\w.]+?` gibt eine oder mehrere Zeichen von alphanumerischen Zeichen und dem Punkt zurück. Dies gilt für den Domainnamen nach dem "@"-Zeichen. Das `?` ist ein nicht-greedy-Operator und stellt sicher, dass nur so viele Zeichen wie möglich erfasst werden.
+* `\.` prüft, ob das "."-Zeichen vorhanden ist.
+* `(com|net|org|de)` gibt eine von vier möglichen Top-Level-Domains zurück.
+* `$` bedeutet, dass der reguläre Ausdruck am Ende der Zeichenfolge enden soll.
+
+Dieser reguläre Ausdruck könnte genutzt werden, um sicherzustellen, dass eine Eingabe von Benutzern tatsächlich eine gültige E-Mail-Adresse enthält, bevor sie in eine Datenbank oder ein Formular eingetragen wird.
+
+Frage:
+Generiere jeweils 3 passende und unpassende E-Mail Adressen für diesen regulären Ausdruck
+
+Antwort:
+Passende E-Mail-Adressen:
+
+* john.doe@example.com
+* jane.doe@example.net
+* peter.parker@example.de
+
+Unpassende E-Mail-Adressen:
+
+* john.doe@example
+* jane.doe@example.
+* peter.parker@example.invalid
+****
+
+=== Andere Anwendungen
+
+Die häufigste Anwendung von regulären Ausdrücken ausserhalb von Programmiersprachen ist in Editoren und Tools (grep, ag, vi, sed, Google Docs, VS Code).
+Aber auch in der Textverarbeitung in Datenbanken oder Big Data Systemen (Spark, Flink) sowie ML-Anwendungen werden sie häufig genutzt, besonders zur Textanalyse.
+
+=== Fazit
+
+Reguläre Ausdrücke sind ein mächtiges Tool und werden in Java gut unterstützt.
+Es ist gut sie im Handwerkszeug zu haben, und zu wissen wann und wo man sie anwenden kann und sollte.
+Mit Java 20 wurde ihre Nutzung mit benannten Gruppen noch einmal vereinfacht, ich hoffe dass der JEP zur Leistungsverbesserung bald Eingang in das JDK findet.
+
+=== Referenzen
+
+* [JavaPattern] https://docs.oracle.com/en/java/javase/20/docs/api/java.base/java/util/regex/Pattern.html
+* [RegexpCheatSheet] https://www.jrebel.com/blog/java-regular-expressions-cheat-sheet
+* [Geschichte] https://en.wikipedia.org/wiki/Regular_expression#History
+* [JakartaRegexp] https://jakarta.apache.org/regexp/changes.html
+* [Regex101] https://regex101.com/
+* [Regexr] https://regexr.com/
+* [PerformanceJEP] https://openjdk.org/jeps/8260688
+* [Java20Enhancement] https://bugs.openjdk.org/browse/JDK-6350801
+* [RegexpWebsite] https://www.regular-expressions.info/
+* [Baeldung] https://www.baeldung.com/regular-expressions-java
+* [Jenkov] https://jenkov.com/tutorials/java-regex/index.html
+* [ReDOS] https://en.wikipedia.org/wiki/ReDoS

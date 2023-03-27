@@ -1,0 +1,534 @@
+[NOTE]
+Final für Frau Weinert
+
+== In den Speicher geschaut, das Java Speichermodell (JMM)
+
+Wenn wir bisher auf Java's Speicher geschaut haben, dann ist das meist im Rahmen von Speichermanagement, d.h. Erzeugung (Allocation) und Beseitigung (Garbage Collection) von Objekten geschehen. 
+Die Nutzung des Heaps mit den verschiedenen Generationen (Young-, Old- und Perm-Gen) sowie die verschiedenen Garbage-Collectors, sollen in dieser Kolumne aber nicht im Mittelpunkt stehen, sondern das Speichermodell das der Java Virtual Machine (JVM) zugrundeliegt.
+
+Nachdem wir vor kurzem schon einmal Aleksey Shipilev's Arbeit, den Java Measurement Harness (JMH) im Visier hatten, will ich ihn auch dieses Mal zu einem anderen, spannenden aber auch komplizierten Teil der JVM-Spezifikation zitieren, dem Java Speichermodell (JMM). 
+Er hat dazu einen ausführlichen Beitrag geschrieben, der einen eine Weile beschäftigen kann.
+
+=== Einführung
+
+Jeder hat seine ganz eigenen Erfahrungen mit Concurrency, Race-Conditions und der Sichtbarkeit von Änderungen für andere Threads gehabt und es gibt da sicher so einige Gruselgeschichten zu berichten.
+Diese Art von Fehlern ist schwer zu finden und deterministisch zu reproduzieren, meistens hat man sich einige Informationen angelesen und hergeleitet, aber oft ist das eher gefährliches Halbwissen.
+
+Aleksey geht seinem sehr langen Artikel [Shipilev JMM] ausführlich auf viele Details der Java Language Specification (JLS) bezüglich des Speichermodells ein, von denen ich im folgenden einige erörtern möchte.
+
+Generell ist die Frage, die für die verschiedensten Kontexte, Zustände und Situationen beantwortet werden muss: *"Welchen Wert siehts eine bestimmte Leseoperation"*. 
+Das ganze ist natürlich nur für nebenläufige Programme wirklich interessant, bei sequentiellem Ablauf ist die Antwort deterministisch. Dort ist nur die Abfolge von Speicher-Lese und Schreiboperationen für Sprachkonstrukte relevant, d.h. wann lesen und/oder schreiben welche Operationen welche Werte und wie werden sie nacheinander ausgeführt (auch abhängig von Präzendenz und Compiler-Optimierungen).
+
+////
+Zum Beispiel welchen Wert hat die folgende Operation als Ergebnis? : `++variable + ++variable`. 
+Sieht das zweite Inkrement den anfänglichen Wert oder den Wert nach dem ersten Inkrement und wird die Operation von rechts- nach links oder in einer anderen beliebigen Reihenfolge ausgeführt? Mit funktionalen Sprachen und unveränderlichen Werten ist die ganze Speichermodelldiskussion viel schneller und einfacher abgehandelt.
+////
+
+Eine Sprachspezifikation wie die der JVM besteht aus dem einfachen Teil, der die Syntax der Sprache festlegt und beschreibt, und der weitaus komplexeren Beschreibung des Laufzeitverhaltens.
+
+Das Verhalten wird oft im Rahmen einer Abstrakten Maschine dargestellt, deren Operationen und Speichermodell detailliert dargelegt sind.
+
+(Diese Maschine wird dann von Interpretern emuliert oder von Compilern aus dem Quellcode umgesetzt, in beiden Fällen kann es zu Problemen kommen.)
+
+Im Endeffekt handelt es sich bei der Umsetzung von Sprachen, Compiler und Speichermodellen immer um einen Balanceakt.
+Man will sie so einfach, performant und korrekt wie möglich gestalten und muss dafür jeweils Abstriche an anderen Aspekten hinnehmen.
+
+Wir wollen im Folgenden einige Aspekte im Detail betrachten
+
+=== Atomare Lese- und Schreiboperationen
+
+In einer Programmiersprache geht man eigentlich davon aus, dass jeder Lese- und Schreibzugriff eines Feldes atomar ist. 
+Leider lässt uns dabei die Hardware im Stich, denn je nach Architektur können längere Werte nicht mehr atomar mit einer Hardwareinstruktion gehandhabt werden. 
+In Java betrifft das auf einigen Plattformen (32-bit) den Zugriff auf Werte vom Typ long und double (jeweils 8 Bytes). 
+Und wenn man mindestens 2 Operationen benötigt, dann ist nicht automatisch sichergestellt, dass diese noch atomar ablaufen, ohne dass sich ein weiterer Zugriff dazwischenschmuggelt. 
+Dasselbe Problem tritt auf, wenn ein Wert auf zwei Zeilen des Prozessor-Caches oder auf Speicherbereiche mit dem falschen Alignment verteilt ist.
+
+Daher sind im Java-Speichermodelle nur atomare Speicheroperationen bis zu 32 Bit Länge garantiert (Kompatibilität zu 32-Bit-Prozessoren), bei längeren Werten muss mit `volatile` oder `final` Modifikatoren eine atomare Operation erzwungen werden (wenn nötig). 
+Dann treffen der Compiler und die JVM spezielle, aufwändigere Vorkehrungen dass diese Operationen auch atomar ausgeführt werden und z.b. Speicher- und Cachezellen zwangsweise publiziert werden. 
+Das ist auch der Grund warum Objektreferenzen in Java maximal 32 Bit lang sind, damit sie garantiert atomar gelesen und geschrieben werden können. 
+Da diese Operationen deutlich teurer sind, werden sie nicht standardmässig genutzt und es liegt in der Verantwortung des Anwenders, bei Notwendigkeit (z.b. parallelem Zugriff) die Variablen entsprechend geschützt zu deklarieren.
+
+//.Kosten des volatilen Speicherzugriffs [Shiplev JMM]
+//image::http://shipilev.net/blog/2014/jmm-pragmatics/page-024.png[]
+
+////
+Heutzutage haben viele Prozessoren 64 Bit Address- und Operatorbreite, so dass diese Ausnahme (besonders auf 64 Bit JVMs) eigentlich entfernt werden könnte [Shipilev Atomic Access].
+Leider sind in der Semantik von "volatile" zwei Aspekte gemischt, der atomare Zugriff und die Publikation des Wertes nach einem Update über die Prozessorgrenzen hinweg, so dass andere Threads diese Aktualisierung auch sehen (und nicht nur der lokale Prozessorcache). 
+In 64-Bit Prozessoren könnte in der JVM intern jeder primitive Zugriff atomar implementiert werden, und nur explizite Publikation des Wertes würde die deutlich erhöhten Kosten tragen. 
+Wenn die semantische Trennung von _volatile_ vorgenommen würde, könnte man dann die beiden Belange getrennt voneinander handhaben.
+////
+
+////
+Aleksey stellt beispielsweise dar, dass der Objekt-Header von 12 Bytes es nicht möglich macht, einen Wert vom Typ long (8 bytes) direkt darauf folgen zu lassen. 
+Da dieser dann nicht an den 8 Byte Grenzen ausgerichtet wäre, somit werden 4 weitere Bytes als Lückenfüller benötigt, damit der Wert wieder an einer Alignmentgrenze anfängt und somit nicht über zwei Zeilen gesplittet wird. 
+////
+
+Wenn es für die Wertlänge keine atomaren Prozessoroperationen gibt, muss man sich anders behelfen, entweder über Compare and Swap (CAS) Prozessoroperationen oder sogar Sperren (Locks) auf dem Maschinenlevel.
+
+Zum Beispiel in `AtomicLong` werden atomare Lese- oder Schreiboperationen erreicht, indem der gekapselte Wert als volatiles Feld deklariert ist. Komplexere Operationen wie Erhöhen um einen Wert (wofür man ihn Lesen *und* Schreiben muss) werden über CAS umgesetzt.
+
+////
+==== Structs
+
+In anderen Sprachen gibt es neben den primitiven Datentypen auch noch nutzerspezifizierte Wert-Typen (Structs) beliebiger Größe.
+Wenn für diese auch atomare Operationen definiert werden sollen, bringt das Compiler und Ausführungsumgebung in ganz eigene Schwierigkeiten. Speicherbereiche beliebiger Größe atomar zu lesen und zu schreiben wird entweder sehr teuer oder unmöglich. 
+
+Wenn Wert-Typen (Value-Types) in Java umgesetzt werden (siehe [Goetz]) dann wird das auch hier relevant und dann vorrausichtlich genauso wie bei long und double über explizite "volatile" Schlüsselworte erzwungen werden müssen.
+Damit kann dann die JVM mit den entsprechenden Operationen und Kosten für die Sicherstellung der Atomizität sorgen. 
+
+John Rose [Rose] hat dazu einen eigenen Artikel unter dem aussagekräftigen Titel "Struct Tearing" verfasst.
+In diesem stellt er das Für und Wider einer direkten Implementierung von Structs (direkter Zugriff als Speicherblöcke oder Register) dem sichereren Design mittels Strukturen mit unveränderlichen Komponenten (Persistent Data Types) gegenüber und deutlich zu letzterem tendiert.
+
+////
+=== Individueller Feldzugriff
+
+Für die Aktualisierung von Feldwerten kann es abhängig von der Lesebreite der Hardware notwendig sein, mehrere Feldelemente auf einmal zu lesen, den Wert zu ändern und den ganzen Block auf einmal wieder zurückzuschreiben. 
+Man kann sich leicht vorstellen, dass das bei konkurrierendem Zugriff schnell danebengeht, so dass ein Thread Änderungen eines parallel laufenden zweiten Threads überschreibt.
+
+Da die meisten Maschinen eine Mindestbreite des Zugriffes von einem Byte haben, können z.B. Boolean-Felder nicht pauschal als Bitsets abgebildet werden. 
+In der Java Spezifikation sind Datenstrukturen mit einer Breite kleiner als ein Byte verboten, um das generell auszuschliessen. 
+Wichtig ist dies auch bei Optimierungen durch Programmierer oder Compiler, die nebenläufig größere Puffer auf einmal lesen, bearbeiten und zurückschreiben. 
+Diese Zugriffe müssen durch entsprechende Synchronisationsmechanismen geschützt werden.
+
+=== Schreiboperationen und Sichtbarkeit durch Publikation von Aktualisierungen
+
+Parallele Operationen in einem Programm können auf diesselben Register und Speicherzellen lesend und schreibend zugreifen. 
+Die Reihenfolge des Ablaufs bestimmt in der Theorie welche Werte diese Threads sehen. 
+In Realität sieht das noch etwas anders aus. 
+Ohne weitere Hinweise, ist der Compiler in der Lage diverse Operationen umzusortieren, um Abläufe effizienter zu gestalten. 
+
+Auch im Prozessor ist eine aggressive Optimierung der Reihenfolge und optmistische Spekulationen über Speicherzugriffe und Operationen an der Tagesordnung (Im Fehlerfall wird die Spekulation dann verworfen und ggf. die aktuelle Pipeline zurückgesetzt). 
+Ausserdem sind Prozessoren heutzutage mit einem schnellen, mehrstufigen (meist 3) Cachesystem ausgestattet, das lokale Änderungen an Werten erlaubt, ohne dass diese sofort in den Speicher zurückgeschrieben oder anderen beteiligten Prozessorkernen bekannt gemacht müssen.
+
+Aus diesen zwei Gründen können Schreiboperationen eines Threads für andere Threads komplett unsichtbar sein und damit zur falschen Aussagen beim Lesen von Werten führen, die dann im weiteren Verlauf die Korrektheit des Programms beeinflussen.
+
+Für die meisten Operationen im Programm sind diese Optimierungen auch wichtig und unproblematisch, da sie im lokalen Kontext eines Threads erfolgen, und damit massive Leistungssteigerungen hervorrufen können. 
+Für das aktive Bekanntmachen von Änderungen und Verhindern solcher Optimierungen gibt es das Konzept der Speicherbarrieren (memory barriers).
+D.h. Instruktionen die dem Prozessor mitteilen das Speicheroperationen in einer festen Reihenfolge und mit globaler Sichtbarkeit erfolgen müssen.
+
+=== Formalismen im Java Memory Model
+
+////
+==== Detour: Sequential Consistency
+
+Um einige der späteren Ausführungen zu verstehen, hier eine kurze Diskussion von Sequential Consistency: 
+
+Sequential Consistency (Lamport, 1979): Das Ergebnis der Ausführung *gleicht* dem, das entstünde, wenn alle Instruktionen aller Prozessoren von einem Prozessor in Reihe ausgeführt würden, und die generelle Sequenz (nicht die exakte Aufeinanderfolge) der Aktionen mit denen des Programms übereinstimmen würde. 
+Also als ob alle Aktionen in Reihenfolge ausgeführt würde und nur manchmal der Thread wechselt. D.h. prinzipiell kann massiv optimiert werden, da nur das Ergebnis zählt.
+In  der Realität ist das global nicht möglich, da die kombinatorische Vielfalt explodiert.
+Daher wird es über einen Annäherungs-/Ausschlussverfahren angenähert.
+
+Zusammengefasst, aus [Lea] ergibt sich folgendes Bild für erlaubte Umsortierungen von relevanten Operationen durch Compiler (und implizit Prozessor):
+
+[cols=4]
+|====
+
+h|Umordnen erlaubt
+3+^h|2. Operation
+
+h|1. Operation	h|Normal Load / Normal Store	h|Volatile Load / Monitor Enter	h|Volatile Store / Monitor Exit
+
+h|Normal Load / Normal Store	|Ja	|Ja	|Nein
+
+h|Volatile Load / Monitor Enter	|Nein	|Nein	|Nein
+
+h|Volatile Store / Monitor Exit	|Ja	|Nein	|Nein
+
+|====
+
+Operations-Paare, die hier ein "Ja" haben, können erst im Rahmen der normalen Java-Semantik (z.B. wenn sie unabhängig sind) umsortiert werden. 
+Ausserdem können sich zwischen zweier dieser Operationen beliebig viele Aktionen, die keiner Synchronisation Bedingen befinden befinden.
+
+// Wenn der Compiler zweifelsfrei feststellen kann dass ein Lock oder ein volatiles Feld nur in einem Thread genutzt werden, dann kann er diese entfernen bzw. als normales Feld behandeln.
+
+////
+
+==== Sequential Consistency: Data Race Free
+
+Der von Aleksey dargestellte Ansatz zur Beschreibung der Herstellung einer konsistenten Ausführungsreihenfolge von Operationen wird von ihm als "Sequential Consistency - Data Race Free (SC-DRF)" bezeichnet. 
+Dabei wird aus einer Reihe von Operationsabhängigkeiten für verschiedene Teilaspekte (Abfolge, Synchronisation, Umordnungsrestriktionen) die Menge der möglichen Abfolgen von Instruktionen immer weiter reduziert, bis die konsistenten Sequenzen übrig bleiben.
+
+Um ein Speichermodell sinnvoll so auf Hardware abzubilden, dass die Konsistenz der Operationen noch gewährleistet ist (trotz extremer Optimierungen von Compiler und Prozessor), muss es Festlegungen geben welche Operationen wie voneinander abhängig sind (oder nicht) und welche Ausführungsreihenfolge garantiert sein muss. 
+Also Regeln, welche Operationen (besonders Feld und Monitor-Operationen) warum nicht umsortiert werden _dürfen_.
+
+Nur so kann man Race-Conditions, d.h. abhängige Werte werden gelesen bevor sie geschrieben werden, verhindern.
+Man kann aber nicht die Reihenfolge eines jeden Befehls fixieren, da dass die Möglichkeiten moderner Prozessoren zur Optimierung komplett aushebeln würde und als Ergebnis nur im Schneckentempo ausgeführt würde.
+
+Im Java Memory Model (JMM) werden diese Zusammenhänge über Regeln, die spezielle Aktionen und Reihenfolgen/Abhängigkeiten festlegen, formalisiert.
+
+==== Aktionen und Reihenfolgen
+
+Der Ablauf eines "abstrakten" Programms wird über einzelne *Aktionen* definiert, das können je nach Art der Betrachtung entweder alle Instruktionen (_Programmaction_) sein, oder nur bestimmte Speicherzugriffe (_Synchronizationaction_). 
+
+Da die Instruktionen durch das Scheduling mehrerer Threads und prinzipiell jederzeit in einer beliebigen Reihenfolge ausgeführt werden können, legen Ausführungsordnungen (~order) die möglichen und je nach Art der Betrachtung erlaubten *Reihenfolgen von Aktionen* fest.
+
+Dass heisst, die Menge aller möglichen Ausführungen ist wie ein Q-Bit und die "Beobachtung" durch die erlaubten Reihenfolgen von Aktionen fixieren bestimmte Aspekte der Möglichkeiten, so dass zum Schluss nur die gültigen (aber meist mehr als eine, durchaus variable) Ausführungen übrigbleiben.
+
+//.Formalismen im Java-Memory-Model [Shiplev JMM]
+//image::http://shipilev.net/blog/2014/jmm-pragmatics/page-050.png[]
+
+===== Arten von Aktionen:
+
+* Programmaktionen (Program Action, PA): stellen die ganz normalen Instruktionen/Statements des Programmcodes dar
+* Synchronsationsaktionen (SynchronizationAction, SA): Nur Speicherzugriffsmechanismen, sowie Start und Ende von Threads, Monitors und Locks sind hier relevant
+** wie z.b. Lese "1" von "x" als `read(x): 1` oder Schreibe "1" auf  "x" als `write(x,1)`
+
+Die einzelnen Aktionen werden dann über gerichtete Verknüpfungen zu konkreten Programm(ausführungen) verbunden.
+
+===== Die spezifizierten Ausführungsreihenfolgen sind:
+
+* Program Order (PO), 
+** originale sequentielle Reihenfolge der Programmaktionen (Statements) *innerhalb* des Programms und eines Threads, 
+** Verbindung zum Originalcode
+** Aktionen können für eine Ausführung aber umgeordnet werden
+
+* Synchronization Order (SO),
+** nur Synchronizationsaktionen stehen in dieser expliziten Reihenfolge, alle andere Operationen werden nicht betrachtet, 
+** SO legt die bedingte Reihenfolge von Schreib und Leseoperationen fest.
+
+* Synchronization With (SW), Sichtbarkeitsreihenfolge von Speicherzugriffen
+
+* Happens Before (HB), Kombination der vorangegangenen Regeln, welche Aktionen sind wie voneinander abhängig und welche Sichtbarkeiten aller Speicherzustände gibt es für nachfolgende Leseoperationen
+** einmal gesehene Werte, fixieren was vorher passiert sein muss, über Speicherstellen hinweg
+
+Mit diesen 4 Ausführungsreihenfolgen, 
+// die ich ich etwas detaillierter und am Beispiel erläutere, 
+wird die Menge aller möglichen Ausführungspfade von mehreren Programmfragmenten über mehrere Threads annotatiert. 
+Die bei der dazugehörigen Regelanwendung übrig bleibenden, validen Konstruktionen stellen die erlaubten Ausführungsreihenfolgen dar.
+
+//Ein interessantes Zitat von Hans Boehm:
+
+[quote,Hans Boehm]
+Wenn man nur genügend "volatile" Modifikatoren über ein Programm sprenkelt wird es irgendwann entscheidbar (sequentially consistent), da irgendwann genug Programmaktionen in Synchronizationsaktionen umgewandelt wurden, die dann eine ausreichend definierte, globale Reihenfolge fixieren
+
+[begin actions & orders]
+////
+==== Program Order (PO)
+
+Beispiel:
+
+.Beispiel für Program Order [Shiplev JMM]
+image::http://shipilev.net/blog/2014/jmm-pragmatics/page-052.png[]
+
+Für jedes Programm(fragment) gibt es eine Menge Reihenfolgen (Program Orders) von Aktionen, die eine *korrekte* Repräsentation des Programmablaufs darstellen und somit die minimale Konsistenzregel innerhalb von Threads repräsentieren.
+Mehrere Möglichkeiten für diese Reihenfolge ergeben sich aus dem potentiellen Umsortieren von unabhängigen Java-Instruktionen, deren Ausführung keine Auswirkung aufeinander hat.
+Diese Reihenfolgen stellt auch die Verbindung zwischen Speichermodell (JMM) und dem Rest der Java Sprachspezifikation her.
+
+Alle anderen Ausführungen beschäftigen sich mit den Laufzeitreihenfolgen von Speicheraktionen.
+
+==== Synchronizationsreihenfolge (Synchronization-Order, SO) 
+
+ist für folgende Synchronizations-Aktionen (SA) gültig:
+
+* volatile Lese- und Schreiboperationen
+* Lock und Unlock eines Monitors
+* erste, letzte Aktion eines Threads
+* Aktionen die feststellen, ob ein Thread gestartet oder beendet (z.B. `Thread.join()`) wurde
+
+Im Gegensatz zu Programmaktionen stehen Synchronisationsaktionen in einer globalen Reihenfolge, dh. alle Aktionen werden in genau dieser Abfolge über alle Threads ausgeführt.
+
+Weiterhin gilt: Für nur einen Thread entspricht die Synchronisationsreihenfolge der Programmabfolge und *alle Leseoperationen der SO sehen das Ergebnis der letzten Schreiboperation der SO*.
+
+// Die erste Regel besagt, dass die SO und PO konsistent sein müssen, dh. obwohl die SO gegenüber der PO theoretisch umgeordnet werden könnte, darf sie es nicht.
+
+// Die zweite Regel ist besonders wichtig für threadübergreifende Speichernutzung, sie stellt sicher, dass es eine "Vorgänger-Nachfolger"-Reihenfolge für synchronisierte Schreib/Leseoperationen gibt.
+
+Beispiel: Dekkers Algorithmus [Dekker]:
+
+[cols="m,m,m,m"]
+|====
+4+h|Initialization
+4+m|volatile int x,y;
+2+h| Thread 1
+2+h| Thread 2
+h| Statements
+h| PO-Aktionen
+h| Statements
+h| PO-Aktionen
+
+|x=1;
+|write(x,1)
+|y=1; 
+|write (y,1)
+
+|r1=y;
+|read(y): ?
+|r2=x; 
+|read(x): ?
+
+|====
+
+Innerhalb dieses Programms sind folgende Reihenfolgen gültig, d.h. Synchronizationsreihenfolge ist konsistent mit Programmablauf (PO) und Abfolge der SO-Aktionen ist korrekt (abhängiges Lesen nach Schreiben).
+
+[cols="m,m"]
+|====
+
+|1. write(x,1)     |1. write(x,1)
+|2. read(y): 0     |2. write(y,1)
+|3. write(y,1)     |3. read(x): 1
+|4. read(x): 1     |4. read(y): 1
+
+|====
+
+Also sind für `(x,y)` nur die Ergebnisse `(0,1)` und `(1,1)` möglich, nicht aber `(1,0)` oder `(0,0)`.
+
+Im allgemeinen gilt, dass die Effekte der Synchronizationsaktionen so sichtbar sind, als wären sie in der Reihenfolge des Programms ausgeführt worden. 
+// Die Synchronisationsreihenfolge stellt einen definierten Weg dar, zwischen Threads zu wechseln.
+
+==== Synchronizes-With Order (SW)
+
+_Synchronized-With_ ist eine Reihenfolge, die festlegt, dass wenn *ein Wert* durch eine Synchronisationsaktion (SA) (auch in einem anderen Thread) einmal gelesen wurde, dann auch alle darauffolgenden Aktionen *diesen Wert* sehen. 
+Wenn die Leseaktion dagegen einen anderen Wert gesehen hat, ist sie nicht mit der jeweiligen Schreibaktion synchronisiert. 
+Damit werden wieder Ausführungspfade ausgefiltert, in denen z.B. eine 1 geschrieben, aber nachfolgend eine 0 vom Speicher gelesen würde.
+
+==== Happens Before (HB)
+
+Zum Schluss muss es auch noch Regeln geben, die bestimmen, wie die Nicht-Synchronisationsaktionen ausreichend korrekt in den Programmablauf eingeordnet werden können.
+Dass heisst nicht, dass sie nicht etwaig umgeordnet werden, besonders, wenn sie unabhängig voneinander sind. 
+
+Die transitive Zusammenfassung des Programmablaufs innerhalb eines Threads (PO) und der Synchronized-With (SW) ergibt eine erlaubte, abgeleitete Abhängigkeitsreihenfolge "Happens Before" (HB, "vorher geschehen") von Aktionen, die sowohl innerhalb als auch zwischen Threads gültig ist.
+
+Wo bisher nur die Aussage stand, _dass_ ein späterer Lesevorgang _einen_ früheren Schreibvorgang sieht, legt "Happens Before" fest, _welche_ das sind, d.h. den _letzten_ relevanten Schreibvorgang.
+Sie verbietet dagegen, Ergebnisse von Schreiboperationen zu sehen, die laut der HB-Reihenfolge _nach_ dem Lesevorgang passiert sind.
+Interessanterweise erlaubt "Happens Before" data races, d.h. das Umsortieren von Lese- und Schreibvorgängen im Allgemeinen.
+
+HB stellt also sicher, wenn ein Lesevorgang ein Update gesehen hat, sehen alle nachfolgenden Lesevorgänge auch dieses und alle vorangegangenen Aktualisierungen.
+
+Diese 4 Reihenfolge-Regeln zusammen bedeuten jetzt:
+
+Wenn ein Programm korrekt synchronisiert ist, d.h. die notwendigen Synchronisationsreihenfolgen existieren, dann ist sichergestellt, dass es logisch konsistent und entscheidbar ist. 
+Die Reihenfolge von thread-lokalen Operationen in "Happens Before" werden durch die Programmreihenfolge festgelegt, die über Threadgrenzen hinweg von "Synchronized With".
+
+end actions & orders
+////
+
+////
+Zur Vereinfachung kann man die Anfangs- und Endpunkte der Happens-Before Kanten als "release" und "acquire" von Synchronisationszuständen betrachtet werden. 
+D.h. ein Zustand wird bei "release" veröffentlicht und bei "acquire" festgestellt. 
+
+TODO example mit acquire / release test on read and write, volatile/sharing??
+Sharing of State between threads / in thread
+good example of broken opitmizations, it's not able to pull the read before the loop??
+sharing of writes
+
+For a writing test, we can start incrementing the same variable. We do a bit of backoff to stop bashing the system with writes, and here we can observe the difference both between shared/unshared cases and between volatile/non-volatile cases. One would expect volatile tests to lose across the board, however we can see the shared tests are losing. This reinforces the idea that data sharing is what you should avoid in the first place, not volatiles.
+////
+
+==== Publikation von Aktualisierungen
+
+Im Allgemeinen kann man "Happens Before"-Verbindungen zwischen Aktionen als Paare einer _release_ (Updates veröffentlichen) und _aquire_ (Updates erhalten) betrachten. Dies gilt hier nur für eine Variable, es wird später mittels der "memory barrier" als generelle Publikation erweitert.
+
+.Publikation von Änderungen mittels "release -> acquire" [Shiplev JMM]
+image::http://shipilev.net/blog/2014/jmm-pragmatics/page-091.png[]
+
+Beispiel:
+
+----
+class Test {
+  volatile Object value;
+  public synchronized set(Object value) { if (this.value == null) this.value = value; }
+  public Object get() { return this.value; }
+}
+----
+
+Dieses Beispiel funktioniert, da die `synchronized` Methode am Ende ein _release_ erzeugt und der Zugriff auf die `volatile` Variable das entsprechende _acquire_.
+
+Bei Benchmarks zeigen sich die Kosten von "volatilen" Variablen aber auch des Teilens von Zustand/Speicher im Allgemeinen, die notwendigen Zusicherungen für threadübergreifende Sichtbarkeit es verhindern, dass der Compiler Programmoptimierungen vornehmen kann, die sonst massive Auswirkungen hätten.
+
+[begin optimierung]
+////
+==== Werte aus spekulativen Optimierungen
+
+Zwischen Synchronizationsaktionen können Operationen beliebig umsortiert werden.
+Falls dabei Inkorrektheiten aufgrund fehlender Auszeichnungen von Feldern oder Methoden passieren, ist es in der Verantwortung des Entwicklers dafür Sorge zu tragen, dass das keine Folgen hat, oder korrigiert wird.
+
+Jetzt kann es vorkommen, dass spekulative Hardware bestimmte Branches schon soweit vorberechnet, dass Werte entstehen, die es eigentlich gar nicht gibt. Damit diese *nicht* als Ausgangspunkt für nachfolgende Leseoperationen genutzt werden dürfen, beschreibt die JLS eine ausführliche "vorher-nachher" Commit-Semantik. 
+
+Diese stellt den finalen Aspekt des Regelwerks zur Ermittlung der erlaubten Abläufe von Aktionen dar.
+
+end optimierung
+////
+
+==== Fazit: JMM Formalisierung
+
+Wenn alle Ausführungsreihenfolgen angewandt und validiert wurden, bleiben nur die Programmabläufe als gültig zurück, die allen Restriktionen standhalten. 
+Dieser kleine Teil ist dann, was vom Compiler generiert und der JVM ausgeführt werden kann, ohne dass die Invarianten und Vor- und Nachbedingungen verletzt werden.
+
+.Venn Diagramm der 5 Regelanwendungen [Shiplev JMM]
+image::http://shipilev.net/blog/2014/jmm-pragmatics/page-125.png[]
+
+Und die Hilfen, die man als Programmierer gibt, wie `volatile`, `final`, `synchronized` und Threadsteuerung helfen dabei, die validen Lese- und Schreiboperationen auf geteilte Resourcen zu markieren und korrekt abzusichern und zu publizieren.
+
+Das Thema Formalisierung des JMM ist nicht so einfach zu verstehen und auch nicht so einfach zu erklären, wie ich mir vorgestellt habe. 
+Ich hoffe, Sie wurden nicht überfordert. 
+Ich fand das Ganze sehr spannend und einsichtsreich.
+
+=== Speicherbarrieren 
+(memory barrier, memory fence)
+
+Speicherbarrieren dienen zur Publikation von Änderungen über Prozessorgrenzen hinweg, sie werden _zwischen_ Speicherzugriffen aktiv.
+Sie stellen sicher, dass bestimmte Aktualisierungen nicht nur im lokalen Prozessorcache widergespiegelt werden, sondern auch für Threads auf anderen Prozessoren sichtbar sind. 
+Dazu werden beim Eintreffen einer solchen Instruktion die Cache-Lines und Schreibpuffer des Prozessors geflushed. 
+Bei Einzelprozessoren ist das nicht notwendig sie teilen sich einen Prozessorcache, nur bei Multiprozessoren.
+
+Interessanterweise müssen sie auch vom Compiler erzeugt werden, wenn der eigentliche Feldzugriff auf das "synchronisierte" Feld wegoptimiert wird, da in ihrem Kontrakt steht, dass sie auch alle vorherigen Speicheroperationen sichtbar machen.
+
+Die teure, grobgranulare "Fence" Operation der meisten Prozessoren stellt sicher, dass alle Schreiboperationen vor der Grenze allen Leseoperationen nach der Grenze zur Verfügung stehen.
+
+Es gibt 4 Arten von Speicherbarrieren, je nachdem welches Paar von Operationen sie trennen. 
+Die am häufigsten vorkommende ist, wie schon zu erwarten StoreLoad, dass neben seiner eigentlichen Operation auch noch das Lesen nachfolgend, durch einen anderen Prozessor gespeicherter, noch nicht publizierter Werte verhindert, so dass diese nicht zufällig den publizierten Wert überdecken. 
+
+Compiler müssen Barrieren pessimistisch zwischen entsprechenden Speicherzugriffen eingefügt werden, da eine globale Optimierung der Platzierung nicht trivial möglich ist. 
+Es ist oft nicht entscheidbar, was für eine Operation einem Lese- oder Schreibzugriff folgt, zum Beispiel wenn dieser von einem `return` gefolgt wird.
+
+[begin optimierung]
+////
+
+==== Optimierungen
+
+Volatile Variablen sind dann sinnvoll, wenn ein Lock unnötig, da zu teuer für Operationen ist, bei denen die Lesezugriff auf eine Variable die Schreibzugriffe um ein Vielfaches übersteigen. 
+
+Doppelte Barrieren können entfernt werden, wenn mehrere davon aufeinanderfolgen, und keine relevanten Synchronisationsaktionen dazwischenliegen, da die Semantik vor allem von *StoreLoad* besagt, dass _alle vorangegangenen_ Aktualisierungen für spätere Zugriffe sichtbar publiziert wurden und nicht nur das betroffene Feld. 
+Ähnliches gilt auch für doppelte Locks oder Paare von Barrieren und Locks.
+Weitere Optimierungen betreffen: nachweislich thread-lokale Zugriffe auf volatile Variablen, den konkreten Einfügepunkt der Barrieren in den Instruktionsstrom und prozessorspezifische Implementierung von Barrieren (ggf. NO-OP).
+
+
+// Es muss vor allem das nochmalige Laden von Werten, die vor der Grenze gespeichert wurden, verhindert werden.
+// StoreLoad had auch die Effekte der 3 anderen Barrieren, ist aber auch am teuersten.
+// Für die Publikation der Referenz eines Objektes mit finalen Feldern wird auch StoreLoad eingesetzt.
+
+//
+Die Existenz einer konsistenten Reihenfolge von Operationen (sequential consistency) ist (so schön es auch wäre) leider nicht gegeben und mit heutigen Mitteln auch nicht effizient entscheidbar.
+
+Barrier instructions apply between different kinds of accesses as they occur during execution of a program. Finding an "optimal" placement that minimizes the total number of executed barriers is all but impossible. Compilers often cannot tell if a given load or store will be preceded or followed by another that requires a barrier; for example, when a volatile store is followed by a return. The easiest conservative strategy is to assume that the kind of access requiring the "heaviest" kind of barrier will occur when generating code for any given load, store, lock, or unloc
+
+end optimierung
+//// 
+
+
+=== Zum Schluss: Final
+
+Beispiel:
+
+----
+class A {
+   int f;
+   public A() { f = 42; }
+}
+----
+
+|=====
+| Thread 1       | Thread 2
+| A a = new A(); | if ( a != null) out.println(a.f);
+|=====
+
+Welche Ausgaben kann Thread 2 produzieren? 
+
+Erwartet:
+
+* Nichts
+* 42
+
+Nicht erwartet, kommt aber trotzdem:
+
+* 0
+* NullPointerException
+
+*Warum?* Race-Conditions können machen dass `a.f` noch nicht initialisiert ist, wenn Thread 2 schon auf darauf zugreift.
+Die NullPointer Exception kann aus einem Fall kommen, in dem Thread 2, zwei verschiedene Werte von `a` sieht, einmal den
+initialisierten, so dass die if-Bedingung erfüllt ist, dann aber wieder den nicht-initialisierten, so dass es zur NPE kommt.
+
+Wie kann man das verhindern? 
+Indem das Feld als `final int f;` deklariert wird. 
+
+Damit wird es nicht nur unveränderlich, sondern was hier viel wichtiger ist, es bekommt einen sauberen Publikationsmechanismus für die Sichtbarkeit seines Wertes.
+
+Der Compiler darf auserdem nicht mehr die Referenz für `a` anderen Threads zur Verfügung stellen bevor nicht alle finalen Felder gesetzt wurden.
+Und damit werden auch alle anderen Änderungen die bis dahin passiert sind, verfügbar.
+Damit wird auch effektiv verhindert, dass unsere eigentlich geschützten (immutablen) Objekte (absichtlich) einem anderen Konsumenten vor der fertigen Initialisierung zur Verfügung gestellt werden, ohne dass wir es kontrollieren können.
+
+// Für immutable Objekte können durch den Compiler so auch schnellere und effektivere Synchronisationsmechanismen eingesetzt werden.
+
+Die Implementierung von `final` ist leichter als gedacht. 
+Mit einer Speicherbarriere (_freeze action_) am Ende des Konstruktors, Initialisierung der Felder vor Publikation der Instanz, und einer Garantie dass die Referenzen der Instanz und damit auch der finalen Felder erst geladen werden, wenn die Initialisierung abgeschlossen ist.
+Durch die Speicherbarriere sind auch Aktualisierungen automatisch publiziert auf die finale Felder referenzieren.
+
+////
+In der JMM Spezifikation wird `final` deutlich komplexer durch eine neue _Freeze_ Aktion und zwei zusätzliche Reihenfolgen abgebildet, "memory order" (mc) and "derference order" (dr), die sicherstellen, dass die genannten Garantien eingehalten werden.
+D.h. Festzurren (Freeze) der finalen Felder im Konstruktor sowie Zuweisung der Referenzen des Objekts (und der finalen Felder) erst nach Abschluss der Publikation.
+////
+
+Dieser Publikationsmechanismus funktioniert wirklich gut, es gibt nur eine Ausnahme.
+
+Man muss aufpassen, dass man die aktuelle Instanz der Klasse nicht während der Konstrukturausführung unbeabsichtigt globalen Variablen zuzuweisen. 
+Andere Threads können über diese Variable dann eine unpublizierte Referenz auf die Instanz und ihre finalen Felder zugreifen. 
+Das kann auch passieren, indem während der Konstrukturausführung fremde Methoden mit der eigenen Referenz (this) aufgerufen werden und damit ohne es zu wollen, die noch nicht initialisierte Instanz zu zeitig geteilt wird.
+
+//Einmal geteilt bleibt die Referenz in dem lesenden Thread korrupt.
+//Das liegt daran, dass Referenzen von der Laufzeitumgebung gecached werden können und dann nicht mit der korrekten Variante ersetzt werden. 
+
+//Wie bei `volatile` löst Schreibvorgang auf einen Speicher mit `final` Modifikator eine _memory barrier_ aus, die die Publikation des Wertes über Prozessorgrenzen hinweg sicherstellt. Desweiteren stellt `final` wie bekannt Garantien für das einmalige Beschreiben des Platzes dar.
+
+////
+Für finale Felder gibt es zwei Regeln 
+
+1. Objektreferenzen mit finalen Feldern dürfen erst für andere Threads sichtbar gemacht werden, wenn die finalen Felder gesetzt sind.
+2. Die Zuweisung der Objektreferenz das das Feld enhält, darf nicht mit der Zugriffsoperation auf das Feld umgeordnet werden, .d.h `Object x = create();  x.finalField;`
+
+Das bedingt das der Zugriff auf ein Objekt mit mindestens einem finalen Feld mit vorheriger Publikation verbunden werden muss (durch eine geeigneten Mechanismus), so dass jeder Zugriff von aussen nur fertig konstruierte Objekte sieht. 
+Bei nicht finalen Feldern ist das aber nicht der Fall, da kann ein anderer Thread Zugriff auf das Objekt erhalten bevor es fertig initialisiert ist, und man muss selbst dafür Sorge tragen, dass das nicht geschieht.
+////
+
+[begin JOL]
+////
+=== Tool: Java Object Layout (JOL)
+
+Ich habe es im Artikel über JMH schon einmal erwähnt, das Tool JOL von Aleksey ist sehr hilfreich, wenn es darum geht das tatsächliche Layout einer Klasse im Speicher darzustellen. 
+Es ist alles andere als trivial das zu inferieren, da der Compiler frei ist, Felder umzusortieren und zu packen. 
+Nach dem Objekt-Header werden Felder der Superklassen in Reihenfolge angeordnet, das generelle Layout von Klassen ist auf 8 Bytes angeordnet (aligned). 
+Teilweise können kleine Felder direkt in die Zeile mit dem Header aus 12 Bytes geschrieben werden.
+
+Das ganze wird wichtig, wenn durch konkurrierenden Zugriff auf Instanzvariablen einer Klasse diesselben Cache-Lines des Prozessors als geteilte Resource erscheinen und dann für jeden Schreibzugriff über die Prozessorgrenzen hinweg publiziert werden müssen. 
+um das zu verhindern behilft man sich des Paddings (Auffüllen auf Cache-Line-Breite z.b. 256 Bytes) und zusammengehörige Anordnung der gemeinsam durch einen Thread genutzten Felder.
+
+JOL kann nun für eine beliebige Klasse das Layout anzeigen. 
+// Mein Beispiel ist java.util.Stack der von Vector erbt.
+Mein Beispiel ist eine *ausgedachte* Klasse für einen Knoten (+Node+) in einer Graphdatenbank wie Neo4j.
+
+class Entity {
+   long id;
+   Database database;
+}
+class PropertyContainer extends Entity {
+   Map<String,Object> properties;
+   boolean propertiesLoaded;
+}
+
+class Node extends PropertyContainer {
+   int totalRelationships;
+   Map<TypeAndDirection,List<Relationship>> relationships;
+   int relationshipsLoaded;
+}
+
+Dieses Konstrukt enthält einige Felder mit verschiedenen Breiten (boolean, int, long, Objektreferenzen), die auch noch lustig gemischt sind.
+Die spannende Frage ist jetzt, wieder Compiler die Klasse Node im Speicher anordnet.
+
+----
+java -jar jol-internals.jar javaspektrum.jmm.Node
+....
+----
+end JOL
+////
+
+=== Referenzen:
+
+* [JLS - Memory Model] http://docs.oracle.com/javase/specs/jls/se8/html/jls-17.html#jls-17.4
+* [Shipilev JMM Pragmatics] http://shipilev.net/blog/2014/jmm-pragmatics/
+* [Goetz Value Types] http://cr.openjdk.java.net/~jrose/values/values-0.html
+* [Rose Struct Tearing] https://blogs.oracle.com/jrose/entry/value_types_and_struct_tearing
+* [Rose Value Types] https://blogs.oracle.com/jrose/entry/value_types_in_the_vm
+* [JEP 188 JMM Update] http://openjdk.java.net/jeps/188
+* [Shipilev Atomic Access] http://shipilev.net/blog/2014/all-accesses-are-atomic/
+//* [JMM Examples: David Aspinall and Jaroslav Sevcik 2007] http://groups.inf.ed.ac.uk/request/jmmexamples.pdf
+* [Dekker] http://en.wikipedia.org/wiki/Dekker's_algorithm
+* [Lea JSR 133 Cookbook for Compiler Writers] http://gee.cs.oswego.edu/dl/jmm/cookbook.html (konservative Interpretation des JMM)
