@@ -1,0 +1,157 @@
+== First steps with Podman
+:tags: docker, container, podman, til
+
+Today I got fed up with starting Docker again, and remembered that I wanted to try podman.
+Podman is meant to be a daemon-less container service drop-in replacement for Docker.
+
+TLDR; Painless setup, great error messages, and works out of the box. 
+Only issue is that you have to re-download your images, so don't try this on a plane or train :)
+
+I had already installed it with `brew install podman` and for good measure, just tried to run:
+
+----
+brew install podman
+Warning: podman 4.5.0 is already installed and up-to-date.
+To reinstall 4.5.0, run:
+  brew reinstall podman
+----
+
+Ok, all good, let's start our container.
+
+`podman run -p 7687:7687 -p 7474:7474 -e NEO4J_AUTH=neo4j/pa55w0rd neo4j` 
+
+which failed with a nice error message:
+
+----
+Cannot connect to Podman. Please verify your connection to the Linux system using `podman system connection list`, or 
+try `podman machine init` and `podman machine start` to manage a new Linux VM
+
+Error: unable to connect to Podman socket: Get "http://d/v4.5.0/libpod/_ping": dial unix ///var/folders/79/fmg6d9z90t74392zcpppgnph0000gn/T/podman-run--1/podman/podman.sock: connect: no such file or directory
+----
+
+Ok, nice, so let's `init` and `start` the machine.
+
+----
+podman machine init
+Downloading VM image: fedora-coreos-38.20230430.2.1-qemu.aarch64.qcow2.xz: done  
+Extracting compressed file
+Image resized.
+Machine init complete
+To start your machine run:
+
+	podman machine start
+----
+
+Ok, let's do that. It takes a while though for the first time, 2-3 minutes.
+
+----
+podman machine start
+Starting machine "podman-machine-default"
+Waiting for VM ...
+
+Mounting volume... /Users:/Users
+Mounting volume... /private:/private
+Mounting volume... /var/folders:/var/folders
+
+This machine is currently configured in rootless mode. If your containers
+require root permissions (e.g. ports < 1024), or if you run into compatibility
+issues with non-podman clients, you can switch using the following command: 
+
+	podman machine set --rootful
+
+API forwarding listening on: /Users/mh/.local/share/containers/podman/machine/qemu/podman.sock
+
+The system helper service is not installed; the default Docker API socket
+address can't be used by podman. If you would like to install it run the
+following commands:
+
+	sudo /opt/homebrew/Cellar/podman/4.5.0/bin/podman-mac-helper install
+	podman machine stop; podman machine start
+
+You can still connect Docker API clients by setting DOCKER_HOST using the
+following command in your terminal session:
+
+	export DOCKER_HOST='unix:///Users/mh/.local/share/containers/podman/machine/qemu/podman.sock'
+
+Machine "podman-machine-default" started successfully
+----
+
+Ok, good to know about the `rootless` mode. 
+And why not install the "Docker API socket".
+
+----
+sudo /opt/homebrew/Cellar/podman/4.5.0/bin/podman-mac-helper install
+Password:
+podman machine stop; podman machine start
+Waiting for VM to exit...
+Machine "podman-machine-default" stopped successfully
+Starting machine "podman-machine-default"
+Waiting for VM ...
+Mounting volume... /Users:/Users
+Mounting volume... /private:/private
+Mounting volume... /var/folders:/var/folders
+
+API forwarding listening on: /var/run/docker.sock
+Docker API clients default to this address. You do not need to set DOCKER_HOST.
+
+Machine "podman-machine-default" started successfully
+----
+
+Now let's try our container again, which also downloads the image:
+
+----
+podman run -p 7687:7687 -p 7474:7474 -e NEO4J_AUTH=neo4j/pa55w0rd neo4j
+
+Resolving "neo4j" using unqualified-search registries (/etc/containers/registries.conf.d/999-podman-machine.conf)
+Trying to pull docker.io/library/neo4j:enterprise...
+Getting image source signatures
+Copying blob sha256:3aa3fe131fde0ce072e7b87753cf16cd5d86a83e95ebe1ea85581e4b7cf01a8f
+...
+Copying config sha256:5d30c05a208e81fc92ba79e35c04df9af40e8950da321169bfa87bf06e621d7d
+Writing manifest to image destination
+Storing signatures
+5d30c05a208e81fc92ba79e35c04df9af40e8950da321169bfa87bf06e621d7d
+
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2023-05-09 07:52:36.641+0000 INFO  The license agreement was accepted with environment variable NEO4J_ACCEPT_LICENSE_AGREEMENT=yes when the Software was started.
+
+
+2023-05-09 07:52:36.699+0000 INFO  Starting...
+2023-05-09 07:52:39.838+0000 INFO  ======== Neo4j 5.7.0 ========
+2023-05-09 07:52:39.867+0000 INFO  This instance is ServerId{777e7ed9} (777e7ed9-ed52-4660-bab2-92e27b954c36)
+2023-05-09 07:52:42.695+0000 INFO  Default database 'neo4j' is created
+2023-05-09 07:52:43.008+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2023-05-09 07:52:43.015+0000 INFO  Bolt (Routing) enabled on 0.0.0.0:7688.
+2023-05-09 07:52:43.743+0000 INFO  Remote interface available at http://localhost:7474/
+2023-05-09 07:52:43.749+0000 INFO  id: 7904A9EEEBE156763A0E6F0849A06712A024633EF1A54D6BD94D1B5B47E8A54C
+2023-05-09 07:52:43.750+0000 INFO  name: system
+2023-05-09 07:52:43.751+0000 INFO  creationDate: 2023-05-09T07:52:41.653Z
+2023-05-09 07:52:43.752+0000 INFO  Started.
+----
+
+And finally, see if it's running
+
+----
+podman ps
+
+CONTAINER ID  IMAGE                               COMMAND     CREATED             STATUS        PORTS                                           NAMES
+4427779b8789  docker.io/library/neo4j  neo4j       About a minute ago  Up About a minute  0.0.0.0:7474->7474/tcp, 0.0.0.0:7687->7687/tcp  elastic_feynman
+----
+
+So we can now use the built in `Neo4j Browser UI` on port: 7474, or connect via `cypher-shell` or a `driver` on port 7687.
+
+----
+podman exec 4427779b8789 /var/lib/neo4j/bin/cypher-shell \
+    -u neo4j -p pa55w0rd --format verbose \
+    'CREATE path = (:Person {name:"Michael"})-[:LIKES]->(:Tool {name:"podman"}) RETURN path as til;'
+
++----------------------------------------------------------------+
+| til                                                            |
++----------------------------------------------------------------+
+| (:Person {name: "Michael"})-[:LIKES]->(:Tool {name: "podman"}) |
++----------------------------------------------------------------+
+
+1 row
+ready to start consuming query after 1 ms, results consumed after another 3 ms
+Added 2 nodes, Created 1 relationships, Set 2 properties, Added 2 labels
+----
