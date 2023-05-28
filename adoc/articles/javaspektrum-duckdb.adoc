@@ -17,7 +17,7 @@ DuckDB ist der analytische OLAP Zwilling dazu, also "SQLite für Datenanalyse",
 
 Von Hannes Mühleisen und Mark Raasveldt als Datenbank-Doktoranden am CWI (Centrum Wiskunde & Informatica) in Amsterdam entwickelt, hat DuckDB ihren Usprung in der Erkenntnis das Data-Scientists in R oft kein SQL benutzten, weil keine gute Datenbankintegration für R existierte und Client-Server Datenbanken unpraktisch waren.
 Ausgehend von "wie schwer kann dass den sein", ist während nunmehr 8 Jahren Arbeit erst im universitären und jetzt auch im kommerziellen Umfeld ein beindruckendes Datenbanktool entstanden, dass Anwendern weit über R hinaus den Zugang zur effizienten Datenanalyse ermöglicht.
-DuckDB ist in C++ 11 implementiert, hat keine weiteren Abhängigkeiten, und unter der MIT License veröffentlicht.
+DuckDB ist in C++ 11 implementiert, hat keine weiteren Abhängigkeiten, und ist unter der MIT License veröffentlicht.
 
 Oft assoziieren wir mit der Analyse von Datenmengen im zwei- oder dreistelligen Gigabytebereich, größere Spark-Cluster oder DWH Lösungen wie Snowflake, PowerBI, Cognos, Redshift oder ähnliches.
 Jede davon mit den entsprechenden Investitionen in Infrastruktur, Zeit, Datentransfer und Komplexität.
