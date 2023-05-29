@@ -623,7 +623,11 @@ Für Endanwendungen wird neben der C/C++ API auch Integration für Python und R 
 Als Parser wird ein modifizierter Postgres-Parser genutzt, der sehr flexible auf die Bedürfnisse angepasst werden kann.
 Abfrageplannung erfolgt in einem kostenbasierten Optimizer, der Ansätze wie "join-order-optimization" und "dynamic programming" ausnutzt.
 // , mit Optimierung von JOIN Reihenfolgen und dynamischer Programmierung ().
-
+Für Indizes und Constraints (PK, FK), sowie Geo und Range-Abfragen sowie Joins benutzt DuckDB Adaptive Radix Tree (ART) Indizes (Tries mit horizontaler und vertikaler Kompression).
+// https://duckdb.org/2022/07/27/art-storage.html
+// trees that also contain the data (e.g. 1 char or 1 byte per level)
+// vertical compression for nodes with only one child -> radix tree -> store prefix and then only next child which has bifurcation
+// horizontal compresion -> ART -> on each position of the 256 values of a byte there is one pointer pointing down (or null) -> 
 Die Ausführung des physischen Plans übernimmt eine vektorisierte, kolumnare, parallele Implementierung, die auf Teilmengen (Batches) von Daten arbeitet (Vector Volcano/Morsel Ansatz) und damit eine gute Balance zwischen der Verarbeitung pro Zeile bzw. der kompletten Daten auf einmal erreicht.
 
 Alle Daten innerhalb von DuckDB liegen in getypten, optimierten Vektor-Implementierungen für verschiedene Inhalte (numerisch, Konstanten, Strings, Listen, Structs, usw.) die sowohl durch Kompression, Metadaten (min, max) und zusätzliche Indizes die Auswahl bzw. Verarbeitung beschleuinigen.
@@ -633,6 +637,7 @@ DuckDB ist auch transaktional, damit während der analytischen Abfragen auch Upd
 Es benutzt eine OLAP optimierte Variante MVCC (Multi Version Concurrency Control) mit serialiserten Transaktionen wie auch das HyPer System der TU München.
 Dabei werden Aktualisierungen direkt ausgeführt und vorherige Werte in einem Undo-Puffer gehalten, falls die Transaktion zurückgerollt werden muss.
 
+Alles in allem laut Aussage der Entwickler eine Lehrbuch-Architektur, aber das Datenbank-sLehrbuch ist dann schon ziemlich modern.
 
 // SIGMOD 2019 paper https://hannes.muehleisen.org/publications/SIGMOD2019-demo-duckdb.pdf
 // Dissecting DuckDB: The internals of the “SQLite for Analytics” https://pdet.github.io/assets/papers/duck_sbbd.pdf 
@@ -735,23 +740,58 @@ Dabei war die Extraktion der Daten aus der Anbietersoftware der größte Aufwand
 [source,sql]
 ----
 WITH production_per_month_and_hour AS (
-    SELECT any_value(strftime (measured_on, '%B')) AS Month,
-           any_value(date_part('hour', measured_on)) AS Hour,
-           avg (power) / 1000 AS Energy
-    FROM production
-    GROUP BY date_trunc('hour', measured_on)
-)
-
+        SELECT any_value(strftime(measured_on, '%B'))    AS Month,
+               any_value(date_part('hour', measured_on)) AS Hour,
+               avg(production) / 1000                    AS Energy
+          FROM measurements
+         GROUP BY date_trunc('hour', measured_on)
+         ORDER BY Hour
+    )
 SELECT *
 FROM production_per_month_and_hour
 PIVOT (
-    round (avg (Energy), 2)
-    FOR Month IN ('January', 'February', 'March', 'April', 'May', 'June', 
-         'July', 'August', 'September', 'October', 'November', 'December')
+    round(avg(Energy), 2)
+    FOR Month IN ('January', 'February', 'March', 'April', 'May', 'June')
     GROUP BY Hour
 );
 ----
 
+.Listing {listing} Ausgabe PV Analyse
+----
+┌───────┬─────────┬──────────┬────────┬────────┬────────┬────────┐
+│ Hour  │ January │ February │ March  │ April  │  May   │  June  │
+│ int64 │ double  │  double  │ double │ double │ double │ double │
+├───────┼─────────┼──────────┼────────┼────────┼────────┼────────┤
+│     0 │         │          │        │    0.0 │    0.0 │        │
+│     1 │         │          │        │    0.0 │    0.0 │        │
+│     2 │         │          │        │    0.0 │    0.0 │        │
+│     3 │         │          │        │    0.0 │    0.0 │        │
+│     4 │         │          │        │    0.0 │    0.0 │        │
+│     5 │         │          │        │    0.0 │    0.0 │        │
+│     6 │         │          │        │   0.05 │   0.36 │        │
+│     7 │         │          │        │   0.57 │   1.23 │        │
+│     8 │         │          │        │   1.37 │   2.16 │        │
+│     9 │         │          │        │   2.18 │   2.99 │        │
+│    10 │         │          │        │   2.31 │   3.69 │        │
+│    11 │         │          │        │   2.28 │   3.92 │        │
+│    12 │         │          │        │   3.14 │    4.3 │        │
+│    13 │         │          │        │   3.13 │   4.36 │        │
+│    14 │         │          │        │   2.89 │   4.26 │        │
+│    15 │         │          │        │   2.82 │   3.85 │        │
+│    16 │         │          │        │   1.87 │   3.13 │        │
+│    17 │         │          │        │   1.41 │   2.51 │        │
+│    18 │         │          │        │   1.05 │   1.86 │        │
+│    19 │         │          │        │   0.55 │   1.22 │        │
+│    20 │         │          │        │   0.08 │   0.43 │        │
+│    21 │         │          │        │    0.0 │   0.01 │        │
+│    22 │         │          │        │    0.0 │    0.0 │        │
+│    23 │         │          │        │    0.0 │    0.0 │        │
+├───────┴─────────┴──────────┴────────┴────────┴────────┴────────┤
+│ 24 rows                                              7 columns │
+└────────────────────────────────────────────────────────────────┘
+----
+
+////
 .Bild 2 - Ausgabe PV Analyse
 image::pv_pivot.png[]
 
@@ -775,6 +815,7 @@ FROM per_day;
 
 .Bild 3 - Ausgabe Tagesstatistik
 image::pv_per_day.png[]
+////
 
 === Anwendungsfälle
 
