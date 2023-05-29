@@ -6,9 +6,7 @@ Ist es im Zeitalter von BigData denn noch möglich, Datenanalysen von hunderten 
 Ja jetzt wieder, mittels DuckDB, dem neuesten Star in der Datenbankwelt.
 Diese leichtgewichtige, hocheffiziente Datenbank kann leicht in die eigenen Python-, Java- oder andere Programme integriert werden und macht moderne SQL-Analysefunktionalität einfach nutzbar.
 
-De Gründer von Motherduck, Jordan Tigani einer der originalen Entwickler von Google's BigQuery hat dazu im Artikel  "Big Data is Dead" [BigData] Stellung genommen - die meisten Datensets sind nicht gigantisch (median 100GB) und die wichtigsten Analysen erfolgen auf den jüngsten Daten, of nur wenige hundert Megabytes.
-
-Die verbreitetste Datenbank ist nicht etwa MySQL oder MS Access, sondern [SQLite], das in zehntausenden Anwendungen in unseren Mobiltelefonen, Webbrowsern, Spielen, Fernsehern und anderen Geräten genutzt wird, um schnell und effizient strukturierte Daten abzulegen und mit SQL zugreifbar zu machen.
+Die verbreitetste Datenbank ist nicht etwa MySQL oder MS Access, sondern [SQLite], das in zehntausenden Anwendungen (mehr als eine Billion Datenbanken) in unseren Mobiltelefonen, Webbrowsern, Spielen, Fernsehern und anderen Geräten genutzt wird, um schnell und effizient strukturierte Daten abzulegen und mit SQL zugreifbar zu machen.
 Der besondere Reiz liegt darin, dass die Datenbank als Bibliothek einfach in Programme integriert werden kann und dann innerhalb des eigenen Prozesses läuft, ohne einen separaten Server zu betreiben.
 SQLite ist eine volltransaktionale OLTP Datenbank mit einer extrem guten Testabdeckung und Verfikation.
 Im Podcast [SQLitePodcast] hat der Erfinder, Richard Hipp die Geschichte der Datenbank anschaulich dargelegt.
@@ -22,17 +20,20 @@ DuckDB ist in C++ 11 implementiert, hat keine weiteren Abhängigkeiten, und unte
 Oft assoziieren wir mit der Analyse von Datenmengen im zwei- oder dreistelligen Gigabytebereich, größere Spark-Cluster oder DWH Lösungen wie Snowflake, PowerBI, Cognos, Redshift oder ähnliches.
 Jede davon mit den entsprechenden Investitionen in Infrastruktur, Zeit, Datentransfer und Komplexität.
 
-Aber wie schon von Frank McSherry [McSherry] in 2015 demonstriert, kann man mit einer effizienten Implementierung unter Ausnutzung all der mächtigen Eigenschaften moderner CPUs (Vektorisierung, massives Pipelining, sehr große CPU Caches) und exisitierender und aktueller Algorithmen der Datenbankforschung große Datenmengen selbst auf einem einzelnen Thread verarbeiten.
+De Gründer von Motherduck, Jordan Tigani einer der originalen Entwickler von Google's BigQuery hat dazu im Artikel  "Big Data is Dead" [BigData] Stellung genommen - die meisten Datensets sind nicht gigantisch (median 100GB) und die wichtigsten Analysen erfolgen auf den jüngsten Daten, of nur wenige hundert Megabytes.
+
+Wie schon von Frank McSherry [McSherry] in 2015 demonstriert, kann man mit einer effizienten Implementierung unter Ausnutzung all der mächtigen Eigenschaften moderner CPUs (Vektorisierung, massives Pipelining, sehr große CPU Caches) und exisitierender und aktueller Algorithmen der Datenbankforschung große Datenmengen selbst auf einem einzelnen Thread verarbeiten.
+
 
 Diesen Ansatz hat sich DuckDB auch zu eigen gemacht und ermöglicht damit effiziente, lokale Datenanalyse.
 
 Aber genug der Einleitung, am besten machen wir uns gleich einmal mit DuckDB vertraut.
 Keine Angst, die Ente beißt nicht.
 
-Entweder per Paketmanager, oder Python Installer (pip) oder einfach per [Download] kann die kompakte Installation auf den eigenen Computer geholt werden (siehe Listing 1). 
+Entweder per Paketmanager, oder Python Installer (pip) oder einfach per [Download] kann die kompakte Installation auf den eigenen Computer geholt werden (siehe Listing {counter:listing}). 
 Aktuell ist gerade Version 0.8.0.
 
-.Listing 1 Installation
+.Listing {listing} Installation
 [source,shell]
 ----
 apt install duckdb
@@ -50,9 +51,9 @@ Es gibt auch eine in-Browser [Web-Shell], die in einer WASM Sandbox läuft.
 
 Netterweise kann man auch komplett ohne Persistenz, d.h. mit einer reinen Hauptspeicherdatenbank experimentieren.
 
-Unser erstes Beispiel ist zwar ein "Hello World", aber wir steigen gleich auch weiter ein, mit Stringoperationen, transposition (unnest), Aggreation und Sortierung (siehe Listing 2).
+Unser erstes Beispiel ist zwar ein "Hello World", aber wir steigen gleich auch weiter ein, mit Stringoperationen, transposition (unnest), Aggreation und Sortierung (siehe Listing {counter:listing}).
 
-.Listing 2 Hallo Welt!
+.Listing {listing} Hallo Welt!
 [source,shell]
 ----
 duckdb
@@ -116,23 +117,27 @@ select c, count(*) as freq from (
 ----
 
 Für die Anzeige der Ergebnisse kann man zwischen verschiedenen Modi mittels `.mode <name>` wählen.
-Wir haben bisher `duckbox` gesehen, es gibt auch csv, json, jsoline, line (jeder Wert auf einer neuen Zeile), html, insert, trash (keine Ausgabe) und andere mehr.
+Wir haben bisher `duckbox` gesehen, es gibt auch 'csv, json, jsoline, line' (jeder Wert auf einer neuen Zeile), `html, insert, trash` (keine Ausgabe) und andere mehr.
 Andere nützliche Kommandos der CLI sind mittels `.help` verfügbar, `.timer on` gibt zum Beispiel die Laufzeit eines Statements aus.
 
 Bei Fragen steht die umfangreiche und detaillierte Dokumentation [DuckDBDocs] zur Verfügung und eine sehr hilfsbereite Community beantwortet Fragen auf [Discord].
 
 DuckDB unterstützt einen Großteil des SQL Standard, bringt zusätzlich noch viele nützliche Funktionen mit.
 
-Am besten ist aber, dass die Datenbank relativ einfach mit weiterer Funktionalität erweitert werden kann.
-Diese Erweiterungen werden der eigenen Installation mit `INSTALL name/url` und `LOAD name` hinzugefügt, und stehen ab dann allen APIs zur Verfügung, wiederholte Konfiguration und Nutzung kann in `duckdbrc`
+Sehr angenehm ist auch, dass die Datenbank relativ einfach mit weiterer Funktionalität erweitert werden kann.
+Diese Erweiterungen werden der eigenen Installation mit `INSTALL name/url` und `LOAD name` hinzugefügt, und stehen ab dann allen APIs zur Verfügung.
+Es gibt Erweiterungen für verschiedene Dateiformate und -quellen, Volltextsuche, Geodaten, und vieles mehr.
 
-Ein sehr nützlicher Einsatzzweck ist die Analyse existierender Daten, die irgendwo in der Cloud via https oder Cloud Storage (S3, GCP, HDFS) zur Verfügung stehen, ohne dass man diese erst manuell herunterladen und importieren muss.
+Wiederholte Konfiguration und Nutzung kann in `$HOME/.duckdbrc` abgelegt werden.
+
+Ein sehr nützlicher Einsatzzweck von DuckDB ist die Analyse existierender Daten, die irgendwo in der Cloud via https oder Cloud Storage (S3, GCP, HDFS) zur Verfügung stehen, ohne dass man diese erst manuell herunterladen und importieren muss.
 
 Desweiteren gibt es integrierte Unterstützung für CSV und eine Erweiterung für JSON und Parquet.
+// Seit Version 0.8 sind viele dieser Operationen standardmäßig parallelisiert.
 
-Damit können wir im nächsten Schritt gleich mal ein paar Daten aus dem Internet analysieren, z.B. Bevölkerungszahlen von Ländern [CSV] wie in Listing 3 zu sehen.
+Damit können wir im nächsten Schritt gleich mal ein paar Daten aus dem Internet analysieren, z.B. Bevölkerungszahlen von Ländern [CSV] wie in Listing {counter:listing} zu sehen.
 
-.Listing 3
+.Listing {listing}
 [source,shell]
 ----
 duckdb
@@ -184,9 +189,24 @@ Die Integration zum Lesen und Schreiben verschiedener Datenformate ist wirklich 
 Neben CSV und JSON Dateien können auch SQLite und Postgres Datenbanken gelesen werden.
 Besonders die Unterstützung von Parquet ist weit gediehen, dort können Filter und Selektions-Prädikate von SQL schon in der Zugriffschicht ausgeführt, und somit die zu ladende Menge von Daten erheblich reduziert werden.
 
+Ein weiterer praktischer Einsatzzweck ist die Kombination von Datenbereinigung und Formatkonvertierung.
+So können zum Beispiel Daten aus JSON oder CSV gelesen und bereinigt werden und dann als Parquet abgespeichert.
+
+////
+Die Erweiterung zur JSON Unterstützung ist sehr praktisch, so können Dateien oder API-Antworten aus einem JSON Objekt direkt in Tabellenzeilen umgewandelt werden, wie in Listing {counter:listing} ersichtlich.
+
+.Listing {listing}
+[source,sql]
+----
+select * from read_json('https://api.stackexchange.com/2.2/questions?pagesize=10&order=desc&sort=creation&tagged=duckdb&site=stackoverflow&filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf',auto_detect=true, compression=gzip);
+
+Error: Invalid Error: IO Error: HTTP GET error: Content-Length from server mismatches requested range, server may not support range requests.
+----
+////
+
 === Metadatenanalyse
 
-DuckDB hilft uns auch dabei, Metadaten von Tabellen zu untersuchen (`describe`), und zu modifizieren, siehe Listing 4.
+DuckDB hilft uns auch dabei, Metadaten von Tabellen zu untersuchen (`describe`), und zu modifizieren, siehe Listing {counter:listing}.
 
 Mit `read_csv_auto` bzw. `read_csv(AUTO_DETECT=true)` versucht DuckDB mittels einer Stichprobe die Datentypen der Spalten herauszufinden, fällt aber im Zweifelsfall auf Stringtypen `VARCHAR` zurück.
 
@@ -201,7 +221,7 @@ Man kann auch in eine existiernde Tabelle importieren, dann wird deren Schema ge
 // IGNORE_ERRORS=TRUE // skip rows with dirty data
 // columns={'Pop. Density (per sq. mi.)': 'decimal', ...}
 
-.Listing 4 Metadaten
+.Listing {listing} Metadaten
 [source,sql]
 ----
 .mode duckbox
@@ -295,16 +315,16 @@ Für den SQL-Standard sind einige davon auch als im `information_schema` Schema 
 * duckdb_settings()
 * duckdb_extensions()
 * current_schema()
-* curentt_schemas()
+* current_schemas()
 
-=== Größere Datenmengen des Stackoverflow Dumps
+=== Test mit größeren Datenmengen - Stackoverflow Dump
 
-Um DuckDB mal etwas mit größeren Datenmengen zu testen, habe ich den aktuellen Dump von Stackoverflow heruntergeladen und mit meinem [Xml-Converter-Tool] nach CSV gewandelt, da ich keine XML Erweiterung gefunden habe.
+Um DuckDB mit größeren Datenmengen zu testen, habe ich den aktuellen Dump von Stackoverflow [StackOverflow-Dump] heruntergeladen und mit meinem [Xml-Converter-Tool] nach CSV gewandelt, da ich keine XML Erweiterung für DuckDB gefunden habe.
 
 // TODO Parquet
 Es sind zwar nur 65000 Tags und 20 Millionen Nutzer (xx GB CSV), aber xxx Millionen Posts (xx GB CSV), so dass sich das schon mal lohnt.
 
-In Listing 5 ist zu sehen, wie wir die Daten lesen, in Tabellen konvertieren und dann analysieren können.
+In Listing {counter:listing} ist zu sehen, wie wir die Daten lesen, in Tabellen konvertieren und dann analysieren können.
 
 ////
 create table users as (
@@ -336,7 +356,7 @@ from users where reputation > 1000000 order by rate desc;
 todo per year, pivot, window
 ////
 
-.Listing 5 Stackoverflow Analyse
+.Listing {listing} Stackoverflow Analyse
 [source,sql]
 ----
 duckdb stackoverflow.db
@@ -409,11 +429,11 @@ Run Time (s): real 0.001 user 0.000374 sys 0.000069
 ----
 // TODO pivot, ...
 
-Da CSV schon etwas in die Jahre gekommen ist, können die Daten auch nach Parquet exportieren, ein modernes Format für die analytische Datenverarbeitung (Listing 6).
+Da CSV schon etwas in die Jahre gekommen ist, können die Daten auch nach Parquet exportieren, ein modernes Format für die analytische Datenverarbeitung (Listing {counter:listing}).
 Für die 20M Nutzer dauert es 5 Sekunden bis die 10 Dateien mit 1G geschrieben sind.
 Das Lesen der Dateien ist jetzt viel schneller als von CSV.
 
-.Listing 6 - Parquet Dateien schreiben
+.Listing {listings} - Parquet Dateien schreiben
 [source,sql]
 ----
 .timer on
@@ -452,9 +472,10 @@ Run Time (s): real 7.040 user 16.688485 sys 0.173113
 
 Ein sehr praktischer Aspekt von DuckDB ist die Nutzung innerhalb von Python Datenanalyse-Prozessen und -Notebooks.
 
-Daten die in Pandas Dataframes vorliegen, können direkt und ohne Transformation oder Kopiervorgang von DuckDB genutz werden.
-Ergebnisse von DuckDB werden ebenso als Dataframes bereitgestellt
+Daten die in Pandas Dataframes vorliegen, können direkt und ohne Transformation oder Kopiervorgang von DuckDB genutzt werden.
+Ergebnisse von DuckDB werden ebenso als Dataframes bereitgestellt, und können dann mit den gängigen Bibliotheken weiterverarbeitet werden (Listing {counter:listing}).
 
+.Listing {listing} - Nutzung mit Python
 [source,python]
 ----
 import duckdb
@@ -480,9 +501,49 @@ con.query("select count(*) from tags_df")
 └──────────────┘
 ----
 
-Für die Visualisierung von Ergebnissen können dank der Pandas Integration existierende Bibliotheken wie matplotlib genutzt werden.
+Für die Visualisierung von Ergebnissen können dank der transparenten Pandas Integration existierende Bibliotheken wie matplotlib genutzt werden.
 
-Für interaktive Analyse-Anwendungen integriert es sich auch gut mit Streamlit wie auf [LDWM-Streamlit] zu sehen.
+Für interaktive Analyse-Anwendungen integriert es sich auch gut mit Streamlit, wie auf [LDWM-Streamlit] zu sehen.
+
+DuckDB stellt auch eine "fluent"-Python DSL ("relational API") [PythonDSL] bereit, die statt SQL eingesetzt werden kann und die Wiederverwendung von "Relations", sowie Setoperationen, Filter, Projektionen, Aggregationen usw. unterstützt, siehe Listing {counter:listing}.
+Als Quelle für initiale "Relationen" können neben SQL-Statements auch Daten direkt aus Parquet, Arrow und CSV Dateien gelesen werden.
+
+Mir persönlich ist die DSL nicht weit genug entwickelt, da immer noch SQL Fragemente als Parameter übergeben werden müssen.
+
+.Listing {listing} - relational API in Python
+[source,python]
+----
+import duckdb
+import pandas as pd
+
+con = duckdb.connect(database='stackoverflow.db', read_only=True)
+
+rel = con.sql('SELECT * FROM users')
+rel = rel.filter('reputation > 1000')
+rel = rel.aggregate('year(createdAt) as year, count(*) as activeUsersPerYear')
+rel = rel.order('year DESC').limit(10)
+rel.show()
+
+┌───────┬────────────────────┐
+│ year  │ activeUsersPerYear │
+│ int64 │       int64        │
+├───────┼────────────────────┤
+│  2023 │                  2 │
+│  2022 │                251 │
+│  2021 │                757 │
+│  2020 │               1752 │
+│  2019 │               2749 │
+│  2018 │               4601 │
+│  2017 │               7606 │
+│  2016 │              11963 │
+│  2015 │              16508 │
+│  2014 │              21886 │
+├───────┴────────────────────┤
+│ 10 rows          2 columns │
+└────────────────────────────┘
+----
+
+Skalare Python Funktionen können seit Version 0.8 mittels `duckdb.create_function('name', funktion, parameter-typen, return-typ)` in der Datenbank registriert und benutzt werden.
 
 ////
 [source,python]
@@ -496,8 +557,9 @@ Für interaktive Analyse-Anwendungen integriert es sich auch gut mit Streamlit w
 
 Der JDBC Treiber ist auf Maven verfügbar und führt die Datenbank auch wieder innerhalb unseres Prozesses aus.
 
-In Listing X ist ein kleines JBang Beispiel zu sehen, dass die Verbindung zur Datenbank öffnet, die übergebene SQL Abfrage ausführt und die Ergebnisse als Ascii-Tabelle darstellt.
+In Listing {counter:listing} ist ein kleines JBang Beispiel zu sehen, dass die Verbindung zur Datenbank öffnet, die übergebene SQL Abfrage ausführt und die Ergebnisse als Ascii-Tabelle darstellt.
 
+.Listing {counter:listing} - Nutzung von Java mittels JDBC und JBang
 [source,java]
 ----
 ///usr/bin/env jbang "$0" "$@" ; exit $?
@@ -553,33 +615,111 @@ jbang DuckDB.java "SELECT name, reputation FROM users ORDER BY reputation DESC L
 
 === Implementierungsdetails und Architektur
 
-DuckDB ist in C++ 11 geschrieben und maximiert ... TODO
+Wie einer, an einem Datenbanklehrstuhl entwickelten Datenbank würdig, nutzt DuckDB alle relevanten Mechanismen moderner OLAP Datenbanken.
+Wegen der zumeist eingebetteten Ausführung können keine komplexen Bibliotheken oder Infrastrukturen genutzt werden, da diese meist nicht portabel sind, bzw. Betriebssystem-Signale benötigen, oder im Ernstfall den Prozess beenden.
+Daher sind auch effizientes Resourcenmanagement, Datenzugriff möglichst ohne Speicherkopien, und ... wichtig.
 
-image::duckdb_architecture.png[]
+Für Endanwendungen wird neben der C/C++ API auch Integration für Python und R vom Kernsystem bereitgestellt, andere Bibliotheken nutzen die C/C++ API.
+Als Parser wird ein modifizierter Postgres-Parser genutzt, der sehr flexible auf die Bedürfnisse angepasst werden kann.
+Abfrageplannung erfolgt in einem kostenbasierten Optimizer, der Ansätze wie "join-order-optimization" und "dynamic programming" ausnutzt.
+// , mit Optimierung von JOIN Reihenfolgen und dynamischer Programmierung ().
+
+Die Ausführung des physischen Plans übernimmt eine vektorisierte, kolumnare, parallele Implementierung, die auf Teilmengen (Batches) von Daten arbeitet (Vector Volcano/Morsel Ansatz) und damit eine gute Balance zwischen der Verarbeitung pro Zeile bzw. der kompletten Daten auf einmal erreicht.
+
+Alle Daten innerhalb von DuckDB liegen in getypten, optimierten Vektor-Implementierungen für verschiedene Inhalte (numerisch, Konstanten, Strings, Listen, Structs, usw.) die sowohl durch Kompression, Metadaten (min, max) und zusätzliche Indizes die Auswahl bzw. Verarbeitung beschleuinigen.
+Diese Vektoren implementieren alle relationalen Operationen in C++ Klassen mittes Templates für die verschiedenen Datentypen.
+
+DuckDB ist auch transaktional, damit während der analytischen Abfragen auch Updates der darunterliegenden Daten erfolgen können.
+Es benutzt eine OLAP optimierte Variante MVCC (Multi Version Concurrency Control) mit serialiserten Transaktionen wie auch das HyPer System der TU München.
+Dabei werden Aktualisierungen direkt ausgeführt und vorherige Werte in einem Undo-Puffer gehalten, falls die Transaktion zurückgerollt werden muss.
+
+
+// SIGMOD 2019 paper https://hannes.muehleisen.org/publications/SIGMOD2019-demo-duckdb.pdf
+// Dissecting DuckDB: The internals of the “SQLite for Analytics” https://pdet.github.io/assets/papers/duck_sbbd.pdf 
+// DuckDB an Embeddable Analytical RDBMS https://db.in.tum.de/teaching/ss19/moderndbs/duckdb-tum.pdf
+
+// DuckDB ist in C++ 11 geschrieben und maximiert ... TODO
 
 ////
 
-Der Gründer von Motherduck, Tiago? hat dazu im Artikel  "BigData is Dead" [xxx]
+* ART index, used also for maintaining key constraints 
+* Combination of both cost/rule based optimizer
+* vectorization / SIMD
+* morsel driven parallelism
+* batching
+* zero memory copy / data sharing
+* transactional (concurrent updates during analytics queries)
+* effizientes resourcenmanagement
+* keine crashes erlaubt, da in-prozess
+* no dependencies (they often use signal handlers, or exit the process)
 
-Datenzugriff / JSON / Parquet 
+textbook implementation
+-> Parser, logical planner, optimizer, physical planner, execution engine.
+-> orthogonal: transaction and storage manager
 
-Python / Pandas / Polars
+API C/C++/SQLite  [2]
+SQL Parser libpg_query
+Optimizer   Cost-Based
+Execution Engine Vectorized
+Concurrency Control Serializable MVCC
+Storage DataBlocks
 
-Rel-API
+* columnar-vectorized engine
+* vector based chunk processing, not row based or bulk
+* state of the art methods and algorithms
+* API - C/C++/SQLite
+* SQLite compatibility layer through re-linking or library overloading
+* R and Python APIs
+* stripped down, flexible postgres parser -> parse tree of C structures -> c++ classes
+* logical planner -> binder (schema object binding) + plan generator (parse-tree -> logical operators)
+* database statistics propagated through the different expression trees as part of the planning process. 
+* These statistics are used in the opti- mizer itself, and are also used for integer overflow prevention by upgrading types when required.
+* DuckDB’s optimizer performs join order optimization us- ing dynamic programming [7] with a greedy fallback for complex join graphs [11]. It performs flattening of arbitrary subqueries as described in Neumann et al. [9]. 
+* In addition, there are a set of rewrite rules that simplify the expression tree, by performing e.g. common subexpression elimination
+* -> optimized logical plan
+* -> physical plan ()
+* vectorized  vectorized interpreted execution engine -> not JIT because fewer dependencies/portability (no LLVM)
+* numerics -> native array
+* strings -> extra heap
+* null bit-vector faster for intersection
+*  selection vector, which is a list of offsets into the vector stating which indices of the vector are relevant
+* built in templated vector library for all the relational operators
+* Vector Volcano model
+* pull chunks from root node -> subsequent pulls until leaf nodes with tables scan etc. reached
+* MVCC serializable from HyPer -> for hybrid OLTP/OLAP systems
+* this variant updates data in-place immediately, and keeps previous states stored in a separate undo buffer for concurrent transactions and aborts.
+* concurrent modification is frequently requested
+* persistence ead-optimized DataBlocks storage layout 
+* logical tables -> light-weight compressed chunks of columns min/max metadata for each block 
+* + additional lightweight index for each column
+* large datasets on restricted hardware
+* benefits of embedded operations
+* MonetDBLite begins to suf- fer from excessive intermediate result materialization due to its bulk processing model. 
+* HyPer is extremely fast in processing queries, it will not be able to transfer result sets as quickly as DuckDB using its socket client protocol
+*  DuckDB already supports inter-query parallelism but intra-query parallelism will be added as well.
+* Vector is the container format used to store in-memory data during execution.
+* DataChunk is a collection of Vectors, used for instance to represent a column list in a PhysicalProjection operator.
+* different types of vectors based on contained data
+* optimized operations between vector types for operations (e.g. constant times flat vector)
+* 
+* https://duckdb.org/internals/vector
+* All operators in DuckDB are optimized to work on Vectors of a fixed size (default 2048 tuples)
+* different physical representations per type incl. compression + compressed execution
+* flat vectors (arrays), constant vectors (one value), 
+* dict-vectors (child-dict + selection vector - index into dict)
+* sequence - base + increment
+* short strings < 12 bytes inlined, otherwise length + pointer + short(4) prefix for fast initial comparison
+* list vectors with child vector + offset/indexes
+* struct + map (LIST[STRUCT(key KEY_TYPE, value VALUE_TYPE)]) + union vectors  (UNION utilizes the same structure as a STRUCT)
 
-YouPlot / bar()
+image::duckdb_architecture.png[]
 
-JDBC / JBang
 
-Power-Funktionen
-
-Release 0.8  - PIVOT
+=== Erweiterungen
 
 Erweiterungen:
 * Spatial PostGeese
 * FTS
-
-=== Erweiterungen
 
 ////
 
@@ -589,9 +729,9 @@ Auch SQL Experten werden nicht enttäuscht, neben voller Unterstützung von Wind
 
 Mein Kollege Michael Simons, der auch schon öfter in Autor dieser Kolumne war, hat DuckDB genutzt, um die Erzeugungs- und Verbrauchsdaten seiner nagelneuen Photovoltaik Anlage zu analysieren [SimonsPV].
 
-Dabei war die Extraktion der Daten aus der Anbietersoftware der größte Aufwand, zwei interessante Beispielabfragen sind in Listing X und Y zu sehen.
+Dabei war die Extraktion der Daten aus der Anbietersoftware der größte Aufwand, zwei interessante Beispielabfragen sind in Listing {counter:listing} und {counter:listing} zu sehen.
 
-.Listing X - PV Analyse
+.Listing 11 - PV Analyse
 [source,sql]
 ----
 WITH production_per_month_and_hour AS (
@@ -612,9 +752,10 @@ PIVOT (
 );
 ----
 
+.Bild 2 - Ausgabe PV Analyse
 image::pv_pivot.png[]
 
-.Listing Y - Tages Statistik
+.Listing {listing} - Tages Statistik
 [source,sql]
 ----
 WITH per_day AS (
@@ -632,6 +773,7 @@ SELECT
 FROM per_day;
 ----
 
+.Bild 3 - Ausgabe Tagesstatistik
 image::pv_per_day.png[]
 
 === Anwendungsfälle
@@ -657,6 +799,7 @@ Quack!
 == Resourcen
 
 * [DuckDB Docs] https://duckdb.org/docs/
+* [DuckDB JSON] https://duckdb.org/docs/extensions/json.html
 * [DuckDB Discord] https://discord.duckdb.org/
 * [Web-Shell] https://shell.duckdb.org/
 * [Download] https://github.com/duckdb/duckdb/releases
@@ -668,6 +811,8 @@ Quack!
 * [SQLitePodcast] https://corecursive.com/066-sqlite-with-richard-hipp/
 * [McSherry] http://www.frankmcsherry.org/graph/scalability/cost/2015/01/15/COST.html
 * [BigData] https://motherduck.com/blog/big-data-is-dead/
-* [DuckDBFTS] https://duckdb.org/2021/01/25/full-text-search.html
-* [PostGeese]
 * [Motherduck] https://motherduck.com
+* [PythonDSL] https://duckdb.org/docs/api/python/relational_api
+// * [DuckDBFTS] https://duckdb.org/2021/01/25/full-text-search.html
+// * [PostGeese]
+* [InternalsVideo] https://www.youtube.com/watch?v=bZOvAKGkzpQ
