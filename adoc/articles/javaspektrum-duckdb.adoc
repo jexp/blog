@@ -3,26 +3,27 @@
 :imagesdir: ../../img/
 
 Ist es im Zeitalter von BigData denn noch möglich, Datenanalysen von hunderten von Gigabyte auf dem eigenen Rechner durchzuführen, ohne ihn in die Knie zu zwingen?
-Ja jetzt wieder, mittels DuckDB, dem neuesten Star in der Datenbankwelt.
-Diese leichtgewichtige, hocheffiziente Datenbank kann leicht in die eigenen Python-, Java- oder andere Programme integriert werden und macht moderne SQL-Analysefunktionalität einfach nutzbar.
+Ja, jetzt wieder, mittels DuckDB, dem neuesten Star in der Datenbankwelt.
+Diese leichtgewichtige, hocheffiziente Datenbank kann leicht in die eigenen Python-, Java-, Swift- oder andere Programme integriert werden und macht moderne SQL-Analysefunktionalität einfach nutzbar.
 
 Die verbreitetste Datenbank ist nicht etwa MySQL oder MS Access, sondern [SQLite], das in zehntausenden Anwendungen (mehr als eine Billion Datenbanken) in unseren Mobiltelefonen, Webbrowsern, Spielen, Fernsehern und anderen Geräten genutzt wird, um schnell und effizient strukturierte Daten abzulegen und mit SQL zugreifbar zu machen.
-Der besondere Reiz liegt darin, dass die Datenbank als Bibliothek einfach in Programme integriert werden kann und dann innerhalb des eigenen Prozesses läuft, ohne einen separaten Server zu betreiben.
+Der besondere Reiz liegt darin, dass SQLite als Bibliothek einfach in Programme integriert werden kann und dann innerhalb des eigenen Prozesses läuft, ohne einen separaten Server zu betreiben.
 SQLite ist eine volltransaktionale OLTP Datenbank mit einer extrem guten Testabdeckung und Verfikation.
 Im Podcast [SQLitePodcast] hat der Erfinder, Richard Hipp die Geschichte der Datenbank anschaulich dargelegt.
 
-DuckDB ist der analytische OLAP Zwilling dazu, also "SQLite für Datenanalyse", 
+DuckDB ist der analytische OLAP Zwilling dazu, also "SQLite für Datenanalyse".
 
 Von Hannes Mühleisen und Mark Raasveldt als Datenbank-Doktoranden am CWI (Centrum Wiskunde & Informatica) in Amsterdam entwickelt, hat DuckDB ihren Usprung in der Erkenntnis das Data-Scientists in R oft kein SQL benutzten, weil keine gute Datenbankintegration für R existierte und Client-Server Datenbanken unpraktisch waren.
 Ausgehend von "wie schwer kann dass den sein", ist während nunmehr 8 Jahren Arbeit erst im universitären und jetzt auch im kommerziellen Umfeld ein beindruckendes Datenbanktool entstanden, dass Anwendern weit über R hinaus den Zugang zur effizienten Datenanalyse ermöglicht.
-DuckDB ist in C++ 11 implementiert, hat keine weiteren Abhängigkeiten, und unter der MIT License veröffentlicht.
+
+DuckDB ist in C++ 11 implementiert, hat keine weiteren Abhängigkeiten, und als quelloffene Software unter der MIT Lizenz veröffentlicht.
 
 Oft assoziieren wir mit der Analyse von Datenmengen im zwei- oder dreistelligen Gigabytebereich, größere Spark-Cluster oder DWH Lösungen wie Snowflake, PowerBI, Cognos, Redshift oder ähnliches.
 Jede davon mit den entsprechenden Investitionen in Infrastruktur, Zeit, Datentransfer und Komplexität.
 
-De Gründer von Motherduck, Jordan Tigani einer der originalen Entwickler von Google's BigQuery hat dazu im Artikel  "Big Data is Dead" [BigData] Stellung genommen - die meisten Datensets sind nicht gigantisch (median 100GB) und die wichtigsten Analysen erfolgen auf den jüngsten Daten, of nur wenige hundert Megabytes.
+De Gründer von Motherduck, Jordan Tigani einer der originalen Entwickler von Google's BigQuery hat dazu im Artikel  "Big Data is Dead" [BigData] Stellung genommen - die meisten Datensets sind nicht gigantisch (median 100GB) und die wichtigsten Analysen erfolgen auf den jüngsten Daten, oft nur wenige hundert Megabytes.
 
-Wie schon von Frank McSherry [McSherry] in 2015 demonstriert, kann man mit einer effizienten Implementierung unter Ausnutzung all der mächtigen Eigenschaften moderner CPUs (Vektorisierung, massives Pipelining, sehr große CPU Caches) und exisitierender und aktueller Algorithmen der Datenbankforschung große Datenmengen selbst auf einem einzelnen Thread verarbeiten.
+Wie schon von Frank McSherry [McSherry] in 2015 demonstriert, kann man mit einer effizienten Implementierung unter Ausnutzung all der mächtigen Eigenschaften moderner CPUs (Vektorisierung, massives Pipelining, sehr große CPU Caches) und aktueller Algorithmen der Datenbankforschung große Datenmengen selbst auf einem einzelnen Thread verarbeiten.
 
 
 Diesen Ansatz hat sich DuckDB auch zu eigen gemacht und ermöglicht damit effiziente, lokale Datenanalyse.
@@ -51,7 +52,7 @@ Es gibt auch eine in-Browser [Web-Shell], die in einer WASM Sandbox läuft.
 
 Netterweise kann man auch komplett ohne Persistenz, d.h. mit einer reinen Hauptspeicherdatenbank experimentieren.
 
-Unser erstes Beispiel ist zwar ein "Hello World", aber wir steigen gleich auch weiter ein, mit Stringoperationen, transposition (unnest), Aggreation und Sortierung (siehe Listing {counter:listing}).
+Unser erstes Beispiel ist zwar ein "Hello World", aber wir steigen gleich auch weiter ein, mit Stringoperationen, transposition (unnest), Aggregation und Sortierung (siehe Listing {counter:listing}).
 
 .Listing {listing} Hallo Welt!
 [source,shell]
@@ -117,7 +118,7 @@ select c, count(*) as freq from (
 ----
 
 Für die Anzeige der Ergebnisse kann man zwischen verschiedenen Modi mittels `.mode <name>` wählen.
-Wir haben bisher `duckbox` gesehen, es gibt auch 'csv, json, jsoline, line' (jeder Wert auf einer neuen Zeile), `html, insert, trash` (keine Ausgabe) und andere mehr.
+Wir haben bisher `duckbox` gesehen, es gibt auch `csv, json, jsoline, line` (jeder Wert auf einer neuen Zeile), `html, insert, trash` (keine Ausgabe) und andere mehr.
 Andere nützliche Kommandos der CLI sind mittels `.help` verfügbar, `.timer on` gibt zum Beispiel die Laufzeit eines Statements aus.
 
 Bei Fragen steht die umfangreiche und detaillierte Dokumentation [DuckDBDocs] zur Verfügung und eine sehr hilfsbereite Community beantwortet Fragen auf [Discord].
@@ -186,8 +187,8 @@ FROM largest;
 ----
 
 Die Integration zum Lesen und Schreiben verschiedener Datenformate ist wirklich beachtlich.
-Neben CSV und JSON Dateien können auch SQLite und Postgres Datenbanken gelesen werden.
-Besonders die Unterstützung von Parquet ist weit gediehen, dort können Filter und Selektions-Prädikate von SQL schon in der Zugriffschicht ausgeführt, und somit die zu ladende Menge von Daten erheblich reduziert werden.
+Neben CSV und JSON Dateien können auch SQLite und Postgres Datenbanken verarbeitet werden.
+Besonders die Unterstützung von Parquet und Arrow ist weit gediehen, dort können Filter und Selektions-Prädikate von SQL schon in der Zugriffschicht ausgeführt, und somit die zu ladende Menge von Daten erheblich reduziert werden.
 
 Ein weiterer praktischer Einsatzzweck ist die Kombination von Datenbereinigung und Formatkonvertierung.
 So können zum Beispiel Daten aus JSON oder CSV gelesen und bereinigt werden und dann als Parquet abgespeichert.
@@ -210,7 +211,7 @@ DuckDB hilft uns auch dabei, Metadaten von Tabellen zu untersuchen (`describe`),
 
 Mit `read_csv_auto` bzw. `read_csv(AUTO_DETECT=true)` versucht DuckDB mittels einer Stichprobe die Datentypen der Spalten herauszufinden, fällt aber im Zweifelsfall auf Stringtypen `VARCHAR` zurück.
 
-Ausser die Spalten `Country` und `Region`sollten aber alle anderen Spalten Integer- oder Dezimalzahlen sein.
+Ausser die Spalten `Country` und `Region` sollten aber alle anderen Spalten Integer- oder Dezimalzahlen sein.
 
 Mittels `types={'spalte': 'typ'}` können selbst die Standard-SQL Typen angeben, die für spezifische Spalten genutzt werden sollen.
 
@@ -322,8 +323,8 @@ Für den SQL-Standard sind einige davon auch als im `information_schema` Schema 
 Um DuckDB mit größeren Datenmengen zu testen, habe ich den aktuellen Dump von Stackoverflow [StackOverflow-Dump] heruntergeladen und mit meinem [Xml-Converter-Tool] nach CSV gewandelt, da ich keine XML Erweiterung für DuckDB gefunden habe.
 
 // TODO Parquet
-Es sind zwar nur 65000 Tags und 20 Millionen Nutzer (xx GB CSV), aber xxx Millionen Posts (xx GB CSV), so dass sich das schon mal lohnt.
-
+Es sind zwar nur 65000 Tags und 20 Millionen Nutzer (2.2 GB CSV), aber 58 Millionen Posts (5.3 GB CSV), so dass sich das schon mal lohnt.
+// 58 329 358 posts 5.278.202.143 b
 In Listing {counter:listing} ist zu sehen, wie wir die Daten lesen, in Tabellen konvertieren und dann analysieren können.
 
 ////
@@ -426,7 +427,48 @@ SELECT name, reputation, rate, bar(rate,150,300) AS bar FROM top_users;
 │ Marc Gravell    │    1009857 │  189.0 │ ████████████████████▊                                        │
 └─────────────────┴────────────┴────────┴──────────────────────────────────────────────────────────────┘
 Run Time (s): real 0.001 user 0.000374 sys 0.000069
+
+create table posts as (
+select * from read_csv_auto("so/Posts.csv.gz",auto_detect=true, 
+column_names=['id','title','postType','createdAt','score',
+'views','answers','comments','favorites','updatedAt'])
+);
+Run Time (s): real 38.985 user 327.515702 sys 24.987078
+
+select count(*) from posts;
+┌──────────────┐
+│ count_star() │
+│    int64     │
+├──────────────┤
+│     58329356 │
+└──────────────┘
+Run Time (s): real 0.010 user 0.000000 sys 0.162503
+
+select year(createdAt) as year, avg(views), max(answers), max(comments) 
+from posts 
+group by year order by year desc limit 10;
+┌───────┬────────────────────┬──────────────┬─────────────────┐
+│ year  │    avg("views")    │ max(answers) │ max("comments") │
+│ int64 │       double       │    int64     │      int64      │
+├───────┼────────────────────┼──────────────┼─────────────────┤
+│  2023 │  44.38945117445532 │           15 │              69 │
+│  2022 │  265.4586339123072 │           44 │              73 │
+│  2021 │  580.1325887811724 │           65 │              80 │
+│  2020 │  846.6885113285923 │           59 │              74 │
+│  2019 │ 1189.7090769531437 │           60 │              62 │
+│  2018 │  1647.557730647355 │          121 │              65 │
+│  2017 │ 1993.5133771973378 │           65 │             110 │
+│  2016 │ 2201.9238769664453 │           74 │             135 │
+│  2015 │  2349.146274062714 │           82 │             115 │
+│  2014 │ 2841.1271646657733 │           92 │             107 │
+├───────┴────────────────────┴──────────────┴─────────────────┤
+│ 10 rows                                           4 columns │
+└─────────────────────────────────────────────────────────────┘
+Run Time (s): real 0.038 user 4.131562 sys 0.014536
 ----
+
+Wie wir sehen, bringen auch mittelgroße Datenmengen DuckDB nicht aus dem Gleichgewicht, für Tests mit Millarden von Datensätzen wird oft der [New-York-Taxi] Datensatz benutzt, der im Parquet Format vorliegt.
+
 // TODO pivot, ...
 
 Da CSV schon etwas in die Jahre gekommen ist, können die Daten auch nach Parquet exportieren, ein modernes Format für die analytische Datenverarbeitung (Listing {counter:listing}).
@@ -505,7 +547,7 @@ Für die Visualisierung von Ergebnissen können dank der transparenten Pandas In
 
 Für interaktive Analyse-Anwendungen integriert es sich auch gut mit Streamlit, wie auf [LDWM-Streamlit] zu sehen.
 
-DuckDB stellt auch eine "fluent"-Python DSL ("relational API") [PythonDSL] bereit, die statt SQL eingesetzt werden kann und die Wiederverwendung von "Relations", sowie Setoperationen, Filter, Projektionen, Aggregationen usw. unterstützt, siehe Listing {counter:listing}.
+DuckDB stellt auch eine fluent "relational API" [PythonDSL] bereit, die statt SQL eingesetzt werden kann und die Wiederverwendung von "Relations", sowie Setoperationen, Filter, Projektionen, Aggregationen usw. unterstützt, siehe Listing {counter:listing}.
 Als Quelle für initiale "Relationen" können neben SQL-Statements auch Daten direkt aus Parquet, Arrow und CSV Dateien gelesen werden.
 
 Mir persönlich ist die DSL nicht weit genug entwickelt, da immer noch SQL Fragemente als Parameter übergeben werden müssen.
@@ -617,21 +659,22 @@ jbang DuckDB.java "SELECT name, reputation FROM users ORDER BY reputation DESC L
 
 Wie einer, an einem Datenbanklehrstuhl entwickelten Datenbank würdig, nutzt DuckDB alle relevanten Mechanismen moderner OLAP Datenbanken.
 Wegen der zumeist eingebetteten Ausführung können keine komplexen Bibliotheken oder Infrastrukturen genutzt werden, da diese meist nicht portabel sind, bzw. Betriebssystem-Signale benötigen, oder im Ernstfall den Prozess beenden.
-Daher sind auch effizientes Resourcenmanagement, Datenzugriff möglichst ohne Speicherkopien, und ... wichtig.
+Daher sind auch effizientes Resourcenmanagement und Datenzugriff möglichst ohne Speicherkopien wichtig.
 
 Für Endanwendungen wird neben der C/C++ API auch Integration für Python und R vom Kernsystem bereitgestellt, andere Bibliotheken nutzen die C/C++ API.
 Als Parser wird ein modifizierter Postgres-Parser genutzt, der sehr flexible auf die Bedürfnisse angepasst werden kann.
-Abfrageplannung erfolgt in einem kostenbasierten Optimizer, der Ansätze wie "join-order-optimization" und "dynamic programming" ausnutzt.
+Abfrageplannung erfolgt in einem zumeist kostenbasierten Optimizer, der Ansätze wie "join-order-optimization" und "dynamic programming" ausnutzt.
 // , mit Optimierung von JOIN Reihenfolgen und dynamischer Programmierung ().
 Für Indizes und Constraints (PK, FK), sowie Geo und Range-Abfragen sowie Joins benutzt DuckDB Adaptive Radix Tree (ART) Indizes (Tries mit horizontaler und vertikaler Kompression).
 // https://duckdb.org/2022/07/27/art-storage.html
 // trees that also contain the data (e.g. 1 char or 1 byte per level)
 // vertical compression for nodes with only one child -> radix tree -> store prefix and then only next child which has bifurcation
 // horizontal compresion -> ART -> on each position of the 256 values of a byte there is one pointer pointing down (or null) -> 
-Die Ausführung des physischen Plans übernimmt eine vektorisierte, kolumnare, parallele Implementierung, die auf Teilmengen (Batches) von Daten arbeitet (Vector Volcano/Morsel Ansatz) und damit eine gute Balance zwischen der Verarbeitung pro Zeile bzw. der kompletten Daten auf einmal erreicht.
-
-Alle Daten innerhalb von DuckDB liegen in getypten, optimierten Vektor-Implementierungen für verschiedene Inhalte (numerisch, Konstanten, Strings, Listen, Structs, usw.) die sowohl durch Kompression, Metadaten (min, max) und zusätzliche Indizes die Auswahl bzw. Verarbeitung beschleuinigen.
+Die Ausführung des physischen Plans übernimmt eine vektorisierte, kolumnare, parallele Implementierung, die auf Teilmengen (Batches) von Daten arbeitet (Morsel Ansatz) und damit eine gute Balance zwischen der Verarbeitung pro Zeile bzw. der kompletten Daten auf einmal erreicht.
+// vectorized push based model, vectors flow through the operators
+Alle Daten innerhalb von DuckDB liegen in getypten, optimierten Vektor-Implementierungen für verschiedene Inhalte (numerisch-Felder, Konstanten, Strings, Dictionary-Lookups, Listen, Structs, usw.) die sowohl durch Kompression, Metadaten (min, max) und zusätzliche Indizes die Auswahl bzw. Verarbeitung beschleuinigen.
 Diese Vektoren implementieren alle relationalen Operationen in C++ Klassen mittes Templates für die verschiedenen Datentypen.
+Im Ablauf werden die Vektoren durch die Plan-Operatoren von einem zum anderen weitergereicht (push-based).
 
 DuckDB ist auch transaktional, damit während der analytischen Abfragen auch Updates der darunterliegenden Daten erfolgen können.
 Es benutzt eine OLAP optimierte Variante MVCC (Multi Version Concurrency Control) mit serialiserten Transaktionen wie auch das HyPer System der TU München.
@@ -647,6 +690,8 @@ Alles in allem laut Aussage der Entwickler eine Lehrbuch-Architektur, aber das D
 
 ////
 
+* Co designed with Velox 
+* Similar to Arrow but designed for execution, not storage/streaming
 * ART index, used also for maintaining key constraints 
 * Combination of both cost/rule based optimizer
 * vectorization / SIMD
@@ -668,7 +713,48 @@ Optimizer   Cost-Based
 Execution Engine Vectorized
 Concurrency Control Serializable MVCC
 Storage DataBlocks
+* larger than memory execution (out-of-core)
+    * special sort,join,window operators
+    * streaming engine
+    * graceful performance degradation
+    * don't fully switch over to disk based execution
+    * only write minimally to disk
+    * batched vectors better suited
+* single file block based storage
+    * WAL separate file
+    * ACID with headers -> versions
+    * fixed sized blocks (64k)
+    * tables partitioned into row groups, 120k rows, 
+    * row groups are the parallelism and checkpoint unit
+    * rewrite single grow group
+    * distribute row groups over threads
+    * column storage
+    * compression, speeds up IO
+    * generalized lz4, zstd
+    * specified RLE, bitpacking, dict, frame of reference, chimps, FOR, FSST, 
+    * based on patterns in data
+    * different algorithms pick based on data in column per row group
+    * no compaction yet, but block reusage
+* UDFs in Python, tbd JS + WASM + extensions
+* extensions as shared libraries
+* geo extension
+* pluggable filesystem (httpfs etc.)
+* pluggable catalogue - custom like sqlite extension
+* 
+* lock free buffer mgr, inspired by lean-store, sort of LRU
+* pin blocks, fix them in memory
+* lean-store - as few centralized datastructures as possible
+* vectorized push based model, vectors flow through the operators
+* Morsel push based model, parallelism aware operators
+* model control flow outside of operators in central location
+* state explicit
+* vectors cache between operators
+* query cancellation - vectors out of / into operator -> point of cancelation
 
+* allows to pause execution
+* buffers full - pause pipeline
+* source, intermediate, sink operator, model parallelism in source/sink
+* global / local state
 * columnar-vectorized engine
 * vector based chunk processing, not row based or bulk
 * state of the art methods and algorithms
@@ -689,9 +775,15 @@ Storage DataBlocks
 * null bit-vector faster for intersection
 *  selection vector, which is a list of offsets into the vector stating which indices of the vector are relevant
 * built in templated vector library for all the relational operators
-* Vector Volcano model
-* pull chunks from root node -> subsequent pulls until leaf nodes with tables scan etc. reached
+* started out as pull based system (Vector Volcano model)
+    * pull chunks from root node -> subsequent pulls until leaf nodes with tables scan etc. reached
+    * nice and easy but doesn't work well for multithreaded
+    * control inside of operators
+    * but larges stack size
 * MVCC serializable from HyPer -> for hybrid OLTP/OLAP systems
+* snapshot isolation
+* abort tx when multiple changes to same row
+* 
 * this variant updates data in-place immediately, and keeps previous states stored in a separate undo buffer for concurrent transactions and aborts.
 * concurrent modification is frequently requested
 * persistence ead-optimized DataBlocks storage layout 
@@ -711,13 +803,27 @@ Storage DataBlocks
 * All operators in DuckDB are optimized to work on Vectors of a fixed size (default 2048 tuples)
 * different physical representations per type incl. compression + compressed execution
 * flat vectors (arrays), constant vectors (one value), 
-* dict-vectors (child-dict + selection vector - index into dict)
+* Dictionary-Lookups - dict-vectors (child-dict + selection vector - index into dict)
 * sequence - base + increment
-* short strings < 12 bytes inlined, otherwise length + pointer + short(4) prefix for fast initial comparison
+* 16 bytes -> short strings < 12 bytes inlined (like Umbra), otherwise length + pointer (8) + short(4) prefix for fast initial comparison
 * list vectors with child vector + offset/indexes
 * struct + map (LIST[STRUCT(key KEY_TYPE, value VALUE_TYPE)]) + union vectors  (UNION utilizes the same structure as a STRUCT)
+* nested types recursively as vectors 
+* structs -> each entry as it's own vector (column)
+* lists: offset + length vector into a child vector of the whole list (allow sublists etc)
+* no structs containing structs (yet)
+* comb. explosion on vector combinations in operators -> flatten/decompresss into flatvector => data copy / move + expansion
+* instead unified format/view -> indexed lookup array -> into the original vector 
+    * reusable fixed size array for constant vector
+    * for dict-lookup already lookup vector into dictionary
+    * no system penalty
+* vectors sources
+* always specialize on constant vector
+* not-vectorized storage (but compatible) - bit-packing
+* compressed storage
+* at storage layer -> determine which vector type (based on actually stored data)
+* no recompression
 
-image::duckdb_architecture.png[]
 
 
 === Erweiterungen
@@ -856,4 +962,5 @@ Quack!
 * [PythonDSL] https://duckdb.org/docs/api/python/relational_api
 // * [DuckDBFTS] https://duckdb.org/2021/01/25/full-text-search.html
 // * [PostGeese]
+* [New-York-Taxi] https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
 * [InternalsVideo] https://www.youtube.com/watch?v=bZOvAKGkzpQ
