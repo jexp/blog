@@ -6,6 +6,10 @@ https://medium.com/llamaindex-blog/llamaindex-on-twiml-ai-a-distilled-summary-us
 
 TODO more detail on Llama Index
 
+Congratulation to Jerry and the team for securing a first seed funding round ($8.5M) for LlamaIndex, definitely shows the interest in tools in the LLMs space and the potential of the approach.
+
+https://techcrunch.com/2023/06/06/llamaindex-adds-private-data-to-large-language-models/
+
 === Using a Basic CSV Loader
 
 Here is an example of using a basic CSV loader to provide documents for Llama Index.
@@ -186,7 +190,8 @@ class GraphDBCypherReader(BaseReader):
         return documents
 ----
 
-After adding an example to the readme which uses an always-on demo server with stackoverflow data, I was ready to create a pull request, which after a short discusson was quickly merged.
+After adding an example to the readme which uses an always-on demo server with stackoverflow data, I was ready to create a https://github.com/emptycrown/llama-hub/pull/266[pull request^], which after a short discusson was quickly merged.
+
 Thanks a lot Jerry for the smooth experience.
 
 Now let's see how to use our two loaders.
