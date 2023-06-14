@@ -1,14 +1,19 @@
 == Enriching Llama Index Models from GraphQL and Graph Databases
 
-I was listening to the "This Week in ML" (twiml) where Jerry Liu from LlamaIndex (prev. GPT-Index), explained the ideas behind the library to enrich query contexts to LLMs with data from any number of sources.
+I was listening to the https://medium.com/llamaindex-blog/llamaindex-on-twiml-ai-a-distilled-summary-using-llamaindex-de2a88551595["This Week in ML" (twiml)^] where Jerry Liu from LlamaIndex (prev. GPT-Index), explained the ideas behind the library to enrich query contexts to LLMs with data from any number of sources.
 
 https://medium.com/llamaindex-blog/llamaindex-on-twiml-ai-a-distilled-summary-using-llamaindex-de2a88551595
 
-TODO more detail on Llama Index
+# TODO more detail on Llama Index
 
-Congratulation to Jerry and the team for securing a first seed funding round ($8.5M) for LlamaIndex, definitely shows the interest in tools in the LLMs space and the potential of the approach.
+Congratulation to Jerry and the team for https://techcrunch.com/2023/06/06/llamaindex-adds-private-data-to-large-language-models/[securing a first seed funding round^] ($8.5M) for LlamaIndex, definitely shows the interest in tools in the LLMs space and the potential of the approach.
 
 https://techcrunch.com/2023/06/06/llamaindex-adds-private-data-to-large-language-models/
+
+
+All the code for the blog post is available in this link:https://colab.research.google.com/drive/1NUrIoiOh692LaQkBHEmnD-5IuLBpBqGJ#scrollTo=JN4gqQF-NRwj[Collab Notebook^]
+
+https://colab.research.google.com/drive/1NUrIoiOh692LaQkBHEmnD-5IuLBpBqGJ#scrollTo=JN4gqQF-NRwj
 
 === Using a Basic CSV Loader
 
@@ -103,7 +108,7 @@ So I thought, how hard can it be to add them :)
 Adding the new loaders was really straightforward as there is a script in the llama-hub repository to help with adding a new loader.
 Running `./add-loader.sh <folder>` added the skeleton files.
 
-To get familiar with the existing implementations I looked at the [Databases (relational)^] and [MongoDB integrations^], the former for the Graph Database and the latter for the GraphQL.
+To get familiar with the existing implementations I looked at the https://github.com/emptycrown/llama-hub/tree/main/llama_hub/database[Databases (relational)^] and https://github.com/emptycrown/llama-hub/tree/main/llama_hub/mongo[MongoDB integrations^], the former for the Graph Database and the latter for the GraphQL.
 
 It was easy enough, we only needed the requirements for our loader, implement the `base.py` with an straightforward API and a `README.md`` with an explanation and a code example.
 
@@ -227,16 +232,24 @@ When loading the data, each row of results, should turn into one `Document` wher
 [source,python]
 ----
 query = """
-    MATCH (m:Movie)-[rel:ACTED_IN|DIRECTED|IN_GENRE]->(other)
-    WHERE m.year > $year
+    MATCH (m:Movie)-[rel:ACTED_IN|DIRECTED|IN_GENRE]-(other)
+    WHERE $year < m.year and m.imdbRating > $rating
     WITH m, type(rel) as relation, collect(other.name) as names
-    RETURN m.title as title, m.year as year, m.tagline as plot, relation, names
+    RETURN m.title as title, m.year as year, m.plot as plot, relation, names
     ORDER BY m.year ASC
 """
 
-documents = reader.load_data(query, parameters = {"year":1990})
-print(documents[0:5])
+documents = reader.load_data(query, parameters = {"year":1990,"rating":8})
 index = GPTVectorStoreIndex.from_documents(documents, service_context=service_context)
+
+print(len(documents))
+print(documents[0:5])
+----
+
+.Documents From Graph Database
+----
+829
+[Document(text='names:\n- Saifei He\n- Li Gong\n- Jingwu Ma\n- Cuifen Cao\nplot: A young woman becomes the fourth wife of a wealthy lord, and must learn to live\n  with the strict rules and tensions within the household.\nrelation: ACTED_IN\ntitle: Raise the Red Lantern (Da hong deng long gao gao gua)\nyear: 1991\n', doc_id='782d9a63-251b-4bb8-aa3d-5d8f6d1fb5d2', embedding=None, doc_hash='f9fd966bc5f2234e94d09efebd3be008db8c891f8666c1a364abf7812f5d7a1c', extra_info=None), Document(text='names:\n- Yimou Zhang\nplot: A young woman becomes the fourth wife of a wealthy lord, and must learn to live\n  with the strict rules and tensions within the household.\nrelation: DIRECTED\ntitle: Raise the Red Lantern (Da hong deng long gao gao gua)\nyear: 1991\n', doc_id='2e13caf6-b9cf-4263-a264-7121bc77d1ee', embedding=None, doc_hash='e1f340ed1fac2f1b8d6076cfc2c9e9cb0109d5d11e5dcdbf3a467332f5995cb1', extra_info=None), ...]
 ----
 
 Now we can use our `index` to run a LLM query to answer the questions we wanted to pose.
@@ -246,14 +259,17 @@ Now we can use our `index` to run a LLM query to answer the questions we wanted 
 queryEngine= index.as_query_engine()
 
 queryEngine.query("""
-Which genres were Quentin Tarantino directed movies mostly in and did he have any favorite actors?
+What are the most common plots in action movies?
 """)
 ----
 
-The reponse shows not only that our documents have been used in deriving the answer but also a good understandin of movies, genres and the pronoun `he` and what `favorite actors` means.
+The answer shows that the LLM can utilize the inputs, understands the genre "action movies" and can summarize their plots.
 
 ----
-TODO
+Response(response='Based on the given context information, it appears that the most common plots in action movies are heists and battles against controlling forces. However, it is important to note that this conclusion is based on a limited sample size and may not be representative of all action movies.', 
+
+
+source_nodes=[NodeWithScore(node=Node(text='names:\n- Action\n- Crime\n- Thriller\nplot: A group of professional bank robbers start to feel the heat from police when\n  they unknowingly leave a clue at their latest heist.\nrelation: IN_GENRE\ntitle: Heat\nyear: 1995\n', doc_id='bb117618-1cce-4cec-bd9b-8645ab0b50a3', embedding=None, doc_hash='4d493a9f33eb7a1c071756f61e1975ae5c313ecd42243f81a8827919a618468b', extra_info=None, node_info={'start': 0, 'end': 215, '_node_type': <NodeType.TEXT: '1'>}, relationships={<DocumentRelationship.SOURCE: '1'>: 'dbfffdae-d88c-49e2-9d6b-83dad427a3f3'}), score=0.8247381316731472), NodeWithScore(node=Node(text='names:\n- Thriller\n- Sci-Fi\n- Action\nplot: A computer hacker learns from mysterious rebels about the true nature of his\n  reality and his role in the war against its controllers.\nrelation: IN_GENRE\ntitle: Matrix, The\nyear: 1999\n', doc_id='c4893c61-32ee-4d05-b559-1f65a5197e5e', embedding=None, doc_hash='0b6a080bf712548099c5c8c1b033884a38742c73dc23d420ac2e677e7ece82f4', extra_info=None, node_info={'start': 0, 'end': 227, '_node_type': <NodeType.TEXT: '1'>}, relationships={<DocumentRelationship.SOURCE: '1'>: '6c8dea11-1371-4f5a-a1a1-7f517f027008'}), score=0.8220633045996049)], extra_info={'bb117618-1cce-4cec-bd9b-8645ab0b50a3': None, 'c4893c61-32ee-4d05-b559-1f65a5197e5e': None})
 ----
 
 === Using the GraphQL Loader
@@ -270,11 +286,43 @@ Several larger projects now provide GraphQL APIs including GitHub, Spotify, Twit
 
 The demo is similar to our first, one, we use a public GraphQL endpoint (https://countries.trevorblades.com/), that provides a structure of contintent->country->capital.
 
-The type-defintion is here.
+A subset of the type-defintion is here.
 
 [source,graphql]
 ----
-TODO
+type Query {
+    continent(code: ID!): Continent
+    continents(filter: ContinentFilterInput = {}): [Continent!]!
+    countries(filter: CountryFilterInput = {}): [Country!]!
+    country(code: ID!): Country
+    language(code: ID!): Language
+    languages(filter: LanguageFilterInput = {}): [Language!]!
+}
+
+type Continent {
+    code: ID!
+    countries: [Country!]!
+    name: String!
+}
+
+type Country {
+    awsRegion: String!
+    capital: String
+    code: ID!
+    continent: Continent!
+    currencies: [String!]!
+    currency: String
+    emoji: String!
+    emojiU: String!
+    languages: [Language!]!
+    name(lang: String): String!
+    native: String!
+    phone: String!
+    phones: [String!]!
+    states: [State!]!
+    subdivisions: [Subdivision!]!
+}
+...
 ----
 
 In our demo, we again define the `ServiceContext` with the `ChatGPTLLMPredictor` as before.
@@ -312,7 +360,29 @@ We see that it finds 7 continents with countries and capitals, each of the root 
 [Document(text='countries:\n- capital: Luanda\n  name: Angola\n- capital: Ouagadougou\n  name: Burkina Faso\n- capital: Bujumbura\n  name: Burundi\n- capital: Porto-Novo\n  name: Benin\n- capital: Gaborone\n  name: Botswana\n- capital: Kinshasa\n  name: Democratic Republic of the Congo\n- capital: Bangui\n  name: Central African Republic\n....',doc_id='b82fec36-5e82-4246-b7ab-f590bf6741ab', embedding=None, doc_hash='a4caa760423d6ca861b9332f386add3c449f1683168391ae10f7f73a691a2240', extra_info=None)]
 ----
 
-We could also flip the query around and then get 180 countries with their capitals and continents contained.
+Again we stress the LLM only a little bit by asking it in German, "Which capitals are in North America".
+
+[source,python]
+----
+index = GPTVectorStoreIndex.from_documents(documents, service_context=service_context)
+queryEngine= index.as_query_engine()
+
+response = queryEngine.query("""
+Question: Welche Hauptstädte liegen in Nordamerika? 
+Answer:
+""")
+
+response.response
+----
+
+I was suprised, as I had only expected a hand-full of countries and cities, but it is 27 countries that are in North America, see how our perception is skewed by the western worldview.
+
+----
+Die Hauptstädte, die in Nordamerika liegen, sind Ottawa, San Jos\xE9, Havana, Willemstad, Roseau, Santo Domingo, St. George's, Nuuk, Guatemala City, Tegucigalpa, Port-au-Prince, Kingston, Basseterre, George Town, Castries, Marigot, Fort-de-France, Plymouth, Mexico City, Managua, Panama City, Saint-Pierre, San Juan, San Salvador, Philipsburg, Cockburn Town, Port of Spain, Washington D.C., Kingstown und Road Town.
+----
+
+
+We could also flip the GraphQL query around and then get 250 countries with their capitals and continents contained.
 
 [source,python]
 ----
@@ -334,7 +404,7 @@ print(documents)
 
 Both document lists should work equally well, let's see.
 
-Again we stress the LLM only a little bit by asking it in German, "Which capitals are in North America".
+This time the answer was much more limited, not sure if that was because the index fed the LLM fewer documents to pick from.
 
 [source,python]
 ----
@@ -342,20 +412,16 @@ index = GPTVectorStoreIndex.from_documents(documents, service_context=service_co
 queryEngine= index.as_query_engine()
 
 response = queryEngine.query("""
-Question: Welche Hauptstädte liegen in Nordamerika? 
+Question: Which capitals are in North America? 
 Answer:
 """)
 
 response.response
 ----
 
-I was suprised, as I had only expected a hand-full, but it is 27 countries that are in North America, see how our perception is skewed by the western worldview.
-
 ----
-Die Hauptstädte, die in Nordamerika liegen, sind Ottawa, San Jos\xE9, Havana, Willemstad, Roseau, Santo Domingo, St. George's, Nuuk, Guatemala City, Tegucigalpa, Port-au-Prince, Kingston, Basseterre, George Town, Castries, Marigot, Fort-de-France, Plymouth, Mexico City, Managua, Panama City, Saint-Pierre, San Juan, San Salvador, Philipsburg, Cockburn Town, Port of Spain, Washington D.C., Kingstown und Road Town.
+Washington D.C. and Mexico City are in North America.
 ----
-
-TODO for the country list
 
 === Conclusion
 
