@@ -1,6 +1,8 @@
-== Exploring StackOverflow with DuckDB on MotherDuck
+= Exploring StackOverflow with DuckDB on MotherDuck
 
 :imagesdir: ../img/
+
+== Part 1: Stackoverflow Data Dump Preparation and Import into DuckDB
 
 I was always fascinated by the StackOverflow dataset.
 We all spend a lot of our time searching, reading and writing StackOverflow questions and answers, but rarely think about the system and data behind it.
@@ -271,6 +273,8 @@ You can also export your whole database as Parquet files `EXPORT DATABASE 'targe
 I uploaded them to S3 you can find them here:
 
 // TODO general s3 bucket
+
+== Part 2: From Local to Cloud - Loading our Database into MotherDuck and Querying it with AI Prompts
 
 === Getting started with MotherDuck
 
@@ -543,11 +547,11 @@ Run Time (s): real 3.587 user 0.001733 sys 0.000865
 ----
 
 
-You can also use prompt_sql to fix the SQL for a query, e.g. the infamous, "I forgot GROUP BY".
+You can also use `prompt_fixup` to fix the SQL for a query, e.g. the infamous, "I forgot GROUP BY".
 
 [source,sql]
 ----
-call prompt_sql("select postTypeId, count(*) from posts");
+call prompt_fixup("select postTypeId, count(*) from posts");
 
 query = SELECT postTypeId, COUNT(*) FROM posts GROUP BY postTypeId
 Run Time (s): real 12.006 user 0.004266 sys 0.002980
@@ -557,13 +561,19 @@ Or fixing a wrong join column name, or two.
 
 [source,sql]
 ----
-call prompt_sql("select count(*) from posts join users on posts.userId = users.userId");
+call prompt_fixup("select count(*) from posts join users on posts.userId = users.userId");
 
 query = SELECT COUNT(*) FROM posts JOIN users ON posts.OwnerUserId = users.Id
 Run Time (s): real 2.378 user 0.001770 sys 0.001067
 ----
 
 That's a really neat feature, hope they use it in their UI when your query would encounter an error with an explain in the background.
+
+== Part 3: Advanced Queries from Python, Visualizations, and Dashboards of the StackOverflow Data in MotherDuck
+
+// pivot table
+// bar
+// colab notebook
 
 ////
 
