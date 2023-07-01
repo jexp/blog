@@ -1,0 +1,862 @@
+== Exploring StackOverflow with DuckDB on MotherDuck
+
+:imagesdir: ../img/
+
+I was always fascinated by the StackOverflow dataset.
+We all spend a lot of our time searching, reading and writing StackOverflow questions and answers, but rarely think about the system and data behind it.
+Let's change that.
+
+It's only 65000 tags and 20 million users (2.2 GB CSV), but 58 million posts (5.3 GB CSV), so it's worth seeing how DuckDB holds up at this size.
+Spoiler: Really well.
+
+
+In this article we'll explore the StackOverflow dataset using DuckDB on MotherDuck.
+First we download and transform the raw data, then we load it into DuckDB and inspect it with some EDA queries before exporting it to Parquet.
+We can use these parquet files to create the database on MotherDuck and explore it with the new AI prompt features launched last week.
+To allow you to avoid all the tedious data ingestion work, we use MotherDucks database sharing feature to share the database with you.
+
+For some more interesting queries we access the DuckDB database on MotherDuck from a Python notebook and visualize the results.
+In the last part we'll try out the distributed querying capabilities of MotherDuck from our local machine.
+
+=== Data Dump and Extraction
+
+If you just want to explore and query the data you use the https://data.stackexchange.com/stackoverflow/query/new[stack exchange data explorer^], but for real analysis you want to get access to all the data.
+Thankfully StackOverflow publishes all their data publicly on the [internet archive stack exchange dump] every month, we'll be looking at the (largest) set of files from StackOverflow.
+
+It takes a long time (for me two days in total) to download, especially the posts file, as the internet archive bandwidth is limited and aborts in between.
+We end up with 7 files with a total size of 27 GB.
+
+.Stackoverflow Dump files
+----
+ 19G stackoverflow.com-Posts.7z
+5.2G stackoverflow.com-Comments.7z
+1.3G stackoverflow.com-Votes.7z
+684M stackoverflow.com-Users.7z
+343M stackoverflow.com-Badges.7z
+117M stackoverflow.com-PostLinks.7z
+903K stackoverflow.com-Tags.7z
+----
+
+After the download finished, you need to use p7zip to extract the files, which you often need to install separately.
+
+I recompressed the XML files using pigz, the parallel gz implmentation, which is much faster than the default gzip.
+
+----
+7z e -so stackoverflow.com-Posts.7z | pigz -9 > Posts.xml.gz
+----
+
+When you look into the files they are an odd XML format, where each `Row` element has all columns as attributes, probably some SQL Server export format.
+
+----
+<?xml version="1.0" encoding="utf-8"?>
+<users>
+...
+  <row Id="728812" Reputation="41063" CreationDate="2011-04-28T07:51:27.387" DisplayName="Michael Hunger" LastAccessDate="2023-03-01T14:44:32.237" WebsiteUrl="http://www.jexp.de" Location="Dresden, Germany" AboutMe="&lt;p&gt;&lt;a href=&quot;http://twitter.com/mesirii&quot; rel=&quot;nofollow&quot;&gt;Michael Hunger&lt;/a&gt; has been passionate about soﬅware development for a long time. If you want him to speak at your user group or conference, just drop him an email at michael at jexp.de" Views="7046" UpVotes="4712" DownVotes="24" AccountId="376992" />
+...
+----
+
+Unfortunately there is no XML reader extension for DuckDB yet (please point me to one if you know one), so I had to resort to my own code.
+
+I wrote a conversion tool 7 years ago to convert the XML files to CSV, which you can find on my https://github.com/neo4j-examples/neo4j-stackoverflow-import[xml converter tool^] GitHub repository.
+
+[source,shell]
+----
+mvn compile exec:java -Dexec.mainClass=org.neo4j.example.so.XmlToCsvConverter \
+    -DentityExpansionLimit=0 -DtotalEntitySizeLimit=0 -Djdk.xml.totalEntitySizeLimit=0 \
+    -Dexec.args="Comments.xml.gz:Id,PostId,Score,Text,CreationDate,UserId,ContentLicense"
+
+Comments.xml.gz->[Id, PostId, Score, Text, CreationDate, UserId, ContentLicense]
+Processing Comments.xml.gz
+Done processing Comments.xml.gz with 88222951 rows in 1592 seconds.
+----
+
+It outputs the files as gzipped CSV, which are much smaller now, with separate headers which is useful for the Neo4j import tool.
+
+----
+5.0G Comments.csv.gz
+3.1G Posts.csv.gz
+1.6G Votes.csv.gz
+613M Users.csv.gz
+452M Badges.csv.gz
+137M PostLinks.csv.gz
+1.1M Tags.csv.gz
+----
+
+=== The Data Model
+
+Let's look at the data model of the StackOverflow dataset.
+To remind ourselves of the UI here is a screenshot with most information visible.
+
+image::so-duckdb.png[]
+
+We have the `Questions` (`Post` with postTypeId=1) with a Owner, upvotes, downvotes, tags, views and comments.
+The up to 6 `Tags` define the topics of the questions.
+The `User` with bio, reputation, last login date.
+The `Answers` (Post with postTypeId=2) with their own owner, upvotes, downvotes, comments.
+One of the answers can be acceppted as the correct answer.
+Both can have comments with their own owner, upvotes, downvotes.
+There are also `Badges` that users can earn for their contributions.
+Posts can be linked to other posts, e.g. duplicates or related questions as `PostLinks`.
+
+The dump doesn't have any information of indexes or foreign keys so, we need to discover them as we go.
+
+// TODO data model picture in arrows?
+
+=== Loading the Data into DuckDB
+
+Now we're ready to import the files into DuckDB, which is much easier than our previous steps.
+
+With `read_csv` we can read the CSV files directly from the compressed gzipped files.
+As we have headerless files, we need to provide the column names as a list.
+The `auto_detect` option will try to guess the column types, which works well for the StackOverflow data.
+
+[source,sql]
+----
+duckdb stackoverflow.db
+
+select count(*) 
+from read_csv_auto('Tags.csv.gz');
+
+┌──────────────┐
+│ count_star() │
+│    int64     │
+├──────────────┤
+│        64465 │
+└──────────────┘
+
+describe(select * from read_csv_auto('Tags.csv.gz') limit 1);
+
+┌───────────────┬─────────────┐
+│  column_name  │ column_type │
+│    varchar    │   varchar   │
+├───────────────┼─────────────┤
+│ Id            │ BIGINT      │
+│ TagName       │ VARCHAR     │
+│ Count         │ BIGINT      │
+│ ExcerptPostId │ BIGINT      │
+│ WikiPostId    │ BIGINT      │
+└───────────────┴─────────────┘
+
+select TagName, Count 
+from read_csv('Tags.csv.gz',column_names=['Id','TagName','Count'],auto_detect=true)
+order by Count desc limit 5;
+
+┌────────────┬─────────┐
+│  TagName   │  Count  │
+│  varchar   │  int64  │
+├────────────┼─────────┤
+│ javascript │ 2479947 │
+│ python     │ 2113196 │
+│ java       │ 1889767 │
+│ c#         │ 1583879 │
+│ php        │ 1456271 │
+└────────────┴─────────┘
+----
+
+We could either create the tables first and read the data into them or we can create the tables on the fly as we read the data.
+I won't show all of them but you can find them in the [GitHub repository^].
+
+.Creating Tables in DuckDB
+[source,sql]
+----
+create table users as 
+
+select * from read_csv('Users.csv.gz',auto_detect=true,
+column_names=['Id','Reputation','CreationDate','DisplayName','LastAccessDate','AboutMe','Views','UpVotes','DownVotes']);
+
+-- 19942787
+
+-- we can leave off the select * 
+create table posts as 
+from read_csv('Posts.csv.gz',auto_detect=true,
+    column_names=['Id','PostTypeId','AcceptedAnswerId','CreationDate',
+    'Score','ViewCount','Body','OwnerUserId','LastEditorUserId',
+    'LastEditorDisplayName','LastEditDate','LastActivityDate','Title',
+    'Tags','AnswerCount','CommentCount','FavoriteCount',
+    'CommunityOwnedDate','ContentLicense']);
+
+-- 58329356
+----
+
+=== Exploratory Queries
+
+Now that we have our tables, we can run a a few queries to see what we have.
+
+First we see who are our top users and when did they last login (from this dump), this computes on my machine in 0.126 seconds for 20 million users.
+
+[source,sql]
+----
+.timer on
+
+┌─────────────────┬────────────┬─────────────────────────┐
+│   DisplayName   │ Reputation │     LastAccessDate      │
+│     varchar     │   int64    │        timestamp        │
+├─────────────────┼────────────┼─────────────────────────┤
+│ Jon Skeet       │    1389256 │ 2023-03-04 19:54:19.74  │
+│ Gordon Linoff   │    1228338 │ 2023-03-04 15:16:02.617 │
+│ VonC            │    1194435 │ 2023-03-05 01:48:58.937 │
+│ BalusC          │    1069162 │ 2023-03-04 12:49:24.637 │
+│ Martijn Pieters │    1016741 │ 2023-03-03 19:35:13.76  │
+└─────────────────┴────────────┴─────────────────────────┘
+Run Time (s): real 0.126 user 2.969485 sys 1.696962
+----
+
+Now let's look at the bigger posts table and see some yearly statistics.
+
+[source,sql]
+----
+select  year(CreationDate) as year, count(*), 
+        round(avg(ViewCount)), max(AnswerCount)
+from posts 
+group by year order by year desc limit 10;
+
+┌───────┬──────────────┬───────────────────────┬──────────────────┐
+│ year  │ count_star() │ round(avg(ViewCount)) │ max(AnswerCount) │
+│ int64 │    int64     │        double         │      int64       │
+├───────┼──────────────┼───────────────────────┼──────────────────┤
+│  2023 │       528575 │                  44.0 │               15 │
+│  2022 │      3353468 │                 265.0 │               44 │
+│  2021 │      3553972 │                 580.0 │               65 │
+│  2020 │      4313416 │                 847.0 │               59 │
+│  2019 │      4164538 │                1190.0 │               60 │
+│  2018 │      4444220 │                1648.0 │              121 │
+│  2017 │      5022978 │                1994.0 │               65 │
+│  2016 │      5277269 │                2202.0 │               74 │
+│  2015 │      5347794 │                2349.0 │               82 │
+│  2014 │      5342607 │                2841.0 │               92 │
+├───────┴──────────────┴───────────────────────┴──────────────────┤
+│ 10 rows                                               4 columns │
+└─────────────────────────────────────────────────────────────────┘
+Run Time (s): real 5.977 user 7.498157 sys 5.480121 (1st run)
+Run Time (s): real 0.039 user 4.609049 sys 0.078694
+----
+
+The first time it takes about 6 seconds, and subsequent runs are much faster after the data has been loaded.
+
+Nice, seems to have worked well.
+
+Our DuckDB database file is 18GB, which is a two times as big as the ultra-compressed 8.7GB of the CSV files.
+
+=== Export the Data to Parquet
+
+We could continue to use our local database file, but we wanted to explore MotherDuck, so let's upload it to the cloud.
+
+Alternatively we can just export our tables to Parquet files for safekeeping and easier storage and processing in other ways.
+Parquet as a columnar format compresses better, includes the schema and supports optimized reading with column selection and predicate pushdown.
+
+[source,sql]
+----
+COPY (FROM users) TO 'users.parquet'
+(FORMAT PARQUET, CODEC 'SNAPPY', ROW_GROUP_SIZE 100000);
+-- Run Time (s): real 10.582 user 62.737265 sys 65.422181
+
+COPY (FROM posts) TO 'posts.parquet'
+(FORMAT PARQUET, CODEC 'SNAPPY', ROW_GROUP_SIZE 100000);
+-- Run Time (s): real 57.314 user 409.517658 sys 334.606894
+----
+
+You can also export your whole database as Parquet files `EXPORT DATABASE 'target_directory' (FORMAT PARQUET);`
+
+.Parquet files
+----
+6.9G comments.parquet
+4.0G posts.parquet
+2.2G votes.parquet
+734M users.parquet
+518M badges.parquet
+164M post_links.parquet
+1.6M tags.parquet
+----
+
+I uploaded them to S3 you can find them here:
+
+// TODO general s3 bucket
+
+=== Getting started with MotherDuck
+
+DuckDB itself is focusing on local, and in-process execution of the analytical database engine.
+While you can access remote data, it's downloaded to your machine every time you access the remote files, so you really want to move your DuckDB instance to where the data lives
+
+To make it easier to query data that resides in other, remote locations, MotherDuck offers a managed service, that allows you to run DuckDB in the cloud.
+
+With MotherDuck you can query the data on your cloud storage transparently as if it was local.
+But what's even better, is you can join and combine local data transparently with data residing in the cloud.
+
+Here is a picture of the architecture from the https://motherduck.com/docs/architecture-and-capabilities/[documentation^]:
+
+image::https://motherduck.com/docs/assets/images/md-diagram_v1.2-fde6f7192947deb7a58934c66e8de1d3.png[]
+
+It also integrates with Python and all the other access libraries for DuckDB.
+
+If you already got an invite to MotherDuck, you can create an account, if not, you can join the mailing list or hit me up. 
+Alternatively I heard there might invites on the https://slack.motherduck.com/[MotherDuck Slack^] available, if you come up with a good duck pun.
+
+Then you need the `motherduck` extension and you're ready to go.
+I just put that into my `$HOME/duckdbrc` config file.
+
+With `.open md:` or `.open md:databasename` you open a remote connection.
+
+----
+duckdb
+
+install motherduck;
+load motherduck;
+
+.open md:
+Attempting to automatically open the SSO authorization page 
+   in your default browser.
+1. Please open this link to login into your account: 
+    https://auth.motherduck.com/activate
+2. Enter the following code: XLXM-MJLQ
+
+Token successfully retrieved ✅
+You can store it as an environment variable to avoid having to log in again:
+  $ export motherduck_token='eyJhbGciOiJI...qzeisIuf8_WdQex_Jfo'
+----
+
+Once you have an account you get a token, which you need to connect to MotherDuck.
+Best to set the token as an environment variable, as opening a new database wipes the settings in DuckDB (trust me, I tried).
+
+If you want to explore the MotherDuck UI first, feel free to do so, you can create new databases, upload files and create tables from those.
+You can run queries and get a nice pivotable, sortable output table with inline frequency charts in the header.
+
+image::motherduck-ui.png[]
+
+=== Loading the Data into MotherDuck
+
+You have the option of uploading your local database with single command, which is really neat.
+
+[source,sql]
+----
+CREATE DATABASE remote_database_name FROM CURRENT_DATABASE();
+
+-- or more generally
+CREATE DATABASE remote_database_name FROM '<local database name>';
+----
+
+There are only two caveats, *the local and remote name must be different*, otherwise you get the error below.
+
+----
+Catalog Error: error while importing share: Schema with name <local-database-name> does not exist!
+----
+
+// TODO unnest
+
+And for the size of our stackoverflow database it took quite some time to finish the upload, not 100% sure but I think around 2 hours.
+
+So we rather create the database on MotherDuck and import our tables directly from our Parquet files on S3.
+
+You can do this in the web interface or on your local machine, connected to motherduck.
+
+[source,sql]
+----
+create database stackoverflow;
+
+create table users as 
+from 's3://data.xxx.com/stackoverflow/2023-05/users.parquet';
+-- Run Time (s): real 10.401 user 0.006417 sys 0.003527
+describe users;
+┌────────────────┬─────────────┐
+│  column_name   │ column_type │
+│    varchar     │   varchar   │
+├────────────────┼─────────────┤
+│ Id             │ BIGINT      │
+│ Reputation     │ BIGINT      │
+│ CreationDate   │ TIMESTAMP   │
+│ DisplayName    │ VARCHAR     │
+│ LastAccessDate │ TIMESTAMP   │
+│ AboutMe        │ VARCHAR     │
+│ Views          │ BIGINT      │
+│ UpVotes        │ BIGINT      │
+│ DownVotes      │ BIGINT      │
+│ Id             │ BIGINT      │
+│ Reputation     │ BIGINT      │
+│ CreationDate   │ TIMESTAMP   │
+│ DisplayName    │ VARCHAR     │
+│ LastAccessDate │ TIMESTAMP   │
+│ AboutMe        │ VARCHAR     │
+│ Views          │ BIGINT      │
+│ UpVotes        │ BIGINT      │
+│ DownVotes      │ BIGINT      │
+├────────────────┴─────────────┤
+│ 18 rows                      │
+└──────────────────────────────┘
+Run Time (s): real 0.032 user 0.026184 sys 0.002383
+
+-- do the same for the other tables
+----
+
+In the left sidebar of your web interface, now the database `so`  and the tables should show up, if not, refresh the page.
+
+image::motherduck-ui-so.png[width=300]
+
+== Querying the Data with AI 🤖
+
+Last week MotherDuck released a new https://motherduck.com/docs/key-tasks/using-ml-to-query[generative AI feature^] that allows you to
+
+* query your data using natural language
+* generate SQL statements and 
+* describe your data.
+
+As LLMs, GPT and foundational models are https://medium.com/@mesirii[close to my heart^], I was really excited to try this out.
+
+It works actually already quite well, let's see how it does.
+
+The schema description is a bit uninspiring, I could have seen the same by just looking at the table list.
+As expected from probabalistic models it returns different results on each run.
+
+[source]
+----
+CALL prompt_schema();
+
+summary = The database contains information related to posts, comments, votes, badges, tags, post links, and users for a platform.
+
+Run Time (s): real 1.476 user 0.001069 sys 0.000778
+
+summary = The database schema represents a collection of data about various aspects of a community platform, including users, posts, comments, tags, badges, votes, and post links.
+----
+
+Ok, let's try a simple question: `What are the most popular tags?`
+
+[source,sql]
+----
+.mode duckbox
+pragma prompt_query('What are the most popular tags?');
+┌────────────┬─────────┐
+│  TagName   │  Count  │
+│  varchar   │  int64  │
+├────────────┼─────────┤
+│ javascript │ 2479947 │
+│ python     │ 2113196 │
+│ java       │ 1889767 │
+│ c#         │ 1583879 │
+│ php        │ 1456271 │
+│ android    │ 1400026 │
+│ html       │ 1167742 │
+│ jquery     │ 1033113 │
+│ c++        │  789699 │
+│ css        │  787138 │
+├────────────┴─────────┤
+│ 10 rows    2 columns │
+└──────────────────────┘
+-- Run Time (s): real 3.763 user 0.124567 sys 0.001716
+----
+
+Nice, what is the SQL it might have used for that (probabalistcally it could have been slightly different)?
+
+[source,sql]
+----
+.mode line
+call prompt_sql('What are the most popular tags?');
+
+-- query = SELECT TagName, Count FROM tags ORDER BY Count DESC LIMIT 5;
+-- Run Time (s): real 2.813 user 2.808042 sys 0.005866
+----
+
+Looks good to me, it's even smart enough to use the attribute and ordering and limit to get "most popular" tags.
+
+That was pretty easy, so let's see how it deals a few more involved questions.
+
+* What question has the highest score and what are it's other attributes?
+* Which 5 questions have the most comments, what is the post title and comment count
+
+[source]
+----
+pragma prompt_query("What question has the highest score and what are it's other attributes?");
+
+                   Id = 11227809
+           PostTypeId = 1
+     AcceptedAnswerId = 11227902
+         CreationDate = 2012-06-27 13:51:36.16
+                Score = 26903
+            ViewCount = 1796363
+                 Body = 
+          OwnerUserId = 87234
+     LastEditorUserId = 87234
+LastEditorDisplayName = 
+         LastEditDate = 2022-10-12 18:56:47.68
+     LastActivityDate = 2023-01-10 04:40:07.12
+                Title = Why is processing a sorted array faster than processing an unsorted array?
+                 Tags = <java><c++><performance><cpu-architecture><branch-prediction>
+          AnswerCount = 26
+         CommentCount = 9
+        FavoriteCount = 0
+   CommunityOwnedDate = 
+       ContentLicense = CC BY-SA 4.0
+
+call prompt_sql("What question has the highest score and what are it's other attributes?");
+query = SELECT *
+FROM posts
+WHERE PostTypeId = 1
+ORDER BY Score DESC
+LIMIT 1;
+Run Time (s): real 3.683 user 0.001970 sys 0.000994
+----
+
+Ok, not bad, it's nice that it detects that `PostTypeId = 1` are questions, now lets go for the next one.
+
+[source,sql]
+----
+.mode duckbox
+pragma prompt_query("Which 5 questions have the most comments, what is the post title and comment count");
+
+┌───────────────────────────────────────────────────────────────────────────┬───────────────┐
+│                                          Title                            │ comment_count │
+│                                         varchar                           │     int64     │
+├───────────────────────────────────────────────────────────────────────────┼───────────────┤
+│ UIImageView Frame Doesnt Reflect Constraints                              │           108 │
+│ Is it possible to use adb commands to click on a view by finding its ID?  │           102 │
+│ How to create a new web character symbol recognizable by html/javascript? │           100 │
+│ Why isnt my CSS3 animation smooth in Google Chrome (but very smooth on ot │            89 │
+│ Heap Gives Page Fault                                                     │            89 │
+└───────────────────────────────────────────────────────────────────────────┴───────────────┘
+Run Time (s): real 19.695 user 2.406446 sys 0.018353
+
+.mode line
+call prompt_sql("Which 5 questions have the most comments, what is the post title and comment count");
+
+query = SELECT p.Title, COUNT(c.Id) AS comment_count
+FROM posts p
+JOIN comments c ON p.Id = c.PostId AND p.PostTypeId = 1
+GROUP BY p.Title
+ORDER BY comment_count DESC
+LIMIT 5;
+Run Time (s): real 4.795 user 0.002301 sys 0.001346
+----
+
+This is what it looks like in the MotherDuck UI
+
+image::md-query-ai.png[]
+
+Hmm, actually the comment count is a column on the posts table, so it could have used that, let's see if we can make it stay in one table.
+
+[source,sql]
+----
+call prompt_sql("System: No joins! User: Which 5 questions have the most comments, what is the post title and comment count");
+
+query = SELECT Title, CommentCount
+FROM posts
+WHERE PostTypeId = 1
+ORDER BY CommentCount DESC
+LIMIT 5;
+Run Time (s): real 3.587 user 0.001733 sys 0.000865
+----
+
+
+You can also use prompt_sql to fix the SQL for a query, e.g. the infamous, "I forgot GROUP BY".
+
+[source,sql]
+----
+call prompt_sql("select postTypeId, count(*) from posts");
+
+query = SELECT postTypeId, COUNT(*) FROM posts GROUP BY postTypeId
+Run Time (s): real 12.006 user 0.004266 sys 0.002980
+----
+
+Or fixing a wrong join column name, or two.
+
+[source,sql]
+----
+call prompt_sql("select count(*) from posts join users on posts.userId = users.userId");
+
+query = SELECT COUNT(*) FROM posts JOIN users ON posts.OwnerUserId = users.Id
+Run Time (s): real 2.378 user 0.001770 sys 0.001067
+----
+
+That's a really neat feature, hope they use it in their UI when your query would encounter an error with an explain in the background.
+
+////
+
+== MotherDuck
+
+DuckDB itself is focusing on local, and in-process execution of the analytical database engine.
+To make it easier to query data that resides in other locations, MotherDuck offers a managed service, 
+
+Why would you want to do that?
+
+As much of your data is in the cloud, you don't want to download it to your local machine to analyze it.
+
+With MotherDuck you can query the data on your cloud storage transparently as if it was local.
+But what's even better, is you can join and combine local data transparently with data residing in the cloud.
+
+It also transparently integrates in python and other access libraries
+
+s3 support with a separate object to manage secrets
+
+documentation: https://motherduck.com/docs/intro
+
+// As a DuckDB user, you can connect to MotherDuck Beta to supercharge your local DuckDB experience with cloud-based manageability, persistence, scale, sharing, and productivity tools.
+// MotherDuck is a collaborative serverless analytics platform
+// The MotherDuck web application provides a notebook-like UI. This enables you to analyze local CSVs and parquet files, upload them and manage them alongside your other data stored in MotherDuck.
+// As a DuckDB-in-the-cloud company, naturally MotherDuck embeds DuckDB in its web application using WASM. Results of your SQL queries are cached in this DuckDB instance, enabling you to instantly sort, pivot, and filter query results!
+
+[source,sql]
+----
+duckdb
+install motherduck;
+load motherduck;
+
+.open md:
+
+Attempting to automatically open the SSO authorization page in your default browser.
+1. Please open this link to login into your account: https://auth.motherduck.com/activate
+2. Enter the following code: NZWF-XLRQ
+----
+
+Opens a web browser for authentication where you can sign in/up with your GitHub, Google account or via email.
+
+After authenticating, you can connec
+
+You can share datasets from MotherDuck with others with 
+
+create share 'name' from 'database';
+
+which returns a shareable URL that you then can use with `ATTACH`.
+
+
+access the sample_data database e.g. with the `sample_data.nyc.yellow_cab_nyc_2022_11` table
+
+sample datasets: https://motherduck.com/docs/category/sample-datasets--queries/
+
+`ATTACH 'md:_share/share_sample_data/23b0d623-1361-421d-ae77-62d701d471e6' AS sample_data;`
+
+HackerNews: https://motherduck.com/docs/sample-data-queries/hacker-news
+
+.most shared websites
+[source,sql]
+----
+SELECT
+    regexp_extract(url, 'http[s]?://([^/]+)/', 1) AS domain,
+    count(*) AS count
+FROM sample_data.hn.hacker_news
+WHERE url IS NOT NULL AND regexp_extract(url, 'http[s]?://([^/]+)/', 1) != ''
+GROUP BY domain
+ORDER BY count DESC
+LIMIT 20;
+----
+
+
+.most monthly voted stories
+[source,sql]
+----
+WITH ranked_stories AS (
+    SELECT
+        title,
+        'https://news.ycombinator.com/item?id=' || id AS hn_url,
+        score,
+        YEAR(timestamp) AS year,
+        MONTH(timestamp) AS month,
+        ROW_NUMBER()
+            OVER (PARTITION BY YEAR(timestamp), MONTH(timestamp) ORDER BY score DESC)
+        AS rn
+    FROM sample_data.hn.hacker_news
+    WHERE type = 'story'
+)
+
+SELECT
+    year,
+    month,
+    title,
+    hn_url,
+    score
+FROM ranked_stories
+WHERE rn = 1
+ORDER BY year, month;
+----
+
+
+s3 secrets
+
+----
+-- assume db test01 exists
+.open motherduck:test01; 
+
+CALL MD_CREATE_SECRET(secret_type='s3', s3_access_key_id='my_access_key', s3_secret_access_key='my_secret_key', s3_region='us-east-1');
+
+-- Now you can query from a secure S3 bucket
+CREATE OR REPLACE TABLE mytable AS SELECT * FROM 's3://...';
+----
+
+.upload databases
+----
+CREATE DATABASE remote_database FROM CURRENT_DATABASE();   
+CREATE DATABASE remote_database FROM '<local database name>';
+----
+
+StackOverflow dump from May 2023
+
+Database Size 7GB
+
+posts: 58M
+users: 20M
+tags: 64k
+badges: 48M
+votes: 228M
+post_links: 8.7M
+
+SO db share from motherduck. You should be able to attach it. 
+
+ATTACH 'md:_share/stackoverflow1/bb0e4c8c-1abc-441c-9577-2a6457229db0' as stackoverflow;
+
+I also remembered Evalinas SO Analysis: 
+
+* https://evelinag.com/exploring-stackoverflow/
+* https://www.youtube.com/watch?v=-Ig-RoWzzJ8
+
+////
+create table users as (
+select * from read_csv_auto("so/Users.csv.gz",auto_detect=true, 
+column_names=['id','name','reputation','createdAt','accessedAt',
+'url','location','views','upvotes','downvotes','age','accountId'])
+);
+
+select name, reputation, today()-createdAt as age, createdAt, accountId, upvotes, downvotes
+from users where reputation > 1000000 order by age asc;
+┌─────────────────┬────────────┬─────────────────────────┬───────────┬─────────┬───────────┐
+│ name │ reputation │ createdAt │ accountId │ upvotes │ downvotes │
+│ varchar │ int64 │ timestamp │ int64 │ int64 │ int64 │
+├─────────────────┼────────────┼─────────────────────────┼───────────┼─────────┼───────────┤
+│ FromC │ 1194435 │ 2008-09-13 22:22:33.173 │ 4243 │ 68498 │ 405 │
+│ Jon Skeet │ 1389256 │ 2008-09-26 12:05:05.15 │ 11683 │ 17135 │ 8011 │
+│ Marc Gravell │ 1009857 │ 2008-09-29 05:46:02.697 │ 11975 │ 27390 │ 1129 │
+│ Darin Dimitrov │ 1014014 │ 2008-10-19 16:07:47.823 │ 14332 │ 1949 │ 2651 │
+│ Martijn Pieters │ 1016741 │ 2009-05-03 14:53:57.543 │ 35417 │ 5851 │ 22930 │
+│ T.J. Crowder │ 1010006 │ 2009-08-16 11:00:22.497 │ 52616 │ 14819 │ 34259 │
+│ BalusC │ 1069162 │ 2009-08-17 16:42:02.403 │ 52822 │ 15829 │ 23484 │
+│ Gordon Linoff │ 1228338 │ 2012-01-11 19:53:57.59 │ 1165580 │ 20567 │ 42 │
+└─────────────────┴────────────┴─────────────────────────┴───────────┴─────────┴───────────┘
+
+select name, reputation, reputation/day(today()-createdAt) as rate, today()-createdAt as age, 
+       createdAt, accountId, upvotes, downvotes
+from users where reputation > 1000000 order by rate desc;
+
+todo per year, pivot, window
+////
+
+.listing {listing} stackoverflow analysis
+[source,sql]
+----
+duckdb stackoverflow.db
+
+select name, count 
+from read_csv('so/Tags.csv.gz',column_names=['name','count','id'],auto_detect=true)
+order by count desc limit 5;
+
+┌────────────┬─────────┐
+│    name    │  count  │
+│  varchar   │  int64  │
+├────────────┼─────────┤
+│ javascript │ 2479947 │
+│ python     │ 2113196 │
+│ java       │ 1889767 │
+│ c#         │ 1583879 │
+│ php        │ 1456271 │
+└────────────┴─────────┘
+
+aws s3 ls s3://data.xxx.com/stackoverflow/2023-05/ | grep parquet
+2023-06-23 02:09:05  542334231 badges.parquet
+2023-06-23 02:09:20  171209015 post_links.parquet
+2023-06-23 02:09:27 4215815461 posts.parquet
+2023-06-23 02:10:39    1623978 tags.parquet
+2023-06-23 02:10:42  769382045 users.parquet
+2023-06-23 02:11:02 2325034181 votes.parquet
+
+
+SELECT displayname, reputation, round(reputation/day(today()-creationdate)) as rate, day(today()-creationdate) as days, 
+       creationdate, id, upvotes, downvotes
+FROM stackoverflow1.users WHERE reputation > 1000000 ORDER BY rate DESC;
+
+use stackoverflow;
+
+alter table posts add tagNames varchar[];
+
+
+update posts 
+set tagNames = split(tags[2:-1],'><')
+where posttypeid = 1;
+
+
+create type tag as enum (select distinct tagname from tags);
+alter table posts add tagEnums tag[];
+update posts set tagEnums = list_transform(tagNames, x -> enum_code(x::tag));
+
+
+select tag, count(*), sum(score) as score from
+(
+select unnest(p.tagNames) as tag, p.score as score from posts p
+where p.posttypeid = 1
+)
+group by all
+order by score desc limit 10;
+
+-- this one takes much longer
+select tagname, count(*), sum(score) 
+from tags join posts on (posttypeid=1 and list_has(posts.tagNames, tagname)) -- tagname in unnest(tagNames) didn't work
+group by tagname;
+
+create table tags as select name, count 
+from read_csv('so/Tags.csv.gz',column_names=['name','count','id'],auto_detect=true);
+
+create table users as (
+select * from read_csv_auto('so/Users.csv.gz',auto_detect=true, 
+column_names=['id','name','reputation','createdAt','accessedAt',
+'url','location','views','upvotes','downvotes','age','accountId'])
+);
+
+select count(*) from users; // 19942787
+
+.timer on
+
+SELECT name, reputation, round(reputation/day(today()-createdAt)) as rate, day(today()-createdAt) as days, 
+       createdAt, accountId, upvotes, downvotes
+FROM users WHERE reputation > 1000000 ORDER BY rate DESC;
+
+┌─────────────────┬────────────┬────────┬───────┬─────────────────────────┬───────────┬─────────┬───────────┐
+│      name       │ reputation │  rate  │ days  │        createdAt        │ accountId │ upvotes │ downvotes │
+│     varchar     │   int64    │ double │ int64 │        timestamp        │   int64   │  int64  │   int64   │
+├─────────────────┼────────────┼────────┼───────┼─────────────────────────┼───────────┼─────────┼───────────┤
+│ Gordon Linoff   │    1228338 │  294.0 │  4181 │ 2012-01-11 19:53:57.59  │   1165580 │   20567 │        42 │
+│ Jon Skeet       │    1389256 │  258.0 │  5383 │ 2008-09-26 12:05:05.15  │     11683 │   17135 │      8011 │
+│ VonC            │    1194435 │  221.0 │  5396 │ 2008-09-13 22:22:33.173 │      4243 │   68498 │       405 │
+│ BalusC          │    1069162 │  211.0 │  5058 │ 2009-08-17 16:42:02.403 │     52822 │   15829 │     23484 │
+│ T.J. Crowder    │    1010006 │  200.0 │  5059 │ 2009-08-16 11:00:22.497 │     52616 │   14819 │     34259 │
+│ Martijn Pieters │    1016741 │  197.0 │  5164 │ 2009-05-03 14:53:57.543 │     35417 │    5851 │     22930 │
+│ Darin Dimitrov  │    1014014 │  189.0 │  5360 │ 2008-10-19 16:07:47.823 │     14332 │    1949 │      2651 │
+│ Marc Gravell    │    1009857 │  188.0 │  5380 │ 2008-09-29 05:46:02.697 │     11975 │   27390 │      1129 │
+└─────────────────┴────────────┴────────┴───────┴─────────────────────────┴───────────┴─────────┴───────────┘
+Run Time (s): real 0.006 user 0.007980 sys 0.001260
+
+WITH top_users as select ...
+SELECT name, reputation, rate, bar(rate,150,300,35) AS bar FROM top_users;
+┌─────────────────┬────────────┬────────┬────────────────────────────────────┐
+│      name       │ reputation │  rate  │                bar                 │
+│     varchar     │   int64    │ double │              varchar               │
+├─────────────────┼────────────┼────────┼────────────────────────────────────┤
+│ Gordon Linoff   │    1228338 │  294.0 │ █████████████████████████████████▌ │
+│ Jon Skeet       │    1389256 │  258.0 │ █████████████████████████▏         │
+│ VonC            │    1194435 │  221.0 │ ████████████████▌                  │
+│ BalusC          │    1069162 │  211.0 │ ██████████████▏                    │
+│ T.J. Crowder    │    1010006 │  200.0 │ ███████████▋                       │
+│ Martijn Pieters │    1016741 │  197.0 │ ██████████▉                        │
+│ Darin Dimitrov  │    1014014 │  189.0 │ █████████                          │
+│ Marc Gravell    │    1009857 │  188.0 │ ████████▊                          │
+└─────────────────┴────────────┴────────┴────────────────────────────────────┘
+
+WITH top_users as select ...
+SELECT name, reputation, rate, bar(rate,150,300,50) AS bar FROM top_users;
+
+┌─────────────────┬────────────┬────────┬──────────────────────────────────────────────────┐
+│      name       │ reputation │  rate  │                       bar                        │
+│     varchar     │   int64    │ double │                     varchar                      │
+├─────────────────┼────────────┼────────┼──────────────────────────────────────────────────┤
+│ Gordon Linoff   │    1228338 │  294.0 │ ████████████████████████████████████████████████ │
+│ Jon Skeet       │    1389256 │  258.0 │ ████████████████████████████████████             │
+│ VonC            │    1194435 │  221.0 │ ███████████████████████▋                         │
+│ BalusC          │    1069162 │  211.0 │ ████████████████████▎                            │
+│ T.J. Crowder    │    1010006 │  200.0 │ ████████████████▋                                │
+│ Martijn Pieters │    1016741 │  197.0 │ ███████████████▋                                 │
+│ Darin Dimitrov  │    1014014 │  189.0 │ █████████████                                    │
+│ Marc Gravell    │    1009857 │  188.0 │ ████████████▋                                    │
+└─────────────────┴────────────┴────────┴──────────────────────────────────────────────────┘
+Run Time (s): real 0.001 user 0.000374 sys 0.000069
+////

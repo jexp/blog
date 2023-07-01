@@ -1,0 +1,979 @@
+== Small but mighty - DuckDB as a lightweight analytics database
+
+:imagesdir: ../../img/
+
+In the age of BigData, is it still possible to perform data analysis of hundreds of gigabytes on your own computer without bringing it to its knees?
+Yes, now again, using DuckDB, the latest star in the database world.
+This lightweight, highly efficient database can be easily integrated into one's Python, Java, Swift or other programs and makes modern SQL analysis functionality easy to use.
+
+The most common database is not MySQL or MS Access, but [SQLite], which is used in tens of thousands of applications (more than a trillion databases) in our cell phones, web browsers, games, televisions and other devices to quickly and efficiently store structured data and make it accessible with SQL.
+The special attraction is that SQLite can be easily integrated into programs as a library and then run within its own process without having to run a separate server.
+SQLite is a fully transactional OLTP database with extremely good test coverage and specification.
+In the podcast [SQLitePodcast] the inventor, Richard Hipp has clearly explained the history of the database.
+
+DuckDB is the analytical OLAP twin to it, i.e. "SQLite for data analysis".
+
+Developed by Hannes Mühleisen and Mark Raasveldt as database PhD students at the CWI (Centrum Wiskunde & Informatica) in Amsterdam, DuckDB has its origins in the realization that data scientists in R often did not use SQL because there was no good database integration for R and client-server databases were impractical.
+Starting from "how hard can it be", an impressive database tool has been developed during 8 years of work, first in the university environment and now also in the commercial environment, that gives users access to efficient data analysis far beyond R.
+
+DuckDB is implemented in C++ 11, has no other dependencies, and released as open source software under the MIT license.
+
+We often associate analyzing data volumes in the double or triple digits of gigabytes, larger Spark clusters, or DWH solutions such as Snowflake, PowerBI, Cognos, Redshift, or the like.
+Each with the corresponding investments in infrastructure, time, data transfer and complexity.
+
+De founder of Motherduck, Jordan Tigani one of the original developers of Google's BigQuery has commented on this in the article "Big Data is Dead" [BigData] - most data sets are not gigantic (median 100GB) and the most important analytics are done on the most recent data, often only a few hundred megabytes.
+
+As already demonstrated by Frank McSherry [McSherry] in 2015, with an efficient implementation taking advantage of all the powerful features of modern CPUs (vectorization, massive pipelining, very large CPU caches) and current database research algorithms, it is possible to process large amounts of data even on a single thread.
+
+
+DuckDB has also adopted this approach, enabling efficient, local data analysis.
+
+But enough of an introduction, let's get familiar with DuckDB right away.
+Don't worry, the duck won't bite.
+
+Either via package manager, or Python Installer (pip) or simply via [Download] you can get the compact installation on your own computer (see listing {counter:listing}). 
+The current version is 0.8.0.
+
+Listing {listing} Installation
+[source,shell]
+----
+apt install duckdb
+
+# alternatives
+brew install duckdb
+pip install duckdb
+npm install duckdb
+----
+
+After that the command line application `duckdb` is available, but also the respective libraries.
+As already mentioned, there is no database server, the database runs directly in the process of the application.
+
+There is also an in-browser [web shell] that runs in a WASM sandbox.
+
+Nicely, you can also experiment completely without persistence, i.e. with a pure main memory database.
+
+Our first example is a "Hello World", but we'll get right into it with string operations, transposition (unnest), aggregation and sorting (see listing {counter:listing}).
+
+.listing {listing} Hello World!
+[source,shell]
+----
+duckdb
+-- Loading resources from /Users/mh/.duckdbrc
+v0.8.0 e8e4cea5ec
+Enter ".help" for usage hints.
+Connected to a transient in-memory database.
+Use ".open FILENAME" to reopen on a persistent database.
+
+D select 'Hello world!' as msg;
+┌─────────────┐
+│ msg │
+│ varchar │
+├─────────────┤
+│ Hello world! │
+└─────────────┘
+
+select split('Hello world!','') as msg;
+┌───────────────────────────────────┐
+│ msg │
+│ varchar[] │
+├───────────────────────────────────┤
+│ [H, a, l, o, , W, e, l, t, !] │
+└───────────────────────────────────┘
+
+
+select unnest(split('Hello world!','')) as c;
+┌─────────┐
+│ c │
+│ varchar │
+├─────────┤
+│ H │
+│ a │
+│ l │
+│ l │
+│ o │
+│ │
+│ W │
+│ e │
+│ l │
+│ t │
+│ !       │
+├─────────┤
+│ 11 rows │
+└─────────┘
+
+select c, count(*) as freq from (
+    select unnest(split('Hello world!','')) as c
+) group by c 
+  order by freq desc limit 5;
+
+┌─────────┬───────┐
+│ c │ freq │
+│ varchar │ int64 │
+├─────────┼───────┤
+│ l │ 3 │
+│ H │ 1 │
+│ a │ 1 │
+│ o │ 1 │
+│ │ 1 │
+└─────────┴───────┘
+----
+
+For displaying the results, you can choose between different modes using `.mode <name>`.
+We have seen `duckbox` so far, there are also `csv, json, jsoline, line` (each value on a new line), `html, insert, trash` (no output) and others more.
+Other useful commands of the CLI are available via `.help`, `.timer on` for example prints the runtime of a statement.
+
+If you have questions, the extensive and detailed documentation [DuckDBDocs] is available and a very helpful community answers questions on [Discord].
+
+DuckDB supports a large part of the SQL standard, and additionally brings many useful functions.
+
+It is also very pleasant that the database can be extended with further functionality relatively easily.
+These extensions are added to the own installation with `INSTALL name/url` and `LOAD name`, and are available to all APIs from then on.
+There are extensions for different file formats and sources, full text search, geodata, and much more.
+
+Repeated configuration and usage can be stored in `$HOME/.duckdbrc`.
+
+A very useful use of DuckDB is to analyze existing data available somewhere in the cloud via https or cloud storage (S3, GCP, HDFS) without having to manually download and import it first.
+
+Furthermore, there is built-in support for CSV and an extension for JSON and Parquet.
+// Since version 0.8, many of these operations are parallelized by default.
+
+So in the next step we can analyze some data from the internet, e.g. population numbers of countries [CSV] as shown in Listing {counter:listing}.
+
+.listing {listing}
+[source,shell]
+----
+duckdb
+INSTALL httpfs;
+LOAD httpfs;
+
+SELECT count(*) from 'https://github.com/bnokoro/Data-Science/raw/master/countries%20of%20the%20world.csv';
+┌──────────────┐
+│ count_star() │
+│ int64 │
+├──────────────┤
+│ 227 │
+└──────────────┘
+
+-- with read_csv_auto() shortlinks also work
+SELECT * from read_csv_auto("https://bit.ly/3KoiZR0") LIMIT 2;
+┌──────────────┬──────────────────────┬────────────┬───┬─────────────┬──────────┬─────────┐
+│ Country │ Region │ Population │ ... │ Agriculture │ Industry │ Service │
+│ varchar │ varchar │ int64 │ │ varchar │ varchar │ varchar │ varchar │
+├──────────────┼──────────────────────┼────────────┼───┼─────────────┼──────────┼─────────┤
+│ Afghanistan │ ASIA (EX. NEAR EAS... │ 31056997 │ ... │ 0.38 │ 0.24 │ 0.38 │
+│ Albania │ EASTERN EUROPE ... │ 3581655 │ ... │ 0.232 │ 0.188 │ 0.579 │
+├──────────────┴──────────────────────┴────────────┴───┴─────────────┴──────────┴─────────┤
+│ 2 rows 20 columns (6 shown) │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+SELECT count(*) as countries, max(population) as max_population, 
+round(avg(cast("Area (sq. mi.)" AS decimal)) as avgArea 
+from read_csv_auto("https://bit.ly/3KoiZR0");
+
++-----------+----------------+----------+
+| countries | max_population | avgArea |
++-----------+----------------+----------+
+| 227 | 1313973713 | 598227.0 |
++-----------+----------------+----------+
+
+// of course we can also create temporary tables and use them
+CREATE TABLE largest as SELECT * FROM read_csv_auto("https://bit.ly/3KoiZR0") 
+ORDER BY 'Area (sq. mi.)' DESC LIMIT 20;
+
+// then the answer is instantaneous
+SELECT count(*) as countries, max(Population) AS max_population, 
+round(avg(CAST("Area (sq. mi.)" AS decimal)) AS avgArea 
+FROM largest;
+----
+
+The integration for reading and writing various data formats is really remarkable.
+Besides CSV and JSON files, SQLite and Postgres databases can be processed.
+Especially the support of Parquet and Arrow is advanced, there filters and selection predicates of SQL can be executed already in the access layer, and thus the amount of data to be loaded can be reduced considerably.
+
+Another practical use is the combination of data cleansing and format conversion.
+For example, data from JSON or CSV can be read and cleaned and then saved as a parquet.
+
+////
+
+The extension to JSON support is very handy, so files or API responses from a JSON object can be converted directly to table rows, as seen in Listing {counter:listing}.
+
+.listing {listing}
+[source,sql]
+----
+select * from read_json('https://api.stackexchange.com/2.2/questions?pagesize=10&order=desc&sort=creation&tagged=duckdb&site=stackoverflow&filter=!5-i6Zw8Y)4W7vpy91PMYsKM-k9yzEsSC1_Uxlf',auto_detect=true, compression=gzip);
+
+Error: Invalid Error: IO Error: HTTP GET error: Content-Length from server mismatches requested range, server may not support range requests.
+----
+////
+
+=== Metadata analysis
+
+DuckDB also helps us to examine (`describe`), and modify metadata of tables, see listing {counter:listing}.
+
+With `read_csv_auto` or `read_csv(AUTO_DETECT=true)` DuckDB tries to find out the data types of the columns by sampling, but falls back to string types `VARCHAR` when in doubt.
+
+Except for the columns `Country` and `Region` all other columns should be integers or decimals.
+
+Using `types={'column': 'type'}` you can specify the standard SQL types to be used for specific columns.
+
+You can also import into an existing table, then its schema will be used: `COPY countries FROM 'countries of the world.csv' (AUTO_DETECT TRUE);`
+
+// ALL_VARCHAR=TRUE
+// SAMPLE_SIZE=-1
+// IGNORE_ERRORS=TRUE // skip rows with dirty data
+// columns={'Pop. Density (per sq. mi.)': 'decimal', ...}
+
+.listing {listing} metadata
+{source,sql}
+----
+.mode duckbox
+describe (select * from read_csv_auto("https://bit.ly/3KoiZR0"));
+┌────────────────────────────────────┬─────────────┬─────────┬─────────┬─────────┬─────────┐
+│ column_name │ column_type │ null │ key │ default │ extra │
+│ varchar │ varchar │ varchar │ varchar │ varchar │ varchar │ varchar │
+├────────────────────────────────────┼─────────────┼─────────┼─────────┼─────────┼─────────┤
+│ Country │ VARCHAR │ YES │ │ │ │
+│ Region │ VARCHAR │ YES │ │ │ │
+│ Population │ BIGINT │ YES │ │ │ │
+│ Area (sq. mi.) │ BIGINT │ YES │ │ │ │
+│ Pop. Density (per sq. mi.) │ VARCHAR │ YES │ │ │ │
+│ Coastline (coast/area ratio) │ VARCHAR │ YES │ │ │ │
+...
+│ Climate │ VARCHAR │ YES │ │ │ │
+│ Agriculture │ VARCHAR │ YES │ │ │ │
+│ Industry │ VARCHAR │ YES │ │ │ │
+│ Service │ VARCHAR │ YES │ │ │ │
+├────────────────────────────────────┴─────────────┴─────────┴─────────┴─────────┴─────────┤
+│ 20 rows 6 columns │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+
+.mode line
+D select * from read_csv_auto("https://bit.ly/3KoiZR0") limit 1;
+                           Country = Afghanistan 
+                            Region = ASIA (EX. NEAR EAST)         
+                        Population = 31056997
+                    Area (sq. mi.) = 647500
+        Pop. Density (per sq. mi.) = 48.0
+      Coastline (coast/area ratio) = 0.00
+                     Net migration = 23,06
+Infant mortality (per 1000 births) = 163.07
+                GDP ($ per capita) = 700
+                      Literacy (%) = 36,0
+                 Phones (per 1000) = 3.2
+                        Arable (%) = 12.13
+                         Crops (%) = 0.22
+                         Other (%) = 87.65
+                           Climate = 1
+                         Birthrate = 46.6
+                         Deathrate = 20,34
+                       Agriculture = 0,38
+                          Industry = 0,24
+                           Service = 0,38
+
+
+describe (select country, region, population, "Net migration", climate from 
+    read_csv("https://bit.ly/3KoiZR0", auto_detect=true, header=true,
+    types={'Climate':'float','Net migration':'float'}));
+┌───────────────┬─────────────┬─────────┬─────────┬─────────┬─────────┐
+│ column_name │ column_type │ null │ key │ default │ extra │
+│ varchar │ varchar │ varchar │ varchar │ varchar │ varchar │ varchar │
+├───────────────┼─────────────┼─────────┼─────────┼─────────┼─────────┤
+│ Country │ VARCHAR │ YES │ │ │ │
+│ Region │ VARCHAR │ YES │ │ │ │
+│ Population │ BIGINT │ YES │ │ │ │
+│ Net migration │ FLOAT │ YES │ │ │ │
+│ Climate │ FLOAT │ YES │ │ │ │
+└───────────────┴─────────────┴─────────┴─────────┴─────────┴─────────┘
+
+--- ALTER TABLE for data type with expression for conversion.
+ALTER TABLE countries ALTER Climate SET DATA TYPE FLOAT USING CAST(Climate AS FLOAT);
+----
+
+DuckDB knows some additional types like:
+
+* Enums for counted values
+* lists/arrays
+* Map for key-value pairs
+* Structs for recurring structures
+* Date, Timestamp, Interval
+* Bitstring
+* Blob
+* NULL
+* Union (of data types)
+
+There are of course "meta" functions that can be used to inspect the database itself, here are some of them listed, using `select function_name from duckdb_functions() where function_name like 'duckdb_%';`.
+For the SQL standard, some of them are also available as tables in the `information_schema` schema.
+
+* duckdb_keywords()
+* duckdb_types()
+* duckdb_functions()
+* duckdb_databases()
+* duckdb_schemas() - `information_schema.schemata`
+* duckdb_tables() - `information_schema.tables`
+* duckdb_views()
+* duckdb_sequences()
+* duckdb_constraints()
+* duckdb_indexes()
+* duckdb_columns() - `information_schema.columns`
+* duckdb_settings()
+* duckdb_extensions()
+* current_schema()
+* current_schemas()
+
+=== Test with larger datasets - stackoverflow dump
+
+To test DuckDB with larger amounts of data, I downloaded the current dump from Stackoverflow [StackOverflow dump] and converted it to CSV using my [xml converter tool] since I couldn't find an XML extension for DuckDB.
+
+// TODO Parquet
+It's only 65000 tags and 20 million users (2.2 GB CSV), but 58 million posts (5.3 GB CSV), so it's worth it.
+// 58 329 358 posts 5.278.202.143 b
+Listing {counter:listing} shows how we can read the data, convert it to tables and then analyze it.
+
+////
+create table users as (
+select * from read_csv_auto("so/Users.csv.gz",auto_detect=true, 
+column_names=['id','name','reputation','createdAt','accessedAt',
+'url','location','views','upvotes','downvotes','age','accountId'])
+);
+
+select name, reputation, today()-createdAt as age, createdAt, accountId, upvotes, downvotes
+from users where reputation > 1000000 order by age asc;
+┌─────────────────┬────────────┬─────────────────────────┬───────────┬─────────┬───────────┐
+│ name │ reputation │ createdAt │ accountId │ upvotes │ downvotes │
+│ varchar │ int64 │ timestamp │ int64 │ int64 │ int64 │
+├─────────────────┼────────────┼─────────────────────────┼───────────┼─────────┼───────────┤
+│ FromC │ 1194435 │ 2008-09-13 22:22:33.173 │ 4243 │ 68498 │ 405 │
+│ Jon Skeet │ 1389256 │ 2008-09-26 12:05:05.15 │ 11683 │ 17135 │ 8011 │
+│ Marc Gravell │ 1009857 │ 2008-09-29 05:46:02.697 │ 11975 │ 27390 │ 1129 │
+│ Darin Dimitrov │ 1014014 │ 2008-10-19 16:07:47.823 │ 14332 │ 1949 │ 2651 │
+│ Martijn Pieters │ 1016741 │ 2009-05-03 14:53:57.543 │ 35417 │ 5851 │ 22930 │
+│ T.J. Crowder │ 1010006 │ 2009-08-16 11:00:22.497 │ 52616 │ 14819 │ 34259 │
+│ BalusC │ 1069162 │ 2009-08-17 16:42:02.403 │ 52822 │ 15829 │ 23484 │
+│ Gordon Linoff │ 1228338 │ 2012-01-11 19:53:57.59 │ 1165580 │ 20567 │ 42 │
+└─────────────────┴────────────┴─────────────────────────┴───────────┴─────────┴───────────┘
+
+select name, reputation, reputation/day(today()-createdAt) as rate, today()-createdAt as age, 
+       createdAt, accountId, upvotes, downvotes
+from users where reputation > 1000000 order by rate desc;
+
+todo per year, pivot, window
+////
+
+.listing {listing} stackoverflow analysis
+[source,sql]
+----
+duckdb stackoverflow.db
+
+select name, count 
+from read_csv('so/Tags.csv.gz',column_names=['name','count','id'],auto_detect=true)
+order by count desc limit 5;
+
+┌────────────┬─────────┐
+│ name │ count │
+│ varchar │ int64 │
+├────────────┼─────────┤
+│ javascript │ 2479947 │
+│ python │ 2113196 │
+│ java │ 1889767 │
+│ c# │ 1583879 │
+│ php │ 1456271 │
+└────────────┴─────────┘
+
+
+create table tags as select name, count 
+from read_csv('so/Tags.csv.gz',column_names=['name','count','id'],auto_detect=true);
+
+create table users as (
+select * from read_csv_auto('so/Users.csv.gz',auto_detect=true, 
+column_names=['id','name','reputation','createdAt','accessedAt',
+'url','location','views','upvotes','downvotes','age','accountId'])
+);
+
+select count(*) from users; // 19942787
+
+.timer on
+
+SELECT name, reputation, round(reputation/day(today()-createdAt)) as rate, day(today()-createdAt) as days, 
+       createdAt, accountId, upvotes, downvotes
+FROM users WHERE reputation > 1000000 ORDER BY rate DESC;
+
+┌─────────────────┬────────────┬────────┬───────┬───┬───────────┬─────────┬───────────┐
+│ name │ reputation │ rate │ days │ ... │ accountId │ upvotes │ downvotes │
+│ varchar │ int64 │ double │ int64 │ int64 │ int64 │ int64 │ int64 │
+├─────────────────┼────────────┼────────┼───────┼───┼───────────┼─────────┼───────────┤
+│ Gordon Linoff │ 1228338 │ 296.0 │ 4154 │ ... │ 1165580 │ 20567 │ 42 │
+│ Jon Skeet │ 1389256 │ 259.0 │ 5356 │ ... │ 11683 │ 17135 │ 8011 │
+│ VonC │ 1194435 │ 222.0 │ 5369 │ ... │ 4243 │ 68498 │ 405 │
+│ BalusC │ 1069162 │ 213.0 │ 5031 │ ... │ 52822 │ 15829 │ 23484 │
+│ T.J. Crowder │ 1010006 │ 201.0 │ 5032 │ ... │ 52616 │ 14819 │ 34259 │
+│ Martijn Pieters │ 1016741 │ 198.0 │ 5137 │ ... │ 35417 │ 5851 │ 22930 │
+│ Darin Dimitrov │ 1014014 │ 190.0 │ 5333 │ ... │ 14332 │ 1949 │ 2651 │
+│ Marc Gravell │ 1009857 │ 189.0 │ 5353 │ ... │ 11975 │ 27390 │ 1129 │
+├─────────────────┴────────────┴────────┴───────┴───┴───────────┴─────────┴───────────┤
+│ 8 rows 8 columns (7 shown) │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+Run Time (s): real 0.006 user 0.007980 sys 0.001260
+
+WITH top_users as select ...
+SELECT name, reputation, rate, bar(rate,150,300) AS bar FROM top_users;
+┌─────────────────┬────────────┬────────┬──────────────────────────────────────────────────────────────┐
+│ name │ reputation │ rate │ bar │
+│ varchar │ int64 │ double │ varchar │
+├─────────────────┼────────────┼────────┼──────────────────────────────────────────────────────────────┤
+│ Gordon Linoff │ 1228338 │ 296.0 │ ██████████████████████████████████████████████████████████... │
+│ Jon Skeet │ 1389256 │ 259.0 │ ██████████████████████████████████████████████████████████▏ │
+│ FromC │ 1194435 │ 222.0 │ ██████████████████████████████████████▍ │
+│ BalusC │ 1069162 │ 213.0 │ █████████████████████████████████▌ │
+│ T.J. Crowder │ 1010006 │ 201.0 │ ███████████████████████████▏ │
+│ Martijn Pieters │ 1016741 │ 198.0 │ █████████████████████████▌ │
+│ Darin Dimitrov │ 1014014 │ 190.0 │ █████████████████████▎ │
+│ Marc Gravell │ 1009857 │ 189.0 │ ████████████████████▊ │
+└─────────────────┴────────────┴────────┴──────────────────────────────────────────────────────────────┘
+Run Time (s): real 0.001 user 0.000374 sys 0.000069
+
+create table posts as (
+select * from read_csv_auto("so/Posts.csv.gz",auto_detect=true, 
+column_names=['id','title','postType','createdAt','score',
+'views','answers','comments','favorites','updatedAt'])
+);
+Run Time (s): real 38.985 user 327.515702 sys 24.987078
+
+select count(*) from posts;
+┌──────────────┐
+│ count_star() │
+│ int64 │
+├──────────────┤
+│ 58329356 │
+└──────────────┘
+Run Time (s): real 0.010 user 0.000000 sys 0.162503
+
+
+select year(createdAt) as year, avg(views), max(answers), max(comments) 
+from posts 
+group by year order by year desc limit 10;
+┌───────┬────────────────────┬──────────────┬─────────────────┐
+│ year │ avg("views") │ max(answers) │ max("comments") │
+│ int64 │ double │ int64 │ int64 │
+├───────┼────────────────────┼──────────────┼─────────────────┤
+│ 2023 │ 44.38945117445532 │ 15 │ 69 │
+│ 2022 │ 265.4586339123072 │ 44 │ 73 │
+│ 2021 │ 580.1325887811724 │ 65 │ 80 │
+│ 2020 │ 846.6885113285923 │ 59 │ 74 │
+│ 2019 │ 1189.7090769531437 │ 60 │ 62 │
+│ 2018 │ 1647.557730647355 │ 121 │ 65 │
+│ 2017 │ 1993.5133771973378 │ 65 │ 110 │
+│ 2016 │ 2201.9238769664453 │ 74 │ 135 │
+│ 2015 │ 2349.146274062714 │ 82 │ 115 │
+│ 2014 │ 2841.1271646657733 │ 92 │ 107 │
+├───────┴────────────────────┴──────────────┴─────────────────┤
+│ 10 rows 4 columns │
+└─────────────────────────────────────────────────────────────┘
+Run Time (s): real 0.038 user 4.131562 sys 0.014536
+----
+
+As we can see, even medium sized datasets do not upset DuckDB, for tests with billions of records, the [New-York-Taxi] dataset is often used, which is in Parquet format.
+
+// TODO pivot, ...
+
+Since CSV is getting a bit old, the data can also export to Parquet, a modern format for analytical data processing (listing {counter:listing}).
+For the 20M users, it takes 5 seconds to write the 10 files at 1G.
+Reading the files is now much faster than from CSV.
+
+.listing {listings} - write parquet files
+[source,sql]
+----
+.timer on
+COPY (SELECT * FROM users ORDER BY accessedAt DESC) TO 'users.parquet' 
+     (FORMAT PARQUET, PER_THREAD_OUTPUT TRUE);
+100% ▕""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""▏ 
+Run Time (s): real 5.244 users 19.425849 sys 9.041617
+
+ls users.parquet 
+data_0.parquet data_2.parquet data_4.parquet data_6.parquet data_8.parquet
+data_1.parquet data_3.parquet data_5.parquet data_7.parquet data_9.parquet
+mh@Ombatis downloads % du -sh users.parquet
+954M users.parquet
+
+select count(*) from read_parquet('users.parquet/*');
+┌──────────────┐
+│ count_star() │
+│ int64 │
+├──────────────┤
+│ 19942787 │
+└──────────────┘
+Run Time (s): real 0.014 user 0.018494 sys 0.006188
+
+select count(*) from read_csv_auto('so/Users.csv.gz');
+100% ▕""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""▏
+┌──────────────┐
+│ count_star() │
+│ int64 │
+├──────────────┤
+│ 19942787 │
+└──────────────┘
+Run Time (s): real 7.040 user 16.688485 sys 0.173113
+----
+
+=== DuckDB and Python
+
+A very practical aspect of DuckDB is its use within Python data analysis processes and notebooks.
+
+Data that exists in Panda's dataframes can be used directly by DuckDB without transformation or copying.
+Results from DuckDB are also provided as dataframes, and can then be further processed using common libraries (Listing {counter:listing}).
+
+Listing {listing} - Use with Python
+[source,python]
+----
+import duckdb
+import pandas as pd
+
+con = duckdb.connect(database='stackoverflow.db', read_only=True)
+tags_df = con.execute("""select * from tags"").df()
+
+tags_df.head()
+         name count
+0 .net 329455
+1 html 1167742
+2 javascript 2479947
+3 css 787138
+4 php 1456271
+
+con.query("select count(*) from tags_df")
+┌──────────────┐
+│ count_star() │
+│ int64 │
+├──────────────┤
+│ 64465 │
+└──────────────┘
+----
+
+For visualization of results, existing libraries such as matplotlib can be used thanks to the transparent Pandas integration.
+
+For interactive analysis applications, it also integrates well with Streamlit, as seen on [LDWM-Streamlit].
+
+DuckDB also provides a fluent "relational API" [PythonDSL] that can be used instead of SQL and supports reuse of "relations", as well as set operations, filters, projections, aggregations, etc., see listing {counter:listing}.
+As a source for initial "relations", data can be read directly from Parquet, Arrow and CSV files, in addition to SQL statements.
+
+Personally, the DSL is not developed far enough, since SQL question segments still have to be passed as parameters.
+
+
+Listing {listing} - relational API in Python
+[source,python]
+----
+import duckdb
+import pandas as pd
+
+con = duckdb.connect(database='stackoverflow.db', read_only=True)
+
+rel = con.sql('SELECT * FROM users')
+rel = rel.filter('reputation > 1000')
+rel = rel.aggregate('year(createdAt) as year, count(*) as activeUsersPerYear')
+rel = rel.order('year DESC').limit(10)
+rel.show()
+
+┌───────┬────────────────────┐
+│ year │ activeUsersPerYear │
+│ int64 │ int64 │
+├───────┼────────────────────┤
+│ 2023 │ 2 │
+│ 2022 │ 251 │
+│ 2021 │ 757 │
+│ 2020 │ 1752 │
+│ 2019 │ 2749 │
+│ 2018 │ 4601 │
+│ 2017 │ 7606 │
+│ 2016 │ 11963 │
+│ 2015 │ 16508 │
+│ 2014 │ 21886 │
+├───────┴────────────────────┤
+│ 10 rows 2 columns │
+└────────────────────────────┘
+----
+
+Scalar Python functions can be registered and used in the database since version 0.8 using `duckdb.create_function('name', function, parameter-types, return-type)`.
+
+////
+[source,python]
+----
+----
+////
+
+=== Usage with Java
+
+Similar to Python, using DuckDB in Java is delightfully straightforward.
+
+The JDBC driver is available on Maven and also runs the database back within our process.
+
+Listing {counter:listing} shows a small JBang example that opens the connection to the database, executes the passed SQL query, and displays the results as an ascii table.
+
+.listing {counter:listing} - Using Java with JDBC and JBang
+[source,java]
+----
+///usr/bin/env jbang "$0" "$@" ; exit $?
+//DEPS org.duckdb:duckdb_jdbc:0.8.0
+//DEPS com.github.freva:ascii-table:1.2.0
+//DEPS org.apache.commons:commons-lang3:3.0
+
+import static java.lang.System.*;
+import java.sql.*;
+import java.util.*;
+import com.github.freva.asciitable.*;
+
+public class DuckDB {
+
+    public static void main(String... args) throws Exception {
+        try (Connection con=DriverManager.getConnection(getenv("JDBC_URL"));
+             Statement stmt=con.createStatement();
+             ResultSet rs=stmt.executeQuery(String.join(" ",args))) {
+                ResultSetMetaData meta=rs.getMetaData();
+                String[] cols=new String[meta.getColumnCount()];
+                for (int c=1;c<=cols.length;c++) 
+                    cols[c-1]=meta.getColumnName(c);
+                int row=0;
+                String[][] rows=new String[100][];
+                while (rs.next() || row>=rows.length) {
+                    rows[row]=new String[cols.length];
+                    for (int c=1;c<=cols.length;c++) 
+                        rows[row][c-1]=rs.getString(c);
+                    row++;
+                }
+                out.println(AsciiTable.getTable(cols, Arrays.copyOf(rows,row)));
+             }
+    }
+}
+
+export JDBC_URL="jdbc:duckdb:stackoverflow.db"
+jbang DuckDB.java "SELECT name, reputation FROM users ORDER BY reputation DESC LIMIT 5"
+
++-----------------+------------+
+| name | reputation |
++-----------------+------------+
+| Jon Skeet | 1389256 |
++-----------------+------------+
+| Gordon Linoff | 1228338 |
++-----------------+------------+
+| VonC | 1194435 |
++-----------------+------------+
+| BalusC | 1069162 |
++-----------------+------------+
+| Martijn Pieters | 1016741 |
++-----------------+------------+
+----
+
+=== Implementation details and architecture
+
+As worthy of a database developed at a database chair, DuckDB uses all relevant mechanisms of modern OLAP databases.
+Because of the mostly embedded execution, no complex libraries or infrastructures can be used, since these are mostly not portable, or require operating system signals, or terminate the process in case of emergency.
+Therefore, efficient resource management and data access without memory copies, if possible, are also important.
+
+For end applications, integration for Python and R is provided by the core system in addition to the C/C++ API, other libraries use the C/C++ API.
+As parser a modified Postgres parser is used, which can be adapted very flexibly to the needs.
+
+
+Query planning is done in a mostly cost-based optimizer that exploits approaches such as join-order optimization and dynamic programming.
+// , with optimization of JOIN sequences and dynamic programming ().
+For indexes and constraints (PK, FK), as well as geo and range queries and joins, DuckDB uses Adaptive Radix Tree (ART) indexes (tries with horizontal and vertical compression).
+// https://duckdb.org/2022/07/27/art-storage.html
+// trees that also contain the data (e.g. 1 char or 1 byte per level)
+// vertical compression for nodes with only one child -> radix tree -> store prefix and then only next child which has bifurcation
+// horizontal compression -> ART -> on each position of the 256 values of a byte there is one pointer pointing down (or null) -> 
+
+The execution of the physical plan is done by a vectorized columnar parallel implementation which works on subsets (batches) of data (Morsel approach) and thus achieves a good balance between processing per line or the complete data at once.
+// vectorized push based model, vectors flow through the operators
+
+All data within DuckDB is stored in typed, optimized vector implementations for different contents (numeric fields, constants, strings, dictionary lookups, lists, structs, etc.) which simplify selection and processing by compression, metadata (min, max) and additional indexes.
+These vectors implement all relational operations in C++ classes with templates for the different data types.
+In the flow, the vectors are passed from one to another by the plan operators (push-based).
+
+DuckDB is also transactional, so that updates to the underlying data can also occur during analytical queries.
+It uses an OLAP-optimized variant MVCC (Multi Version Concurrency Control) with serialized transactions, as does TU Munich's HyPer system.
+Here, updates are executed directly and previous values are held in an undo buffer in case the transaction needs to be rolled back.
+
+All in all, according to the developers, a textbook architecture, but then the database textbook is pretty modern.
+
+// SIGMOD 2019 paper https://hannes.muehleisen.org/publications/SIGMOD2019-demo-duckdb.pdf
+// Dissecting DuckDB: The internals of the "SQLite for Analytics" https://pdet.github.io/assets/papers/duck_sbbd.pdf 
+// DuckDB an Embeddable Analytical RDBMS https://db.in.tum.de/teaching/ss19/moderndbs/duckdb-tum.pdf
+
+// DuckDB is written in C++ 11 and maximizes ... TODO
+
+////
+
+* Co designed with Velox 
+* Similar to Arrow but designed for execution, not storage/streaming
+* ART index, used also for maintaining key constraints 
+* Combination of both cost/rule based optimizer
+* vectorization / SIMD
+* morsel driven parallelism
+* batching
+* zero memory copy / data sharing
+* transactional (concurrent updates during analytics queries)
+* efficient resource management
+* no crashes allowed, since in-process
+* no dependencies (they often use signal handlers, or exit the process)
+
+textbook implementation
+-> parser, logical planner, optimizer, physical planner, execution engine.
+-> orthogonal: transaction and storage manager
+
+API C/C++/SQLite [2]
+SQL parser libpg_query
+Optimizer Cost-Based
+Execution Engine Vectorized
+Concurrency Control Serializable MVCC
+Storage DataBlocks
+* larger than memory execution (out-of-core)
+    * special sort,join,window operators
+    * streaming engine
+    * graceful performance degradation
+    * don't fully switch over to disk based execution
+    * only write minimally to disk
+    * batched vectors better suited
+* single file block based storage
+    * WAL separate file
+    * ACID with headers -> versions
+    * fixed sized blocks (64k)
+    * tables partitioned into row groups, 120k rows, 
+    * row groups are the parallelism and checkpoint unit
+    * rewrite single grow group
+    * distribute row groups over threads
+    * column storage
+    * compression, speeds up IO
+    * generalized lz4, zstd
+    * specified RLE, bitpacking, dict, frame of reference, chimps, FOR, FSST, 
+    * based on patterns in data
+    * different algorithms pick based on data in column per row group
+    * no compaction yet, but block reusage
+* UDFs in Python, tbd JS + WASM + extensions
+* extensions as shared libraries
+* geo extension
+* pluggable filesystem (httpfs etc.)
+* pluggable catalog - custom like sqlite extension
+* 
+* lock free buffer mgr, inspired by lean-store, sort of LRU
+* pin blocks, fix them in memory
+* lean-store - as few centralized datastructures as possible
+* vectorized push based model, vectors flow through the operators
+* Morsel push based model, parallelism aware operators
+* model control flow outside of operators in central location
+* state explicit
+* vectors cache between operators
+* query cancellation - vectors out of / into operator -> point of cancellation
+
+
+* allows to pause execution
+* buffers full - pause pipeline
+* source, intermediate, sink operator, model parallelism in source/sink
+* global / local state
+* columnar-vectorized engine
+* vector based chunk processing, not row based or bulk
+* state of the art methods and algorithms
+* API - C/C++/SQLite
+* SQLite compatibility layer through re-linking or library overloading
+* R and Python APIs
+* stripped down, flexible postgres parser -> parse tree of C structures -> c++ classes
+* logical planner -> binder (schema object binding) + plan generator (parse-tree -> logical operators)
+* database statistics propagated through the different expression trees as part of the planning process. 
+* These statistics are used in the optimizer itself, and are also used for integer overflow prevention by upgrading types when required.
+* DuckDB's optimizer performs join order optimization us- ing dynamic programming [7] with a greedy fallback for complex join graphs [11]. It performs flattening of arbitrary subqueries as described in Neumann et al [9]. 
+* In addition, there are a set of rewrite rules that simplify the expression tree, by performing e.g. common subexpression elimination.
+* -> optimized logical plan
+* -> physical plan ()
+* vectorized vectorized interpreted execution engine -> not JIT because fewer dependencies/portability (no LLVM)
+* numerics -> native array
+* strings -> extra heap
+* null bit-vector faster for intersection
+* selection vector, which is a list of offsets into the vector stating which indices of the vector are relevant
+* built in templated vector library for all the relational operators
+* started out as pull based system (Vector Volcano model)
+    * pull chunks from root node -> subsequent pulls until leaf nodes with tables scan etc. reached
+    * nice and easy but doesn't work well for multithreaded
+    * control inside of operators
+    * but larges stack size
+* MVCC serializable from HyPer -> for hybrid OLTP/OLAP systems
+* snapshot isolation
+* abort tx when multiple changes to same row
+* 
+* this variant updates data in-place immediately, and keeps previous states stored in a separate undo buffer for concurrent transactions and aborts.
+* concurrent modification is frequently requested
+* persistence ead-optimized DataBlocks storage layout 
+* logical tables -> light-weight compressed chunks of columns min/max metadata for each block 
++ additional lightweight index for each column
+* large datasets on restricted hardware
+* benefits of embedded operations
+* MonetDBLite begins to suf- fer from excessive intermediate result materialization due to its bulk processing model. 
+* HyPer is extremely fast in processing queries, it will not be able to transfer result sets as quickly as DuckDB using its socket client protocol.
+* DuckDB already supports inter-query parallelism but intra-query parallelism will be added as well.
+* Vector is the container format used to store in-memory data during execution.
+* DataChunk is a collection of vectors, used for instance to represent a column list in a PhysicalProjection operator.
+* different types of vectors based on contained data
+* optimized operations between vector types for operations (e.g. constant times flat vector)
+* 
+* https://duckdb.org/internals/vector
+* All operators in DuckDB are optimized to work on Vectors of a fixed size (default 2048 tuples)
+* different physical representations per type incl. compression + compressed execution
+* flat vectors (arrays), constant vectors (one value), 
+* dictionary lookups - dict-vectors (child-dict + selection vector - index into dict)
+* sequence - base + increment
+* 16 bytes -> short strings < 12 bytes inlined (like Umbra), otherwise length + pointer (8) + short(4) prefix for fast initial comparison
+* list vectors with child vector + offset/indexes
+* struct + map (LIST[STRUCT(key KEY_TYPE, value VALUE_TYPE)]) + union vectors (UNION utilizes the same structure as a STRUCT)
+* nested types recursively as vectors 
+* structs -> each entry as it's own vector (column)
+* lists: offset + length vector into a child vector of the whole list (allow sublists etc)
+* no structs containing structs (yet)
+* comb. explosion on vector combinations in operators -> flatten/decompresss into flatvector => data copy / move + expansion
+* instead unified format/view -> indexed lookup array -> into the original vector 
+    * reusable fixed size array for constant vector
+    * for dict-lookup already lookup vector into dictionary
+    * no system penalty
+* vectors sources
+* always specialize on constant vector
+* not-vectorized storage (but compatible) - bit-packing
+* compressed storage
+* at storage layer -> determine which vector type (based on actually stored data)
+* no recompression
+
+
+
+=== Extensions
+
+Extensions:
+* Spatial PostGeese
+* FTS
+
+////
+
+
+=== Advanced Functions - PV Analysis
+
+SQL experts are not disappointed either, besides full support of Window functions `(OVER ... PARTITION BY)`, `PIVOT`, Common Table Expressions are also commonplace in DuckDB.
+
+My colleague Michael Simons, who has been a frequent author of this column, used DuckDB to analyze the generation and consumption data of his brand new photovoltaic system [SimonsPV].
+
+Extracting the data from the vendor software was the biggest effort, two interesting example queries can be seen in Listing {counter:listing} and {counter:listing}.
+
+Listing 11 - PV Analysis
+[source,sql]
+----
+WITH production_per_month_and_hour AS (
+        SELECT any_value(strftime(measured_on, '%B'))    AS month,
+               any_value(date_part('hour', measured_on)) AS Hour,
+               avg(production) / 1000 AS Energy
+          FROM measurements
+         GROUP BY date_trunc('hour', measured_on)
+         ORDER BY Hour
+    )
+SELECT *
+FROM production_per_month_and_hour
+PIVOT (
+    round(avg(Energy), 2)
+    FOR Month IN ('January', 'February', 'March', 'April', 'May', 'June')
+    GROUP BY Hour
+);
+----
+
+.listing {listing} Output PV Analysis
+----
+┌───────┬─────────┬──────────┬────────┬────────┬────────┬────────┐
+│ Hour │ January │ February │ March │ April │ May │ June │
+│ int64 │ double │ double │ double │ double │ double │ double │ double │
+├───────┼─────────┼──────────┼────────┼────────┼────────┼────────┤
+│ 0 │ │ │ │ 0.0 │ 0.0 │ │
+│ 1 │ │ │ │ 0.0 │ 0.0 │ │
+│ 2 │ │ │ │ 0.0 │ 0.0 │ │
+│ 3 │ │ │ │ 0.0 │ 0.0 │ │
+│ 4 │ │ │ │ 0.0 │ 0.0 │ │
+│ 5 │ │ │ │ 0.0 │ 0.0 │ │
+│ 6 │ │ │ │ 0.05 │ 0.36 │ │
+│ 7 │ │ │ │ 0.57 │ 1.23 │ │
+│ 8 │ │ │ │ 1.37 │ 2.16 │ │
+│ 9 │ │ │ │ 2.18 │ 2.99 │ │
+│ 10 │ │ │ │ 2.31 │ 3.69 │ │
+│ 11 │ │ │ │ 2.28 │ 3.92 │ │
+│ 12 │ │ │ │ 3.14 │ 4.3 │ │
+│ 13 │ │ │ │ 3.13 │ 4.36 │ │
+│ 14 │ │ │ │ 2.89 │ 4.26 │ │
+│ 15 │ │ │ │ 2.82 │ 3.85 │ │
+│ 16 │ │ │ │ 1.87 │ 3.13 │ │
+│ 17 │ │ │ │ 1.41 │ 2.51 │ │
+│ 18 │ │ │ │ 1.05 │ 1.86 │ │
+│ 19 │ │ │ │ 0.55 │ 1.22 │ │
+│ 20 │ │ │ │ 0.08 │ 0.43 │ │
+│ 21 │ │ │ │ 0.0 │ 0.01 │ │
+│ 22 │ │ │ │ 0.0 │ 0.0 │ │
+│ 23 │ │ │ │ 0.0 │ 0.0 │ │
+├───────┴─────────┴──────────┴────────┴────────┴────────┴────────┤
+│ 24 rows 7 columns │
+└────────────────────────────────────────────────────────────────┘
+----
+
+////
+.image 2 - output PV analysis
+image::pv_pivot.png[]
+
+.listing {listing} - daily statistics
+[source,sql]
+----
+WITH per_day AS (
+    SELECT sum (power) / 4 / 1000 AS V
+    FROM production
+    GROUP BY date_trunc('day', measured_on)
+)
+
+SELECT 
+    round (min(v), 2) AS 'Worst day',
+    round (max (v), 2) AS 'Best day',
+    round (avg (v), 2) AS 'Daily Average', and
+    round (median (v), 2) AS 'Median',
+    round (sum (v), 2) AS 'Total production'
+FROM per_day;
+----
+
+.image 3 - Output daily statistics
+image::pv_per_day.png[]
+////
+
+=== Use cases
+
+There are many use cases for a tool like DuckDB, of course the most exciting is when it can be integrated with existing cloud, mobile, desktop and command line applications and do its job behind the scenes.
+
+Especially for analyzing data that shouldn't leave the user's own device, such as health, training, financial or home automation data, an efficient local infrastructure comes in handy.
+
+But DuckDB is also useful for fast analysis of larger data sets, such as log files, where computation and reduction can be done where the data is stored, saving high data transfer (costs).
+
+For Data Scientists, data preparation, analysis, filtering and aggregation can be done more efficiently than with Pandas, without leaving the comfortable environment of a notebook with Python or R APIs.
+
+Also exciting will be the distributed analysis of data, depending on the amount, location, and use case, balanced by [Motherduck], for example, between cloud storage, edge network, and local device.
+
+
+=== Conclusion
+
+DuckDB is a refreshingly practical approach to efficient data analysis.
+
+In addition to the large feature set, seamless integration, good documentation, helpful community, and quick start, the continuous development by world-class database researchers is also a guarantee for a successful future.
+
+Quack!
+
+== Resources
+
+* [DuckDB Docs] https://duckdb.org/docs/
+* [DuckDB JSON] https://duckdb.org/docs/extensions/json.html
+* [DuckDB Discord] https://discord.duckdb.org/
+* [Web Shell] https://shell.duckdb.org/
+* [Download] https://github.com/duckdb/duckdb/releases
+* [LDWM] Learn Data With Mark https://youtube.com/@learndatawithmark
+* [LDWM-Streamlit] https://www.youtube.com/watch?v=65MoH1rlK7E&list=PLw2SS5iImhEThtiGNPiNenOr2tVvLj6H7&index=15
+* [SimonsPV] https://github.com/michael-simons/pv
+* [StackOverflow Dump] https://archive.org/download/stackexchange
+* [Xml converter tool] https://github.com/neo4j-examples/neo4j-stackoverflow-import
+* [SQLitePodcast] https://corecursive.com/066-sqlite-with-richard-hipp/
+* [McSherry] http://www.frankmcsherry.org/graph/scalability/cost/2015/01/15/COST.html
+* [BigData] https://motherduck.com/blog/big-data-is-dead/
+* [Motherduck] https://motherduck.com
+* [PythonDSL] https://duckdb.org/docs/api/python/relational_api
+// * [DuckDBFTS] https://duckdb.org/2021/01/25/full-text-search.html
+// * [PostGeese]
+* [New-York-Taxi] https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
+* [InternalsVideo] https://www.youtube.com/watch?v=bZOvAKGkzpQ

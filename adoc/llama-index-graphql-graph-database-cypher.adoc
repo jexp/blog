@@ -1,10 +1,34 @@
 == Enriching Llama Index Models from GraphQL and Graph Databases
 
-I was listening to the https://medium.com/llamaindex-blog/llamaindex-on-twiml-ai-a-distilled-summary-using-llamaindex-de2a88551595["This Week in ML" (twiml)^] where Jerry Liu from LlamaIndex (prev. GPT-Index), explained the ideas behind the library to enrich query contexts to LLMs with data from any number of sources.
+I was listening to the https://medium.com/llamaindex-blog/llamaindex-on-twiml-ai-a-distilled-summary-using-llamaindex-de2a88551595["This Week in ML" (twiml) Podcast^] where Jerry Liu from LlamaIndex (previously. GPT-Index), explained the ideas behind the library to enrich query contexts to LLMs with data from any number of sources.
 
 https://medium.com/llamaindex-blog/llamaindex-on-twiml-ai-a-distilled-summary-using-llamaindex-de2a88551595
 
-# TODO more detail on Llama Index
+https://gpt-index.readthedocs.io/en/latest/index.html[LlamaIndex^] is a toolkit to augment LLMs with your own (private) data using in-context learning.
+I takes care of selecting the right context to retrieve from large knowledge bases.
+To achieve that it utilizes a number of Connectors or Loaders (from https://llamahub.ai/[Llama-Hub^]) and Indices to efficiently provide the pre-processed data as `Documents`.
+
+Each type of index stores documents in different ways, e.g via embeddings for vector search, as a simple list or graph or tree structure.
+Those indices are used as query interface to the LLM, transparently embedding the relevant context.
+
+Besides the higher quality response from the LLM, you get also the documents returned that have been used to construct the answer.
+Llama index also allows chain of thought reasoning and compare on contrast queries as we as natural language querying of databases.
+
+// indexes deal with token sizes for the prompt window sizes
+// query: "Given our internal wiki ..."
+// list (all the nodes are put into the context), vectorstoreindex (chunked/embedding) (top-k)
+// combine answers incrmentally with all nodes in the list
+// tree summarization -> each answer into a tree -> hierarchical combine them
+// graph of index strucutures - 
+// response_mode="tree_summarize" <- summarization (on list index one node after each other)
+// natural language query against sql store -> 
+// from llama_index import SQLDatabase, GTPSQLStructStoreIndex TODO
+// TODO more detail on Llama Index
+
+See also this presentation from Jerry
+
+https://www.youtube.com/watch?v=FQBou-YgxyE
+
 
 Congratulation to Jerry and the team for https://techcrunch.com/2023/06/06/llamaindex-adds-private-data-to-large-language-models/[securing a first seed funding round^] ($8.5M) for LlamaIndex, definitely shows the interest in tools in the LLMs space and the potential of the approach.
 
@@ -96,12 +120,12 @@ Response(response="La capitale de l'Albanie est Tirana.", source_nodes=[NodeWith
 
 The number of existing data sources in the https://llamahub.ai/[open llama-hub^] is impressive, I counted 80 integrations in https://github.com/emptycrown/llama-hub[the repository^], you can find anything from Google docs, to GitHub, or relational databases.
 
-TODO screenshot llama hub
 image::https://camo.githubusercontent.com/c629d70de277acdd07526b4968cdc9082bfe52d38d4b634848a2e7c6e05c2534/68747470733a2f2f7363726162626c652d64696374696f6e6172792e73332e75732d776573742d322e616d617a6f6e6177732e636f6d2f53637265656e2b53686f742b323032332d30322d31312b61742b31322e34352e34342b504d2e706e67[]
 
 But I was missing two of my favorite technologies - GraphQL - the API query language open sourced by Facebook and Graph databases like Neo4j, the best way to store and manage large amounts of connected data, for example in Knowledge Graphs.
 
-So I thought, how hard can it be to add them :)
+[quote]
+So I thought: "How hard can it be to add them :)"
 
 === Adding the new loaders
 
