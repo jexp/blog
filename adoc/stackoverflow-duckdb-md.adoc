@@ -274,6 +274,9 @@ I uploaded them to S3 you can find them here:
 
 // TODO general s3 bucket
 
+So if you don't want to wait for the second part in the series, where we load the data into MotherDuck and query it with AI prompts, you can import the public parquet files into your own database and play around with them.
+Please share any interesting queries or issues on the https://slack.motherduck.com/[MotherDuck Slack channel^].
+
 == Part 2: From Local to Cloud - Loading our Database into MotherDuck and Querying it with AI Prompts
 
 === Getting started with MotherDuck
@@ -568,6 +571,25 @@ Run Time (s): real 2.378 user 0.001770 sys 0.001067
 ----
 
 That's a really neat feature, hope they use it in their UI when your query would encounter an error with an explain in the background.
+
+=== Data Sharing
+
+To https://motherduck.com/docs/key-tasks/sharing-a-motherduck-database[make this data available to others^], we can use the `CREATE SHARE` command.
+
+If we run it, we will get a shareable link, that others can use with `ATTACH` to https://motherduck.com/docs/key-tasks/querying-a-shared-motherduck-database[attach our database^].
+Currently it takes a while to create the share, but in the future it will be a zero-copy operation.
+
+[source,sql]
+----
+-- CREATE SHARE <share name> [FROM <database name>];
+CREATE SHARE so_2023_05 FROM so;
+
+-- ATTACH '<share URL>' [AS <database name>];
+ATTACH 
+----
+
+So while you're waiting for the third part of the blog series, you can attach our share (which is public) and run your own queries on it.
+Please share any interesting queries or issues on the https://slack.motherduck.com/[MotherDuck Slack channel^].
 
 == Part 3: Advanced Queries from Python, Visualizations, and Dashboards of the StackOverflow Data in MotherDuck
 
