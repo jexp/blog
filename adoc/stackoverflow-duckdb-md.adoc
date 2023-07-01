@@ -703,7 +703,6 @@ I also remembered Evalinas SO Analysis:
 * https://evelinag.com/exploring-stackoverflow/
 * https://www.youtube.com/watch?v=-Ig-RoWzzJ8
 
-////
 create table users as (
 select * from read_csv_auto("so/Users.csv.gz",auto_detect=true, 
 column_names=['id','name','reputation','createdAt','accessedAt',
@@ -731,7 +730,6 @@ select name, reputation, reputation/day(today()-createdAt) as rate, today()-crea
 from users where reputation > 1000000 order by rate desc;
 
 todo per year, pivot, window
-////
 
 .listing {listing} stackoverflow analysis
 [source,sql]
