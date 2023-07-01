@@ -2,7 +2,7 @@
 
 :imagesdir: ../img/
 
-== Part 1: Stackoverflow Data Dump Preparation and Import into DuckDB
+== Part 1: StackOverflow Data Dump Preparation and Import into DuckDB
 
 I was always fascinated by the StackOverflow dataset.
 We all spend a lot of our time searching, reading and writing StackOverflow questions and answers, but rarely think about the system and data behind it.
@@ -28,7 +28,7 @@ Thankfully StackOverflow publishes all their data publicly on the [internet arch
 It takes a long time (for me two days in total) to download, especially the posts file, as the internet archive bandwidth is limited and aborts in between.
 We end up with 7 files with a total size of 27 GB.
 
-.Stackoverflow Dump files
+.StackOverflow Dump files
 ----
  19G stackoverflow.com-Posts.7z
 5.2G stackoverflow.com-Comments.7z
@@ -41,7 +41,7 @@ We end up with 7 files with a total size of 27 GB.
 
 After the download finished, you need to use p7zip to extract the files, which you often need to install separately.
 
-I recompressed the XML files using pigz, the parallel gz implmentation, which is much faster than the default gzip.
+I recompressed the XML files using `pigz`, the parallel gzip implementation, which is much faster than the default gzip.
 
 ----
 7z e -so stackoverflow.com-Posts.7z | pigz -9 > Posts.xml.gz
@@ -95,7 +95,7 @@ We have the `Questions` (`Post` with postTypeId=1) with a Owner, upvotes, downvo
 The up to 6 `Tags` define the topics of the questions.
 The `User` with bio, reputation, last login date.
 The `Answers` (Post with postTypeId=2) with their own owner, upvotes, downvotes, comments.
-One of the answers can be acceppted as the correct answer.
+One of the answers can be accepted as the correct answer.
 Both can have comments with their own owner, upvotes, downvotes.
 There are also `Badges` that users can earn for their contributions.
 Posts can be linked to other posts, e.g. duplicates or related questions as `PostLinks`.
@@ -109,7 +109,7 @@ The dump doesn't have any information of indexes or foreign keys so, we need to 
 Now we're ready to import the files into DuckDB, which is much easier than our previous steps.
 
 With `read_csv` we can read the CSV files directly from the compressed gzipped files.
-As we have headerless files, we need to provide the column names as a list.
+As we have header-less files, we need to provide the column names as a list.
 The `auto_detect` option will try to guess the column types, which works well for the StackOverflow data.
 
 [source,sql]
@@ -346,11 +346,11 @@ Catalog Error: error while importing share: Schema with name <local-database-nam
 
 // TODO unnest
 
-And for the size of our stackoverflow database it took quite some time to finish the upload, not 100% sure but I think around 2 hours.
+And for the size of our StackOverflow database it took quite some time to finish the upload, not 100% sure but I think around 2 hours.
 
 So we rather create the database on MotherDuck and import our tables directly from our Parquet files on S3.
 
-You can do this in the web interface or on your local machine, connected to motherduck.
+You can do this in the web interface or on your local machine, connected to MotherDuck.
 
 [source,sql]
 ----
@@ -407,7 +407,7 @@ As LLMs, GPT and foundational models are https://medium.com/@mesirii[close to my
 It works actually already quite well, let's see how it does.
 
 The schema description is a bit uninspiring, I could have seen the same by just looking at the table list.
-As expected from probabalistic models it returns different results on each run.
+As expected from probabilistic models it returns different results on each run.
 
 [source]
 ----
@@ -446,7 +446,7 @@ pragma prompt_query('What are the most popular tags?');
 -- Run Time (s): real 3.763 user 0.124567 sys 0.001716
 ----
 
-Nice, what is the SQL it might have used for that (probabalistcally it could have been slightly different)?
+Nice, what is the SQL it might have used for that (probabilistically it could have been slightly different)?
 
 [source,sql]
 ----
