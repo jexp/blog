@@ -1,30 +1,30 @@
 == Roaring Bitmaps - Effiziente Bitmanipulation und -speicherung in Java
 
 Auch wenn wir heutezutage oft nicht mehr mit individuellen Bits zu tun haben, lauern sie doch direkt unter der Oberfläche unserer Programme.
-Zum Beispiel sind die seltsamen Ergebnisse bei Gleitkommazahlen damit zu erklären, wie sie als Exponent und Mantisse in den 16, 32 (float) oder 64 bit (double) abgelegt werden und welche Zahlen damit ausdrückbar sind.
+Zum Beispiel sind die seltsamen Ergebnisse bei Gleitkommazahlen damit zu erklären, wie sie als Exponent und Mantisse in den 16, 32 (float) oder 64 bit (double) abgelegt werden und welche Zahlen damit ausdrückbar sind (`0.01f*0.03f = 2.9999999E-4`).
 
-Leider ist es in Java nicht einfach möglich Booleans statt Bits zu benutzen, da für das Speichern eines booleschen Wertes noch immer ein ganzes Byte benutzt wird, bis Java X war es sogar ein Integer mit 4 Bytes.
+Leider ist es in Java nicht einfach möglich Booleans statt Bits zu benutzen, da für das Speichern eines booleschen Wertes noch immer ein ganzes Byte benutzt wird, in den frühen Versionen von Java war es sogar ein Integer mit 4 Bytes.
 Wie Booleans zu repräsentieren sind, ist in der Spezifikation der VM nicht vorgegeben, verschiedene JVM Anbieter könnten das unterschiedlich handhaben.
 Damit wird mindestens 8x so viel Speicher verbraucht wie für einen Wahrheitswert benötigt würde, ein Grund mehr sich mit Bits und Bitsets zu beschäftigen.
 
-Zum Beispiel in Datenbanksystemen wie Neo4j in denen es auf jedes Bit (Byte) ankommt, können komplexere Datenstrukturen mit Bestandteilen, die keine vollen Bytes füllen, in kompakteren Strukturen mittels Bitpacking (TODO andere Bedeutung) gespeichert werden.
+Zum Beispiel in Datenbanksystemen wie Neo4j in denen es auf jedes Bit (Byte) ankommt, können komplexere Datenstrukturen mit Bestandteilen, die keine vollen Bytes füllen, in kompakteren Strukturen mittels Bitpacking gespeichert werden.
 
-In HunXxx hatte ich auch schon einmal über die effiziente Repräsentation von Daten berichtet.
+In [HungerKompakt] hatte ich auch schon einmal über die effiziente Repräsentation von Daten berichtet.
 
 === Kleiner Ausflug in die Welt der Bits
 
 Auch wenn Sie sich alle sicher noch daran erinnern, wie Bit-Operationen funktionieren, hier noch einmal eine kleine Wiederholung.
 
-Zahlen in den meisten Digitalsystemen werden nicht im Dezimal, sondern im Binärsystem dargestellt, wobei an jeder Stelle (2^0, 2^1, 2^2 usw.) eine 0 oder 1 dieses Bit aktiviert oder nicht. 
-Damit können in einem Byte 256 Zahlen dargestellt werden, von 0 bis 255 oder mit dem ersten Bit als Vorzeichen (-128 bis 127) (Java Short).
-Oft werden Bytes als zwei 4-Bit Hälften (Nibbles) dargestellt, die jeweils 16 Zahlen (0..15) umfassen, im Hexadezimalsystem (0..F).
+Zahlen in den meisten digitalen Systemen werden nicht im Dezimal, sondern im Binärsystem dargestellt, wobei an jeder Stelle (2^0, 2^1, 2^2 usw.) eine 0 oder 1 diese Stelle (Bit) aktiviert oder nicht. 
+Damit können in einem Byte (8-Stellen, Bits) 256 Zahlen dargestellt werden, von 0 bis 255 oder mit dem ersten Bit als Vorzeichen (-128 bis 127) (Java Short).
+Oft werden Bytes als zwei 4-Bit Hälften (Nibbles) dargestellt, die jeweils 16 Zahlen (0..15) umfassen, im Hexadezimalsystem (0..9,A..F).
 
-In Java können Binärzahlen mit einem Suffix (b) direkt dargestellt werden, das ist nützlich wenn man diese für einen Algorithmus oder eine bestimmte Struktur direkt darstellen möchte.
+In Java können Binärzahlen mit einem Präfix (`0b`) direkt dargestellt werden, das ist nützlich wenn man diese für einen Algorithmus oder eine bestimmte Struktur direkt darstellen möchte, z.B. 0b0101 für Dezimal 5.
 Hexadezimalzahlen beginnen mit einem `0x` Präfix, z.b. `0x2A` für Dezimal `42`.
-Das ganze wird oft auch für Ascii-Tabellen genutzt die nur 7 oder 8 Bit benötigen, für Unicode sind es dann 2 bis 4 Bytes.
+Eine Darstellung von Integerwerten als Binärzahlen kann mittels `Integer.toBinaryString(wert)` und für Hexadezimalzaheln mittels `Integer.toHexString()` erfolgen.
+Die Hexadezimalschreibweise wird oft auch für Ascii-Tabellen genutzt die nur 7 oder 8 Bit benötigen, für Unicode sind es dagegen 2 bis 4 Bytes.
 
-Bit-Operationen verändern einzelne Bits in einer Binärzahl und sind in Prozessoren direkt in Hardware abgebildet.
-
+Bit-Operationen verändern oder testen einzelne Bits in einer Binärzahl und sind in Prozessoren direkt in Hardware abgebildet, die dazu notwendingen Gatter sind die Grundeinheiten eines Prozessors (`AND, OR, NAND, NOR, NOT`).
 
 Die typischen Operationen sind in Tabelle 1 aufgeführt.
 
@@ -34,21 +34,25 @@ Die typischen Operationen sind in Tabelle 1 aufgeführt.
 | Negation | ~ | ~0b1001 = 0b0110 | Jedes Bit wird invertiert
 | Und  | & | 0b1001 & 0b1010 = 0b1000 | Wenn Bit an Position in beiden Werten 1 dann bleibt es 1 sonst 0
 | Oder | \| | 0b1001 \| 0b1010 = 0b1011 | Wenn Bit an Position in beiden Werten 0 dann bleibt es 0 sonst 1
+| XOR | ^ | 0b1001 ^ 0b1010 = 0b0011 | Wenn Bit an Position in beiden Werten gleich dann 0 sonst 1, exclusives Oder
 | Rechts schieben | >> | 0b1001 >> 1 = 0b0100 | Alle Bits werden um N Stellen nach rechts verschoben
 | Rechts schieben mit Vorzeichen | >>> | 0b1001 >> 1 = 0b1100 | Alle Bits werden um N Stellen nach rechts verschoben, dabei wird das höchstwertige Bit wieder eingefügt
 | Links schieben | << | 0b1001 << 1 = 0b0010 | Alle Bits werden um N Stellen nach links verschoben, führende Bits können verloren gehen
 |===
 
-Es gibt auch weitere Operationen, wie zum Beispiel das Zählen von Bits in einer Zahl, die erste oder letzte Position eines aktiven Bits.
+Durch das Verschieben einer 1 um n Bits nach links kann das Bit an Position n gesetzt werden.
 
-Vor der Einführung von Enums waren Bit-Konstanten in Java immer noch üblich, um zum Beispiel Konfigurationsoptionen abzubilden.
+Es gibt auch weitere Operationen, wie zum Beispiel das Zählen von Bits (`Integer.bitCount(wert)`) in einer Zahl, die erste oder letzte Position eines aktiven Bits.
+
+Vor der Einführung von Enums waren Bit-Konstanten in Java üblich, um zum Beispiel Konfigurationsoptionen abzubilden.
 
 Das ist auch immer noch in Klassen wie A, B und in Datei- bzw. Netzwerkoperationen, die mit dem Betriebsysstemkern interagieren notwendig.
 
-Für diese Flags werden oft separate Zweierpotenzen für die Werte benutzt, so dass sie miteinander mittels oder `Flags| FLAG` aktiviert, oder mittels nicht-und `Flags & ~FLAG` deaktiviert werden können.
-Ein Beispiel ist in Listing 2 zu sehen.
+Für diese Flags werden oft separate Zweierpotenzen für die Werte benutzt, so dass sie miteinander mittels ODER `Flags | FLAG` aktiviert, oder mittels NICHT-UND `Flags & ~FLAG` deaktiviert werden können.
+Ein Beispiel ist in Listing {counter:listing} zu sehen.
 
-[source,java    ]
+.Listing {listing} Bit-Flags in Java
+[source,java]
 ----
 final static int FLAG_1 = 0b0001;
 final static int FLAG_2 = 0b0010;
@@ -56,36 +60,50 @@ final static int FLAG_2 = 0b0010;
 // Flag 1 und 2 setzen
 int option = FLAG_1 | FLAG_2;
 
-if (option & FLAG_1 != 0) {
+if ((option & FLAG_1) != 0) {
     // flag 1 gesetzt
 }
 // Flag 2 löschen
-option = option & ~FLAG2;
+option = option & ~FLAG_2;
 
-if (option & FLAG_2 != 0) {
+if ((option & FLAG_2) != 0) {
     // flag 2 gesetzt
 }
 ----
 
 Im Allgemeinen können bestimmte, komplexere Bitmuster, auch Masken  genannt, genutzt werden um schnell zu testen, welche Bits gesetzt sind. 
-Dazu wird der Wert mit der Maske mittels UND `&` verknüpft, so dass, falls alle relevanten Stellen eine 1 haben, ein Wert größer 0 übrig bleibt.
+Dazu wird der Wert mit der Maske mittels UND `&` verknüpft, so dass, falls alle relevanten Stellen eine 1 haben, ein Wert ungleich 0 übrig bleibt.
 
-Für das Setzen der Maske wird sie mittels Oder `|` mit dem existierenden Wert und für das Löschen mit der negierten Make mit Und `&` veknüpft.
+Für das Setzen der Maske wird sie mittels ODER `|` mit dem existierenden Wert und für das Löschen mit der negierten Make mit UND `&` veknüpft, wie in Listing {counter:listing} zu sehen.
 
-Maskenbeispiele
+.Listing {listing} Maskenbeispiele
+[source,java]
+----
+final static int READ   = 0b0001;
+final static int WRITE  = 0b0010;
+final static int APPEND = 0b0100;
+final static int ALL    = 0b0111;
+
+int openOptions = ALL;
+
+openOptions = openOptions & ~WRITE; // WRITE löschen
+if ((openOptions & WRITE) != 0) {
+    boolean doAppend = (openOptions & APPEND) != 0;
+}
+----
 
 Da für jedes Flag ein unabhängiges Bit genutzt werden muss, können in einem Byte 8, in einem Integer-Wert 32 und in einem Long 64 Flags (Bits) gepeichert werden.
 
-Statt Flags könnten diese Positionen auch boolesche Informationen über Dokumente, Datenbankspalten oder -zeilen, Nachbarknoten in einem Graph oder andere Fakten reprästentieren.
+Statt Flags könnten diese Positionen auch boolesche Informationen über Dokumente, Datenbankspalten oder -zeilen, Nutzeraktivitäten, Nachbarknoten in einem Graph oder andere Fakten reprästentieren.
 
-Das wird im allgemeinen mit einem BitSet erreicht, dh. einer größeren Anzahl von Bits die effizient gelesen, geschrieben und verwaltet werden können.
-
+Das wird im allgemeinen mit einem `BitSet` (oder BitMap) erreicht, dh. einer größeren Anzahl von Bits die effizient mittels einer API gelesen, geschrieben und verwaltet werden können.
 
 === Wozu sind Bitmaps nützlich?
 
 Wenn es nur darum geht, einen Fakt über eine fortlaufende Zahl, wie eine Id eines Eintrags zu speichern, dann reicht ein Bit in einer fortlaufenden Reihe aus.
 Somit könnten in einem Long Wert 64 solche Fakten gespeichert werden.
-Falls mehr Einträge nötig sind, müsste man mehrere Long-Werte kombinieren, z.b. 10 für 640 Bits.
+Falls mehr Einträge nötig sind, müsste man mehrere Long-Werte in einem Feld kombinieren, z.b. 10 für 640 Bits.
+Dann wird der zu setzende Wert durch 64 geteilt um den Index des Eintrags im Feld zu erhalten und der Rest der Division durch 64 ist der Index des Bits im Long-Wert.
 
 image::https://vikramoberoi.com/content/images/2022/08/bitmap-3.png[]
 
@@ -95,33 +113,70 @@ Die API eines Bitsets hat aber meist keine Bit-Muster als Parameter sondern, die
 
 Diese Art von Bitset wird oft als Bitmap Index oder Bit-Index bezeichnet und benutzt.
 
-Diese einfache `BitSet` Klasse ist im JDK seit Java xx vorhanden und funktioniert ausreichend gut für kleinere Bitsets also ein paar Tausend bis Zehntausend Bits.
-In Listing {counter:listing} ist ein einfaches Anwendngsbeispiel zu sehen.
+Diese einfache `BitSet` Klasse ist im JDK seit Java 1.0 vorhanden und funktioniert ausreichend gut für kleinere Bitsets also ein paar Tausend bis Millionen Bits.
 
+Das Bitset wächst intern wenn Bits gesetzt werden, für die im Feld noch keine Einträge vorhanden sind.
+
+In Listing {counter:listing} ist ein einfaches Anwendngsbeispiel zu sehen, inspiriert von [BaeldungBitset].
 
 .Listing {listing} - Java BitSet API Beispiel
 [source,java]
 ----
+BitSet bitSet = new BitSet(); // Größe 1
 
+bitSet.set(1000); // Größe 16 Long Werte da 1000/64 = 15
+
+bitSet.get(1000); // true
+bitSet.set(10, 101); // Setzen einer Range 10 bis 100
+
+bitSet.get(101); // false
+bitSet.set(10, false); // Setzen mit boolean Attribut
+bitSet.get(10); // false
+bitSet.clear(42); // Bit löschen
+bitSet.clear(20, 31); // Range löschen
+
+// Erzeugt ein neues Bitset mit 10 Einträgen
+// Eintrag 10 hat den neuen Index 0
+BitSet bitSet2 = bitSet.get(10, 21); 
+
+bitSet.flip(42); // Bit umdrehen
+bitSet.flip(10, 21); // Range umdrehen
+
+bitSet.size(); // aktuelle Kapazität 16*64 = 1024
+bitSet.cardinality(); // Anzahl der gesetzten Bits 73
+bitSet.length(); // Position des höchsten gesetzten Bits + 1 - 1001
+// 0 wenn alle Bits gelöscht sind
+
+bitSet.isEmpty(); // true wenn alle Bits gelöscht sind
+
+var first = new BitSet();
+first.set(0, 10); // 0..9
+var second = new BitSet();
+second.set(5, 15); // 5..14
+first.intersects(second); // true, wenn Überlappung
+first.and(second); // 5..9 Modifiziert das erste Bitset mit der UND Operation (Schnittmenge)
+first.or(second); // 5..14 Modfiziert das erste Bitset mit der ODER Operation (Vereinigungsmenge)
+
+first.xor(second); // 0..4,10..14 Modifiziert das erste Bitset mit der XOR Operation (Symmetrische Differenz)
+
+first.andNot(second); // 0..4 Modifiziert das erste Bitset mit dem negierten 2 Bitset (Löschen)
 ----
-
-[BaeldungBitset]
 
 Für größere Anzahl von Bits wird der Speicherbedarf relevant, für eine Million Bits werden schon 122 Kilobytes benötigt. Für eine Milliarde Bits 119 Megabytes.
 
 Warum würde man trotzdem BitSets benutzen? 
 
-Effiziente Implementierungen von Schnitt- und Vereiningungsmengen von Bits haben viele Anwendungsfälle
+Effiziente Implementierungen von Schnitt- und Vereiningungsmengen von Bits haben viele Anwendungsfälle:
 
-* Suchmaschien TF/IDF (Term Frequency / Inverse Document Frequency) - Tritt ein Term in einem Dokument auf? und die Verküpfung von Termen -> Bitmasken Verknüpfung -> Beispiel
+* Suchmaschinen TF/IDF (Term Frequency / Inverse Document Frequency) - Tritt ein Term in einem Dokument auf? und die Verküpfung von Termen mittels Bitmasken der Terme
 * Datenbankabfragen
 * Boolesche Werte (Existenz)
-* Spalten-Datenbanken Optimierungen (Columnar Database)
-* 
+* Bloom Filter
+* Optimierungen von Spaltenbasierte Datenbanken
 
-TODO Beispiel Term - Dokument - Und Verknüpfung
+// TODO Beispiel Term - Dokument - Und Verknüpfung
 
-Glücklicherweise erfolgt die Nutzung von Bitsets nicht in einem stochastischen Raum, in dem es zufällig ist, ob ein Bit gesetzt ist oder nicht. 
+Glücklicherweise erfolgt die Nutzung von Bitsets nicht in einem stochastischen Raum, in dem es rein zufällig ist, ob ein Bit gesetzt ist oder nicht. 
 Dann gäbe es wenige Optimierungsmöglichkeiten.
 
 In der Realität sind eine ganze Menge von Beobachtungen zu machen:
@@ -130,22 +185,22 @@ In der Realität sind eine ganze Menge von Beobachtungen zu machen:
 * Es gibt wiederkehrende Muster von Informationen, oft sind längere Bereiche durchweg gesetzt oder gelöscht
 * Oft sind bestimmte Muster von Aktivierungen zu beobachten, in einem Histogram gibt es Häufungen z.B. 0xb10011001 könnte viel häufiger vorkommen als andere Muster
 * Bestimmte Bereiche des Bitsets werden aktiv bearbeitet, andere dagegen sind nicht im Fokus
-* Ggf wird das BitSet oder Bereiche davon nur gelesen und nie geschrieben
+* Ggf wird das Bitset oder Bereiche davon nur gelesen und nie geschrieben
 * Ganze Bereiche des Bitsets sind ähnlich und könnten wieder genutzt werden
-* Bestimmte Operationen des Bitsets können mit gecachten Informationen 
+* Bestimmte Operationen des Bitsets können mit gecachten Informationen optimiert werden
 
 Sparse Beispiel - einige wenige "große" Zahlen sind indiziert.
 
 -> z.b. Eintrag mit 10M gesetzt/hinzugefügt.
 
-All diese Aspekte zeigen, auf, wie BitSets optimiert werden können:
+All diese Aspekte zeigen, auf, wie Bitsets optimiert werden könnten:
 
+* Abhängig vom Füllgrad verschiedene Implementierungen nutzen
 * nicht genutzte Bereiche können einfach markiert werden, ohne eigenlichte 
-* Kompression wiederkehrender Muster, am einfachsten mit einer Lauflängenkomprimierung, komplexer mit einem 
+* Kompression wiederkehrender Muster, am einfachsten mit einer Lauflängenkomprimierung, komplexer mit einem Wörterbuch-Ansatz
 * Baumrepräsentation, in dem ganze Teilbäume weggelassen oder virtuell repliziert werden können
 
-
-Natürlich muss die Optimierung eine gute 
+Natürlich muss die Optimierung nicht nur Platz sparen, sondern auch die Operationen auf dem Bitset nicht verlangsamen.
 
 === Roaring Bitmaps
 
@@ -155,115 +210,169 @@ Mit Millisekunden Anforderungen für komplexe Graph Abfragen und -Algorithmen, i
 
 Roaring Bitmaps erwiesen sich da als hilfreiches Werkzeug.
 
+Auf der Seite der Bibliothek [RoaringBitmap] gibt es ein passendes Zitat:
+
 [quote]
 Use Roaring for bitmap compression whenever possible. Do not use other bitmap compression methods 
 -- (Wang et al., SIGMOD 2017)
 
-
 Hintergrund:
 
-Die Idee für Roaring Bitmaps kam aus der Forschung - Daniel Lemire, Owen Kaser und Gregory Ssi-Yan-Kai haben in einem Paper [RBMPaper] in 2016 eine Implementierung für komprimierte Bitsets vorgestellt, die von Roaring Bitmaps implementiert wurde.
+Die Idee für Roaring Bitmaps kam aus der Forschung - Daniel Lemire, Owen Kaser und Gregory Ssi-Yan-Kai haben in einem Paper [RBMPaper] in 2016 eine Implementierung für komprimierte Bitsets vorgestellt
+Diese wurde von Roaring Bitmaps implementiert, welches unter der Apache 2 Lizenz veröffentlicht ist.
 
-Komprimierung ohne Einbuße in Performance - Wie?
+Darin beschrieben sie eine Komprimierung ohne Einbuße in Leistungsfähigkeit.
+Wie wurde das erreicht?
 
 Bei vorheriger Forschung gabs es zwar hohe Kompressionsraten diese gingen aber mit signifikanter Leistungseinbuße einher.
 
-Die API von Roaring Bitmaps ist ähnlich der Bitset API, wie in {counter:listing} zu sehen.
+Die [RoaringBitmapsAPI] ist ähnlich der Bitset API, wie in {counter:listing} zu sehen, aber sehr viel umfangreicher.
 
 .Listing {listing} - Roaring Bitmap API Beispiel
 [source,java]
 ----
+// org.roaringbitmap:RoaringBitmap:0.9.45
+curl -OL https://repo1.maven.org/maven2/org/roaringbitmap/RoaringBitmap/0.9.45/RoaringBitmap-0.9.45.jar
+jshell --class-path RoaringBitmap-0.9.45.jar
 
+import org.roaringbitmap.*;
+
+var A = RoaringBitmap.bitmapOf(1, 2, 3, 4, 5);
+
+// bitmapOfUnordered​(int... data)
+var B = RoaringBitmap.bitmapOfRange​(4, 8);
+// var intersects = A.intersects(B); // true
+var union = RoaringBitmap.or(A, B); // 1,2,3,4,5,6,7
+var intersection = RoaringBitmap.and(A, B); // 4,5
+var difference = RoaringBitmap.andNot(A, B); // 1,2,3
+var xor = RoaringBitmap.xor(A, B); // 1,2,3,6,7
+
+A.runOptimize(); // RLL (Run Length List) Kompression
+
+RoaringBitmap.bitmapOfRange(500_000, 100_000_000).getCardinality();
+//   99500000
 ----
 
-In Roaring Bitmaps wurden eine Reihe von Mechanismen kombiniert, die in Summe die beobachtbaren Verbesserungen erreichen.
+Neben den bekannten Operationen können zusätzliche Optimierungen aktiviert, Kardinalitäten berechnet, (Nicht-)Existenz von vorherigen oder nachfolgenden Bits berechnet oder die Bitmaps serialisiert werden.
 
-Die Roaring BitMap API benutzt 32-Bit Integer Werte, d.h. Einträge sind auf 4 Milliarden begrenzt, bei Bedarf nach mehr Volumen kann z.B. in einem Feld mit Roaring BitMap Objekten mit Präfixen z.B. 16 Einträge (von `0b0000` bis `0b1111`) für 16 x 4Mrd Zahlen.
-Es gibt auch 64-Bit Implementierungen von RBM, aber diese sind noch nicht so sehr verbreitet.
+////
+.or/and/andNot/xor(Iterator<RBM>, RBM ... array)
+.select(index) 
+.remove(start, end)
+.xorCardinality(bm1, bm2)
+.rank(x) // Anzahl der gesetzten Bits bis zu x
+.nextAbsentValue(x) // nächster nicht gesetzter Bit
+.previousValue(x) // letzter gesetzter Bit
+.getSizeInBytes() // Größe in Bytes
+.getLongSizeInBytes() // Größe in Bytes als Long
+.getLongCardinality() // Kardinalität als Long
+.getCardinality
+.cardinalityExceeds(x) // Kardinalität > x
+////
 
-Welche Mechanisment gibt es?
+Die Roaring BitMap API benutzt 32-Bit Integer Werte, d.h. Einträge sind auf 4 Milliarden begrenzt, bei Bedarf nach mehr Volumen können mehrere RoardingBitMaps parallel gehalten werden.
 
+// kann z.B. in einem Feld mit Roaring BitMap Objekten mit Präfixen z.B. 16 Einträge (von `0b0000` bis `0b1111`) für 16 x 4Mrd Zahlen.
+Es gibt auch 64-Bit Implementierungen von Roaring BitMap, aber diese sind noch nicht so sehr verbreitet.
+
+In Roaring Bitmaps wurden eine Reihe von Mechanismen kombiniert, die in Summe die beobachtbaren Verbesserungen erreichen, die wir uns im Folgenden anschauen wollen.
+
+// TODO Bilder 
+// [BaeldungRoaringBitmaps]
 ==== Chunking
 
 Intern werden Blöcke (Chunks) von 2^16 (65536) Integer Werten zusammengefasst, und jeweils unter ihrem 16 Bit Präfix (höchstwertigen Bits als `N / 2^16` oder `N >> 16`) gruppiert.
+Für alle Präfixe und Blöcke die (noch) nicht genutzt wurden, gibt es keinen Eintrag.
 
 Jeder dieser 2^16 möglichen Blöcke ist ein "Container", die eine "Kardinalität" entsprechend ihrer Besetzung (Füllgrad) haben.
 D.h. wenn ich 100 Zahlen kleiner als 65536 einfüge kommen diese in den ersten Container und er hat eine Kardinalität von 100.
+Wenn ich dagegen 5000 Zahlen im Bereich von 2^20 (also ca 1 Million) einfüge, wird nur ein Container mit dem Präfix `0000 0000 0001 0000` angelegt.
 
-Für verschiedene Grade von Kardinalitäten gibt es verschiedene Container
+Für verschiedene Füllgrade (Kardinalitäten) gibt es verschiedene Containerarten.
 
-* Für spärlich besetzte Container (<= 4096 Einträge, 6,25% Füllgrad) - sortiertes dynamisch wachsendes Feld mit den unteren 16 Bit Werten (`N % 2^16`` oder `N & 0xFFFF``) unserer Zahlen (TODO ausformulieren)
-* Dichter besetzte Container (>4096 Einträge) - traditionelles BitMap mit 2^16 Bits also 8 Kilobytes, die komplett alloziert werden. Dabei werden Long-Werte? für die Speicherung der Bits genutzt, also 1024 Long werte. TODO
+Für spärlichen Besatz mit weniger als 4096 Einträge (6,25% Füllgrad) wird ein `ArrayContainer` (auch als Sparse Container bezeichnet) als sortiertes dynamisch wachsendes Feld genutzt, der die gesetzten, untere 16 Bit Werten (`N % 2^16`` oder `N & 0xFFFF``) unserer Zahlen enthält.
 
-Für die Verwaltung der Container wird ein sortierter Index benutzt der mittels der 16 höherwertigen Bits auf die Container zeigt und welcher dynamisch wächst, man könnte sich das als primitive IntegerToObject-Map vorstellen.
+Für mehr als 4096 Einträge wird ein `BitMapContainer` (oder auch Dense Container) genutzt, der eine traditionelles BitMap mit 2^16 Bits also 8 Kilobytes darstellt, die komplett alloziert werden. Dabei werden Long-Werte für die Speicherung der Bits genutzt, also 1024 Long Werte. 
+Der Aufbau und Inhalt für unser Beispiel ist in Tabelle 1 zu sehen.
+
+.Tabelle 1 - Aufbau RoaringBitmap - Präfix und Containerarten
+[%autowidth,opts=header,cols="m,a,m,m"]
+|===
+| Präfix | Art | Typ | Kardinalität | Inhalt
+| 0000 0000 0000 0000 | Sparse Container | ArrayContainer | 100 | 0,1,2,3,..,99
+| ... | | | |
+| 0000 0000 0001 0000 | Dense Container | BitMapContainer | 5000 | 1111 1111 .. 4984x1 .. 1111 1111 0000 .... 0000
+|===
+
+Für die Verwaltung der Container wird ein sortierter Index benutzt, der mittels der 16 höherwertigen Bits auf die Container zeigt und dynamisch wächst, man könnte sich das als primitive `IntegerToObjectMap` vorstellen.
 // Ich denke man könnte aber auch ein dynamisch wachsendes Feld nutzen, das maximal 2^16 Einträge mit jeweils einem Pointer enthält.
+
+Alle Operationen in Roaring Bitmaps sind spezifisch für die Containertypen implementiert, sowohl Modifikationen,als auch Mengenoperationen zwischen zwei Instanzen.
 
 ==== Einfügen/Löschen von Werten
 
-Einfügen von Werten ist abhängig vom Container Typ.
 Zuerst wird überprüft ob im Index schon ein Eintrag für den 16-Bit Präfix vorhanden ist. 
-Wenn nein, wird ein neuer Sparse-Container mit diesem Präfix eingefügt.
+Falls nicht, wird ein neuer Sparse Container mit diesem Präfix eingefügt.
 
-Im Sparse Container wird die notwendige Position im sortierten Feld mittels Binärsuche gesucht, wenn da noch kein Eintrag vorhanden ist, wird er gesetzt.
+Im Sparse Container wird der notwendige Eintrag im sortierten Feld mittels Binärsuche gesucht, wenn da noch kein Eintrag vorhanden ist, wird er gesetzt.
 
-Im Bitmap Container wird das Bit für die 
+Wenn der Füllgrad also die Kardinalität des Containers 4096 übersteigt wird der Sparse Container durch einen Dense Container ersetzt.
 
-Wenn der Füllgrad also Größe des Containers 4096 übersteigt wird der Sparse-Container durch einen BitMap Container ersetzt.
-// Wäre sinnvoll das über Hysterese zu machen, damit es an der Grenze keine Fluktuationen gibt
+In einem Dense Container wird einfach das Bit für die Position in der BitMap gesetzt.
 
-Ähnlich, nur umgekehrt erfolgt die Löschung eines Bits, nur dass für fehlende Container nichts getan werden muss.
-Und dass leere Sparse-Container entfernt werden können, diese könnten in einem Objekt-Pool wiederverwendet werden.
+// Es wäre sinnvoll das über eine Hysterese zu puffern, damit es an der Grenze keine Fluktuationen gibt.
 
-// todo wäre es nicht einfacher, ein statisches Array mit den 65k Bitmaps zu haben und zwischen Indexena auf diese umzuschalten?
+Ähnlich, nur umgekehrt erfolgt die Löschung eines Bits, nur dass für fehlende Container keine Aktion erfolgen muss.
+
+Leere Sparse Container könnten entfernt und in einem Objekt-Pool wiederverwendet werden.
+
+// todo wäre es nicht einfacher, ein statisches Array mit den 65k Bitmaps zu haben und zwischen Indexen auf diese umzuschalten?
 
 ==== Test auf gesetztes Bit
 
 Check auf gesetzes Bit / Wert vorhanden
 
-1. Wenn 16-bit Präfix nicht im Index dann Wert nicht gesetzt
+1. Wenn 16-bit Präfix nicht im Index, dann ist der Wert nicht gesetzt
 2. Sonst Container für Position ermitteln, und untere 16 Bit Wert für Suche nutzen
-3. Binärsuche im Feld, falls Sparse Container
-4. Bit-test an Position im Bitmap-Container
+3. Binärsuche nach diesem Wert im sortierten Feld, falls Sparse Container
+4. Bit-test an Position im Dense Container
 
+==== Schnittmenge ermitteln
 
-==== Schnittmengen ermitteln
-
-Nur für Container die in beiden RBM vorhadnen sind müssen Schnittmengen ermittelt werden.
+Für die Ermittlung der Schnittmenge zwischen zwei RoaringBitMaps, wird über alle gemeinsamen Präfixe iteriert, und die Container verglichen.
+Nur in diesem Fall müssen Schnittmengen ermittelt werden, falls einer der Container fehlt, ist die Schnittmenge leer.
 
 Dabei werden 3 der 4 Kombinationen unterschieden.
 
-* Sparse - Sparse: 
-* Sparse - Sparse: Ergebnis ist immer Sparse Container.
-Abhängig von den Kardinalitäten:
-- Einträge des kleineren Arrays werden im größeren binär gesucht
--  Zwei Pointer werden in beiden Arrays vorwärtsbewegt, solange der Wert in einem der Felder kleiner ist als im anderen. Bei gleichen Wert wird dieser zur Schnittmenge hinzugefügt. (Galloping Intersection)
+*Sparse/Sparse:* Ergebnis ist immer ein Sparse Container.
+Bei einer geringen Kardinalität eines der Felder werden dessen Einträge werden im anderen binär gesucht (Galloping Intersection). 
+Oder mittels Shotgun Intersection bei höheren Kardinalitäten, dabei werden zwei Zeiger in beiden sortierten Feldern vorwärtsbewegt. Solange der Wert in einem der Felder kleiner ist als im anderen. Bei übereinstimmendem Wert wird dieser zur Schnittmenge hinzugefügt.
 
-Sparse - Dense:
+*Sparse/Dense:* Ergebnis ist immer ein Sparse Container, da es maximal 4096 überlappende Einträge geben kann
+Einträge aus dem Sparse Cointainer werden im Dense Container getested.
 
-Einträge aus dem Sparse Cointainer werden im Dense Container getested, Ergebnis ist immer ein Sparse Container, weil es ja maximal 4096 überlappende Einträge geben kann.
+*Dense/Dense:* Die nicht-leeren Bitset Einträge der Container (Long-Werte) werden miteinander mittels UND verknüpft und das Ergebnis ist je nach End-Kardinalität ein Dense Container bzw. Sparse Container.
 
-Dense - Dense
+==== Vereinigungsmenge ermitteln:
 
-Abhängig von Kardinalität können die Bitset Einträge der Container (Long-Werte) miteinander mittels UND verknüpft und das Ergebnis ist je nach Kardinalität ein Dense Container bzw. Sparse Container.
+Ebenso wie bei der Schnittmenge, wird die Vereinigungsmenge über die gemeinsamen Präfixe ermittelt.
+Wenn es nur einen Container mit dem Präfix gibt, ist dieser der neue Container.
 
-Vereinigungsmenge:
+*Sparse/Sparse:* Wenn die Summe aus beiden Kardinalitäten, kleiner als 4096 dann bleibt es ein Sparse Container und die Inhalte werden  mittels Merge Sort zusammegeführt, ansonsten wird es ein Dense Container dessen Bits gesetzt werden. Falls die Endkardinalität kleiner als 4096 ist, wird der Dense Container in einen Sparse Container umgewandelt.
 
-Wenn es nur einen Container mit dem Präfix gibt, ist dieser der neue Container
+*Sparse/Dense:* Die Bits des Dense Containers werden aus dem Sparse Container gesetzt.
 
-* Sparse/Sparse - Summe aus beiden Kardinalitäten, wenn < 4096 dann bleibt es ein Sparse Container und die Inhalte werden  mittels Merge Sort zusammegeführt, ansonsten Dense Container und die Bits des Sparse Containers werden einfach gesetzt.
-* Sparse/Dense - Bits des Sparse Containers werden gesetzt
-* Dense/Dense - Container Inhalte werden per ODER `|` miteinander verknüpft
-
+*Dense/Dense:* Die BitMap Container Inhalte werden per ODER miteinander verknüpft.
 
 ==== Lauflängenkodierung
 
-Im zweiten Roaring Bitmap Paper [RBMPaperOptimierung] wurde eine weitere Optimierung aktiviert, die Lauflängenkodierung.
-Das war auch eine der ersten Kodierungen für Bildformate, für größere Farbflächen (pro Kanal) wurde nur die Farbwert und Anzahl der Pixel gespeichert.
+Im zweiten Roaring Bitmap Paper [RBMPaperOptimierung] wurde eine weitere Optimierung hinzugefügt, die Lauflängenkodierung.
+Das war auch eine der ersten Kodierungen für Bildformate, für größere Farbläufe desselben Wertes (pro Kanal) wurde nur die Farbwert und Anzahl der Pixel mit diesem Wert gespeichert.
 
-Genauso wird hier in einem Lauflängen-Container (Run Container), die Startposition und Anzahl der gesetzten Bits gespeichert, mit jeweils 2 16-Bit-Werten.
+Genauso wird hier in einem Lauflängen-Container (Run Container), die Startposition und Anzahl der gesetzten Bits gespeichert, mit jeweils zwei 16-Bit-Werten.
 
-Diese Container können mittels einer Analyse mit der API Funktion `runOptimize` erzeugt werden, oder wenn ein großer Bereich von Bits auf einmal gesetzt wird.
-Die Erzeugung eines Run-Containers erfolgt aber nur wenn seine Größe kleiner ist als der existierende Sparse oder Dense-Container, das mit einer Heuristik ermittelbar ist - 4 Bytes pro "Run".
+Diese Container können durch eine Analyse mit der API Funktion `runOptimize()` erzeugt werden, oder wenn ein großer Bereich von Bits auf einmal gesetzt wird.
+Die Erzeugung eines Run-Containers erfolgt aber nur, wenn seine Endgröße kleiner ist als die des existierenden Sparse oder Dense-Container. Das ist mit einer Heuristik ermittelbar ist - 4 Bytes pro "Run".
 
 // TODO was ist eine sinnvolle Mindestlänge von Runs?
 
@@ -275,63 +384,179 @@ If you'd like to work out computing the heuristic yourself, it'll help to recall
 ... each run in a run container takes up 32 bits (16 bits for the start, 16 bits for the length).
 ////
 
-Mit der Einführung dieses neuen Containers mussten die Algorithmen für Schnitt- und Vereinigungsmengen angepasst werden, sowie das Setzen und Entfernen von Bits anpassen.
-
-
+Mit der Einführung dieses neuen Containers mussten die Algorithmen für Schnitt- und Vereinigungsmengen, sowie das Setzen und Entfernen von Bits angepasst werden.
 
 // Man hätte den Run-Container auch mit dem Array-container kombinieren können, in dem man mit dem höchstwertigen Bit indiziert, ob es ein Run oder regulärer Eintrag ist, und dann der nächste Eintrag die Lauflänge darstellt.
 
+////
 Masken & Tests
 
 Roaring bitmaps are compressed bitmaps which tend to outperform conventional compressed bitmaps such as WAH, EWAH or Concise. In some instances, they can be hundreds of times faster and they often offer significantly better compression.
+////
 
-
-Eine 
-
-Max De Marzi
-
-Unterstützung für Bitmaps in der Klasse java.util.BitSet in Java seit JDK xxx
-
-https://roaringbitmap.org/
-
-In ein Log 
-
-TODO bitmap index for one-hot encodings 
-
-> Using Roaring bitmaps instead of traditional bitmaps in that application reduced memory usage from ~125GB to 300MB, an impressive 99.8% savings.
+// TODO bitmap index for one-hot encodings 
 
 === Performance Vergleich mit JMH
 
-Wie schon so oft, hilft uns JMH die Leistungsfähigkeit der 2 Implementierungen zu vergleichen
+Wie schon so oft, hilft uns JMH die Leistungsfähigkeit der 2 Implementierungen zu vergleichen.
+Diesmal müssen wir aber kein Maven Projekt dafür aufsetzen, denn ich habe einen Artikel von Max Anderson gefunden, wie man JMH Tests (und Async-Profiler) mittels `jbang` ausführen kann.
 
-TODO welche gibt es noch
+Wir benötigen nur die JMH dependencies und die `main` Methode in unserer Jbang Datei, wie in Listing {counter:listing} zu sehen.
 
-In Listing {counter:listing} ist eine der Benchmark Methoden zu sehen.
+Wir erzeugen zwei Bitsets mit jeweils 20 Millionen Einträgen, und führen dann die Operationen OR, AND, XOR und AND-NOT (Löschen) aus.
+Das JDK Bitset muss vor der Operation geklont werden, da es sonst verändert würde, Roaring Bitmaps erzeugen eine neue Bitmap als Ergebnis, so das es eine äquivalente Operation ist.
 
-.Listing {listing} - JMH Performance Test
+.Listing {listing} - BitSetsBenchmark.java JMH Performance Test
 [source,java]
 ----
-TODO
+//JAVA 20
+//DEPS org.roaringbitmap:RoaringBitmap:0.9.45
+//DEPS org.openjdk.jmh:jmh-generator-annprocess:1.36
+
+package de.jexp.rbm;
+
+import org.openjdk.jmh.annotations.*;
+import org.roaringbitmap.RoaringBitmap;
+import java.util.BitSet;
+
+@State(Scope.Thread)
+public class BitMapOpsComparision {
+    // todo better test 6 alternating sets of sections - sparse, dense, run
+    private final static int BM_SIZE = 20_000_000;
+    private RoaringBitmap rbm1;
+    private RoaringBitmap rbm2;
+    private BitSet bs1;
+    private BitSet bs2;
+
+    public static void main(String[] args) throws Exception {
+       org.openjdk.jmh.Main.main(args);
+    }
+
+    @Setup
+    public void setup() {
+        rbm1 = RoaringBitmap.bitmapOfRange(0, BM_SIZE/2);
+        rbm2 = RoaringBitmap.bitmapOfRange(BM_SIZE/2,BM_SIZE);
+
+        bs1 = new BitSet(BM_SIZE);
+        bs1.set(0, BM_SIZE/2);
+
+        bs2 = new BitSet(BM_SIZE);
+        bs2.set(BM_SIZE/2, BM_SIZE);
+    }
+    @Benchmark
+    public RoaringBitmap rbmOR() {
+        return RoaringBitmap.or(rbm1, rbm2);
+    }
+    @Benchmark
+    public BitSet bsOR() {
+        BitSet result = (BitSet) bs1.clone();
+        result.or(bs2);
+        return result;
+    }
+    @Benchmark
+    public RoaringBitmap rbmAND() {
+        return RoaringBitmap.and(rbm1, rbm2);
+    }
+    @Benchmark
+    public BitSet bsAND() {
+        BitSet result = (BitSet) bs1.clone();
+        result.and(bs2);
+        return result;
+    }
+    @Benchmark
+    public RoaringBitmap rbmAND_NOT() {
+        return RoaringBitmap.andNot(rbm1, rbm2);
+    }
+    @Benchmark
+    public BitSet bsAND_NOT() {
+        BitSet result = (BitSet) bs1.clone();
+        result.andNot(bs2);
+        return result;
+    }
+    @Benchmark
+    public RoaringBitmap rbmXOR() {
+        return RoaringBitmap.xor(rbm1, rbm2);
+    }
+    @Benchmark
+    public BitSet bsXOR() {
+        BitSet result = (BitSet) bs1.clone();
+        result.xor(bs2);
+        return result;
+    }
+}
 ----
 
+Die Ergebnisse des Durchlaufs sind in Listing {counter:listing} zu sehen.
+Es ist zu erkennen, das Roaring Bitmaps in allen Operationen schneller sind als die JDK Bitsets, zwischen zwei- und zweihundert?? mal so schnell.
+
+.Listing {listing} - JMH Performance Test Ergebnisse
+----
+jbang BitMapOpsComparision.java 
+[jbang] Building jar...
+# JMH version: 1.36
+# VM version: JDK 20, OpenJDK 64-Bit Server VM, 20+36-2344
+# Measurement: 5 iterations, 10 s each
+# Threads: 1 thread, will synchronize iterations
+# Benchmark mode: Throughput, ops/time
+
+Benchmark                         Mode  Cnt         Score        Error  Units
+BitMapOpsComparision.bsAND       thrpt   25      8868,941 ±     62,160  ops/s
+BitMapOpsComparision.bsAND_NOT   thrpt   25     11971,923 ±    104,107  ops/s
+BitMapOpsComparision.bsOR        thrpt   25      9260,151 ±    174,202  ops/s
+BitMapOpsComparision.bsXOR       thrpt   25      9295,800 ±     96,617  ops/s
+BitMapOpsComparision.rbmAND      thrpt   25  21667599,584 ± 523502,831  ops/s
+BitMapOpsComparision.rbmAND_NOT  thrpt   25    654138,593 ±   2401,952  ops/s
+BitMapOpsComparision.rbmOR       thrpt   25    284678,683 ±    670,012  ops/s
+BitMapOpsComparision.rbmXOR      thrpt   25    276253,880 ±   1205,404  ops/s
+----
+
+Damit wird durch RoaringBitmaps nicht nur Speicher gespart, sondern auch die Performance verbessert.
+
+Der Extra Aufwand ist natürlich nur sinnvoll, wenn die Anzahl der Bits signifikant ist, d.h. ab 100 000 Bits.
+// TODO Test mit kleinen Bitsets 100 oder 1000 Bits
+
+// Attempting to use compressed bitmaps is wasteful in some circumstances. For example, this could be when we have a small data universe. Compressed bitmaps are probably not for us if we can uncompress BitSet without increasing memory use. If compression isn't required, BitSet provides exceptional speed.
+
+=== Anwendungsbeispiele
+
+Bitmaps können in vielen Szenarien eingesetzt werden, von Flags auf Social Media Posts für verschiedene Dimensionen, für Speicherung von Nachbarknotenexistenz in Graphen, zu Bloom-Filtern, und auch für die Bestimmung von Kohorten-Analyse für Nutzeraktionen von Anwendungen.
+
+Bei letzerem wird pro Ereignis und Zeitpunkt (Stunde, Tag) ein Bitmap angelegt, in dem pro Nutzer-Id an dessen Position das Bit gesetzt wird, wenn sie diese Aktion ausgelöst haben, wie in Tabelle 2 ersichtlich.
+
+Für Kohorten einer Ereignis-Abfolge werden Schnittmengen der verschiedenen Bitmaps erzeugt, so dass sehr schnell die Anzahlen und Anteile der Nutzer ermittelt werden können.
+
+.Tabelle 2 - Nutzer Kohorten mit BitMaps
+|===
+| Aktion | Zeitpunkt | BitMap mit Nutzer-Ids
+| Registrierung | 2023-06-01 | 0010 1100
+| Suche | 2023-06-01 | 1000 0100
+| Suche | 2023-06-02 | 1100 1000
+| Bestellung | 2023-06-01 | 0110 0100
+|===
+
+So kann für die Kohorte "Spontankäufer ohne Suche" - Registrierung, Suche und Kauf am selben Tag, die Schnittmenge der 3 BitMaps gebildet werden - 0010 1100 (Reg) & 0110 0100 (Kauf) & ~0100 0100 (Keine Suche), woraus sich ergibt dass nur der Nutzer mit der Id 5 unser Spontankäufer ist.
+
+Mit Roaring-Bitmaps wird der Speicherbedarf dieser großen (10-100M Nutzer) Bitmaps minimiert ohne die Effizienz für die Berechnungen zu beeinträchtigen.
+
+> Using Roaring bitmaps instead of traditional bitmaps in that application reduced memory usage from ~125GB to 300MB, an impressive 99.8% savings. [RBMNutzerKohorten]
 
 === Fazit
 
 Ehrlich gesagt, hatte ich mich schon auf den Roaring-Bitmap-Artikel gefreut, damit ich ein paar neue Dinge über effiziente Repräsenntation von Bitmaps lernen könnte.
 Und dann ist alles was darin geschieht einfach nur gesunder Menschenverstand und ein paar Brot-und-Butter Algorithmen, gar keine Raketenwissenschaft, schon etwas ernüchternd.
 
-An einigen Stellen wäre es interessant spezielle optimierte Containertypen für bestimmte Bitmuster zu sehen.
+An einigen Stellen wäre es interessant gewesen, spezielle optimierte Containertypen für bestimmte Bitmuster zu sehen.
 Auch der Wechel von Containertypen sollte einer Hysterese unterliegen, damit an der Grenze von 4096 Werten kein ständiger Wechsel passiert und damit Speicherdruck aufgebaut wird.
-Ich habe auch darüber nachgedacht, ob es nicht sinnvoll wäre, die 65536 verschiedenen Bitmaps einfach in der Bibliothek einmalig zu materialisieren in einem Objekt-Array mit sovielen Einträgen und dann nur einen Offset in diese Array pro Container zu speichern.
-Dann kann bei Änderungen einfach auf einen anderen Container gezeigt werden und optimierte Repräsentationen genutzt werden.
-Auch könnten Set-Operationen über eine Matrix abgebildet werden.
 
-Alternativ könnten häufige Muster mit kürzeren Codes versehen werden und dann statt der vollen Long-Werte genutzt.
+Ich habe auch darüber nachgedacht, ob es nicht sinnvoll wäre, die 65536 verschiedenen Bitmaps einfach in der Bibliothek einmalig zu materialisieren in einem Objekt-Array mit entsprechend vielen Einträgen und dann nur einen Offset auf dieses Array pro Container zu speichern.
+Dann kann bei Änderungen einfach auf einen anderen Container gezeigt werden und optimierte Repräsentationen genutzt werden.
+// Auch könnten Set-Operationen über eine Matrix abgebildet werden.
+Alternativ könnten häufige Muster mit kürzeren Codes (Dictionary Encoding) versehen werden und dann statt der vollen Long-Werte genutzt.
 
 Aber wahrscheinlich ist die aktuelle Implementierung eine gute Balance zwischen Verwaltungsaufwand und Speichernutzung.
 Und zuviel dynamische Verwaltung bringt auch oft die Cache-Line Effizienz und das Vorausladen von kontinuierlichen Speicherbereichen aus dem L3 Cache oder dem Hauptspeicher durcheinander.
 
-TODO 4096 im Paper erklärt?
+// TODO 4096 im Paper erklärt?
 
 Aller Ernüchterung zum Trotz ist es schön zu sehen, dass es effiziente BitMap Implementierungen gibt, die jedenfalls im Bereich bis 4 Milliarden Einträge gut funktionieren, wie der JMH Test zeigt.
 
@@ -349,5 +574,8 @@ Ggf könnte man auch den Präfix Index von 16 auf 24 oder 32 Bit erweitern und d
 * [RBMPaperDatenstruktur] https://arxiv.org/pdf/1402.6407.pdf
 * [RBMPaperImplementierung] https://arxiv.org/pdf/1709.07821v4.pdf
 * [RBM Intro] https://vikramoberoi.com/a-primer-on-roaring-bitmaps-what-they-are-and-how-they-work/
-* [RBM Usecase] https://vikramoberoi.com/using-bitmaps-to-run-interactive-retention-analyses-over-billions-of-events-for-less-than-100-mo/
+* [RBMNutzerKohorten] https://vikramoberoi.com/using-bitmaps-to-run-interactive-retention-analyses-over-billions-of-events-for-less-than-100-mo/
 * [Hackers Delight] https://en.wikipedia.org/wiki/Hacker%27s_Delight  
+* [HungerKompakt] Javaspektrum 04/20 - Hunger, Kompakte Daten
+* [RoaringBitmapsAPI] https://javadoc.io/doc/org.roaringbitmap/RoaringBitmap/latest/org/roaringbitmap/RoaringBitmap.html
+* [BaeldungRoaringBitmaps] https://www.baeldung.com/java-roaring-bitmap-intro
