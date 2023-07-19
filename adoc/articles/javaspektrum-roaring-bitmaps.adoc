@@ -417,12 +417,17 @@ package de.jexp.rbm;
 
 import org.openjdk.jmh.annotations.*;
 import org.roaringbitmap.RoaringBitmap;
+import org.roaringbitmap.buffer.MutableRoaringBitmap;
+
 import java.util.BitSet;
 
 @State(Scope.Thread)
 public class BitMapOpsComparision {
-    // todo better test 6 alternating sets of sections - sparse, dense, run
-    private final static int BM_SIZE = 20_000_000;
+    private final static int COUNT = 32*1024*128;
+    private final static int BM_SIZE = COUNT*5;
+    public static final int PATTERN1 = 0b11110000111100001111000011110000;
+    public static final int PATTERN2 = 0b01010101010101010101010101010101;
+
     private RoaringBitmap rbm1;
     private RoaringBitmap rbm2;
     private BitSet bs1;
@@ -434,15 +439,40 @@ public class BitMapOpsComparision {
 
     @Setup
     public void setup() {
-        rbm1 = RoaringBitmap.bitmapOfRange(0, BM_SIZE/2);
-        rbm2 = RoaringBitmap.bitmapOfRange(BM_SIZE/2,BM_SIZE);
+        MutableRoaringBitmap mrbm1 = new MutableRoaringBitmap();
+        MutableRoaringBitmap mrbm2 = new MutableRoaringBitmap();
 
         bs1 = new BitSet(BM_SIZE);
-        bs1.set(0, BM_SIZE/2);
-
         bs2 = new BitSet(BM_SIZE);
-        bs2.set(BM_SIZE/2, BM_SIZE);
+
+        // prepare large patterns, alternating patterns and small patterns
+        setRange(bs1,mrbm1, 0, COUNT/2, 0);
+        setRange(bs2,mrbm2, 0, COUNT/2, -1);
+        setRange(bs1,mrbm1, COUNT/2, COUNT, -1);
+        setRange(bs2,mrbm2, COUNT/2, COUNT, -1);
+        setRange(bs1,mrbm1, COUNT, COUNT*2, -1);
+        setRange(bs2,mrbm2, COUNT, COUNT*2, 0);
+        setRange(bs1,mrbm1, COUNT*2, COUNT*3, PATTERN1);
+        setRange(bs2,mrbm2, COUNT*2, COUNT*3, ~PATTERN1);
+        setRange(bs1,mrbm1, COUNT*3, COUNT*4, PATTERN2);
+        setRange(bs2,mrbm2, COUNT*3, COUNT*4, PATTERN2);
+        setRange(bs1,mrbm1, COUNT*4, COUNT*5, PATTERN2);
+        setRange(bs2,mrbm2, COUNT*4, COUNT*5, ~PATTERN2);
+
+        rbm1 = mrbm1.toRoaringBitmap();
+        rbm2 = mrbm2.toRoaringBitmap();
+
     }
+    private void setRange(BitSet bs, MutableRoaringBitmap rbm, int start, int count, int pattern) {
+        if (pattern == 0) return;
+        for (int i=0;i<count;i++) {
+            if (((pattern >> (i%32)) & 1) == 1) {
+                bs.set(start+i);
+                rbm.add(start+i);
+            }
+        }
+    }
+
     @Benchmark
     public RoaringBitmap rbmOR() {
         return RoaringBitmap.or(rbm1, rbm2);
@@ -499,15 +529,18 @@ jbang BitMapOpsComparision.java
 # Threads: 1 thread, will synchronize iterations
 # Benchmark mode: Throughput, ops/time
 
-Benchmark                         Mode  Cnt         Score        Error  Units
-BitMapOpsComparision.bsAND       thrpt   25      8868,941 ±     62,160  ops/s
-BitMapOpsComparision.bsAND_NOT   thrpt   25     11971,923 ±    104,107  ops/s
-BitMapOpsComparision.bsOR        thrpt   25      9260,151 ±    174,202  ops/s
-BitMapOpsComparision.bsXOR       thrpt   25      9295,800 ±     96,617  ops/s
-BitMapOpsComparision.rbmAND      thrpt   25  21667599,584 ± 523502,831  ops/s
-BitMapOpsComparision.rbmAND_NOT  thrpt   25    654138,593 ±   2401,952  ops/s
-BitMapOpsComparision.rbmOR       thrpt   25    284678,683 ±    670,012  ops/s
-BitMapOpsComparision.rbmXOR      thrpt   25    276253,880 ±   1205,404  ops/s
+# Run complete. Total time: 01:07:31
+
+Benchmark                         Mode  Cnt     Score     Error  Units
+BitMapOpsComparision.bsAND       thrpt   25  3058,319 ±  13,270  ops/s
+BitMapOpsComparision.bsAND_NOT   thrpt   25  3351,750 ±  29,227  ops/s
+BitMapOpsComparision.bsOR        thrpt   25  2036,074 ± 633,781  ops/s
+BitMapOpsComparision.bsXOR       thrpt   25  1863,982 ± 180,648  ops/s
+
+BitMapOpsComparision.rbmAND      thrpt   25   639,181 ±  44,905  ops/s
+BitMapOpsComparision.rbmAND_NOT  thrpt   25   749,623 ±   1,618  ops/s
+BitMapOpsComparision.rbmOR       thrpt   25  1613,844 ±   4,361  ops/s
+BitMapOpsComparision.rbmXOR      thrpt   25   708,791 ±  42,177  ops/s
 ----
 
 Damit wird durch RoaringBitmaps nicht nur Speicher gespart, sondern auch die Performance verbessert.

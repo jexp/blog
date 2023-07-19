@@ -4,15 +4,104 @@
 
 == Part 1: StackOverflow Data Dump Preparation and Import into DuckDB
 
+////
+evalina
+tags
+questions this week
+when do people ask questions
+
+or dayofweek(date)
+-- 'dayofweek'	Day of the week (Sunday = 0, Saturday = 6)	'weekday', 'dow'
+-- select datepart('dow', now());
+
+-- ┌────────────────────────────────┐
+-- │     bar(v, minv, maxv, 30)     │
+-- │            varchar             │
+-- ├────────────────────────────────┤
+-- │ ██████████████████████▌        │
+-- │ ███▊                           │
+-- │ ██████████████████████████████ │
+-- │                                │
+-- │ ███████████████                │
+-- │ ███████████▎                   │
+-- │ ██████████████████▊            │
+-- │ ██████████████████████████▎    │
+-- │ ███████▌                       │
+-- └────────────────────────────────┘
+
+create type Weekday as enum ('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday');
+
+select count(*), cast(dayname(CreationDate) as Weekday) as day
+from posts where posttypeid = 1 
+and tags like '%>sql<%'
+group by all 
+order by day asc;
+
+-- ┌──────────────┬───────────┐
+-- │ count_star() │    day    │
+-- │    int64     │  weekday  │
+-- ├──────────────┼───────────┤
+-- │       103937 │ Monday    │
+-- │       115575 │ Tuesday   │
+-- │       119825 │ Wednesday │
+-- │       119514 │ Thursday  │
+-- │       103445 │ Friday    │
+-- │        47139 │ Saturday  │
+-- │        47390 │ Sunday    │
+-- └──────────────┴───────────┘
+
+select count(*) as c, bar(c,40000, 120000,20), cast(dayname(CreationDate) as Weekday) as day from posts where posttypeid = 1  and tags like '%<sql>%' group b
+┌────────┬───────────────────────────┬───────────┐
+│   c    │ bar(c, 40000, 120000, 20) │    day    │
+│ int64  │          varchar          │  weekday  │
+├────────┼───────────────────────────┼───────────┤
+│ 103937 │ ███████████████▉          │ Monday    │
+│ 115575 │ ██████████████████▉       │ Tuesday   │
+│ 119825 │ ███████████████████▉      │ Wednesday │
+│ 119514 │ ███████████████████▉      │ Thursday  │
+│ 103445 │ ███████████████▊          │ Friday    │
+│  47139 │ █▊                        │ Saturday  │
+│  47390 │ █▊                        │ Sunday    │
+└────────┴───────────────────────────┴───────────┘
+
+with counts as (
+    select count(*) as c, cast(dayname(CreationDate) as Weekday) as day 
+    from posts where posttypeid = 1  and tags like '%<sql>%' 
+    group by all order by day asc)
+select bar(c,minc,maxc,30) as b, count, day from counts, (select round(min(c),-3) as minc, round(max(c),-3) as maxc from counts group by all);
+
+-- ratio weekend / weekdays
+- for different types of languages
+
+-- locations - geolookup, programmers per million
+-- n x 1/population * registered / located * 1M
+-- based on country local
+
+
+-- tags + users -> communities - one-hot encoding of tags for users
+uses with > 1000 posts, tags with > 5000 posts
+
+
+select users.Id, first(users.DisplayName) as name, count(*) as postCount from users join posts on (posts.OwnerUserId = users.Id) group by users.Id having postCount > 1000 order by postCount desc limit 10;
+
+t-sne embedding of users based on tags
+800 tags embed in 2d space
+
+word2vec embedding
+
+- score for answer plotted over reputation
+tag correlation?
+////
+
 I was always fascinated by the StackOverflow dataset.
 We all spend a lot of our time searching, reading and writing StackOverflow questions and answers, but rarely think about the system and data behind it.
 Let's change that.
 
-It's only 65000 tags and 20 million users (2.2 GB CSV), but 58 million posts (5.3 GB CSV), so it's worth seeing how DuckDB holds up at this size.
-Spoiler: Really well.
+It's only 65000 tags and 20 million users (2.2 GB CSV), but 58 million posts (5.3 GB CSV), so it's worth seeing how DuckDB holds up at this size - which is not "Big Data".
+Spoiler: Really well, which is not surprising if you read Jordan's blog post https://motherduck.com/blog/big-data-is-dead/["Big Data is Dead"^].
 
 
-In this article we'll explore the StackOverflow dataset using DuckDB on MotherDuck.
+In this article series we'll explore the StackOverflow dataset using DuckDB both local and on MotherDuck.
 First we download and transform the raw data, then we load it into DuckDB and inspect it with some EDA queries before exporting it to Parquet.
 We can use these parquet files to create the database on MotherDuck and explore it with the new AI prompt features launched last week.
 To allow you to avoid all the tedious data ingestion work, we use MotherDucks database sharing feature to share the database with you.
@@ -23,7 +112,7 @@ In the last part we'll try out the distributed querying capabilities of MotherDu
 === Data Dump and Extraction
 
 If you just want to explore and query the data you use the https://data.stackexchange.com/stackoverflow/query/new[stack exchange data explorer^], but for real analysis you want to get access to all the data.
-Thankfully StackOverflow publishes all their data publicly on the [internet archive stack exchange dump] every month, we'll be looking at the (largest) set of files from StackOverflow.
+Thankfully StackOverflow publishes all their data publicly on the [internet archive stack exchange dump] every quarter, we'll be looking at the (largest) set of files from StackOverflow.
 
 It takes a long time (for me two days in total) to download, especially the posts file, as the internet archive bandwidth is limited and aborts in between.
 We end up with 7 files with a total size of 27 GB.
@@ -288,6 +377,8 @@ To make it easier to query data that resides in other, remote locations, MotherD
 
 With MotherDuck you can query the data on your cloud storage transparently as if it was local.
 But what's even better, is you can join and combine local data transparently with data residing in the cloud.
+The MotherDuck UI runs a build of DuckDB WASM in your browser, so the operations in the database that can be executed and rendered locally, are executed inside your web-browser.
+// https://motherduckcommunity.slack.com/archives/C059BKPAPC5/p1688374661605709?thread_ts=1688374256.430699&cid=C059BKPAPC5
 
 Here is a picture of the architecture from the https://motherduck.com/docs/architecture-and-capabilities/[documentation^]:
 
@@ -583,9 +674,11 @@ Currently it takes a while to create the share, but in the future it will be a z
 ----
 -- CREATE SHARE <share name> [FROM <database name>];
 CREATE SHARE so_2023_05 FROM so;
+-- share_url = md:_share/so/373594a2-06f7-4c33-814e-cf59028482ca
+-- Run Time (s): real 63.335 user 0.014849 sys 0.013110
 
 -- ATTACH '<share URL>' [AS <database name>];
-ATTACH 
+ATTACH 'md:_share/so/373594a2-06f7-4c33-814e-cf59028482ca' AS so;
 ----
 
 So while you're waiting for the third part of the blog series, you can attach our share (which is public) and run your own queries on it.
@@ -598,6 +691,55 @@ Please share any interesting queries or issues on the https://slack.motherduck.c
 // colab notebook
 
 ////
+
+distributed execution
+
+D explain select u.aboutme, c.country from countries.countries c join so.users u on (contains(u.aboutme, c.country)) limit 10;
+
+┌─────────────────────────────┐
+│┌───────────────────────────┐│
+││       Physical Plan       ││
+│└───────────────────────────┘│
+└─────────────────────────────┘
+┌───────────────────────────┐                             
+│         LIMIT (L)         │                             
+└─────────────┬─────────────┘                                                          
+┌─────────────┴─────────────┐                             
+│       PROJECTION (L)      │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│          AboutMe          │                             
+│          Country          │                             
+└─────────────┬─────────────┘                                                          
+┌─────────────┴─────────────┐                             
+│   BLOCKWISE_NL_JOIN (L)   │                             
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │                             
+│           INNER           ├──────────────┐              
+│ contains(AboutMe, Country)│              │              
+└─────────────┬─────────────┘              │                                           
+┌─────────────┴─────────────┐┌─────────────┴─────────────┐
+│       SEQ_SCAN  (L)       ││    DOWNLOAD_SOURCE (L)    │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   ││   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│         countries         ││        bridge_id: 1       │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   ││                           │
+│          Country          ││                           │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   ││                           │
+│           EC: 0           ││                           │
+└───────────────────────────┘└─────────────┬─────────────┘                             
+                             ┌─────────────┴─────────────┐
+                             │  BATCH_DOWNLOAD_SINK (R)  │
+                             │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+                             │        bridge_id: 1       │
+                             └─────────────┬─────────────┘                             
+                             ┌─────────────┴─────────────┐
+                             │       SEQ_SCAN  (R)       │
+                             │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+                             │           users           │
+                             │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+                             │          AboutMe          │
+                             │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+                             │           EC: 0           │
+                             └───────────────────────────┘                             
+
 
 == MotherDuck
 
@@ -648,7 +790,7 @@ which returns a shareable URL that you then can use with `ATTACH`.
 
 access the sample_data database e.g. with the `sample_data.nyc.yellow_cab_nyc_2022_11` table
 
-sample datasets: https://motherduck.com/docs/category/sample-datasets--queries/
+sample datasets: link:https://motherduck.com/docs/category/sample-datasets--queries/
 
 `ATTACH 'md:_share/share_sample_data/23b0d623-1361-421d-ae77-62d701d471e6' AS sample_data;`
 
