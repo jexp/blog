@@ -95,24 +95,24 @@ tag correlation?
 
 I was always fascinated by the StackOverflow dataset.
 We all spend a lot of our time searching, reading and writing StackOverflow questions and answers, but rarely think about the system and data behind it.
-Let's change that.
+Let's change that by analyzing the dataset with DuckDB.
 
-It's only 65000 tags and 20 million users (2.2 GB CSV), but 58 million posts (5.3 GB CSV), so it's worth seeing how DuckDB holds up at this size - which is not "Big Data".
+The data has only 65000 tags and 20 million users (600MB compressed CSV), but 58 million posts (3GB), so it's worth seeing how DuckDB holds up at this size - which is not "Big Data".
 Spoiler: Really well, which is not surprising if you read Jordan's blog post https://motherduck.com/blog/big-data-is-dead/["Big Data is Dead"^].
 
-
-In this article series we'll explore the StackOverflow dataset using DuckDB both local and on MotherDuck.
+In this article series we explore the StackOverflow dataset using DuckDB both locally and on MotherDuck.
 First we download and transform the raw data, then we load it into DuckDB and inspect it with some EDA queries before exporting it to Parquet.
-We can use these parquet files to create the database on MotherDuck and explore it with the new AI prompt features launched last week.
+
+Then we can use these parquet files to create the database on MotherDuck and explore it with the new natural language search (AI prompt) features launched last month.
 To allow you to avoid all the tedious data ingestion work, we use MotherDucks database sharing feature to share the database with you.
 
-For some more interesting queries we access the DuckDB database on MotherDuck from a Python notebook and visualize the results.
-In the last part we'll try out the distributed querying capabilities of MotherDuck from our local machine.
+Finally for some more interesting queries we access the DuckDB database on MotherDuck from a Python notebook and visualize the results.
+We also try out the distributed querying capabilities of MotherDuck from our local machine.
 
 === Data Dump and Extraction
 
 If you just want to explore and query the data you use the https://data.stackexchange.com/stackoverflow/query/new[stack exchange data explorer^], but for real analysis you want to get access to all the data.
-Thankfully StackOverflow publishes all their data publicly on the [internet archive stack exchange dump] every quarter, we'll be looking at the (largest) set of files from StackOverflow.
+Thankfully StackOverflow publishes all their data publicly on the https://archive.org/download/stackexchange[internet archive stack exchange dump^] every moth, we are looking at the (largest) set of files of the StackOverflow site itself.
 
 It takes a long time (for me two days in total) to download, especially the posts file, as the internet archive bandwidth is limited and aborts in between.
 We end up with 7 files with a total size of 27 GB.
@@ -128,8 +128,10 @@ We end up with 7 files with a total size of 27 GB.
 903K stackoverflow.com-Tags.7z
 ----
 
-After the download finished, you need to use p7zip to extract the files, which you often need to install separately.
+To convert the SQL-Server Dump XML files to CSV I used a tool I wrote a few years ago, which you can find https://github.com/neo4j-examples/neo4j-stackoverflow-import[on GitHub^].
 
+////
+After the download finished, you need to use p7zip to extract the files, which you often need to install separately.
 I recompressed the XML files using `pigz`, the parallel gzip implementation, which is much faster than the default gzip.
 
 ----
@@ -160,8 +162,9 @@ Comments.xml.gz->[Id, PostId, Score, Text, CreationDate, UserId, ContentLicense]
 Processing Comments.xml.gz
 Done processing Comments.xml.gz with 88222951 rows in 1592 seconds.
 ----
+////
 
-It outputs the files as gzipped CSV, which are much smaller now, with separate headers which is useful for the Neo4j import tool.
+It outputs the files as gzipped CSV, which are much smaller now.
 
 ----
 5.0G Comments.csv.gz
@@ -180,26 +183,29 @@ To remind ourselves of the UI here is a screenshot with most information visible
 
 image::so-duckdb.png[]
 
-We have the `Questions` (`Post` with postTypeId=1) with a Owner, upvotes, downvotes, tags, views and comments.
-The up to 6 `Tags` define the topics of the questions.
-The `User` with bio, reputation, last login date.
-The `Answers` (Post with postTypeId=2) with their own owner, upvotes, downvotes, comments.
+We have the `Questions` (`Post` with `postTypeId=1`) with a `title`, `body`, `creationDate`, `ownerUserId`, `acceptedAnswerId`, `answerCount`, `tags`, `upvotes`, `downvotes`, `views`, `comments`.
+The up to 6 `Tags` define the topics of the question.
+The `User` with `displayName`, `aboutMe`, `reputation`, `last login` date, etc.
+The `Answers` (Post with `postTypeId=2`) with their own `ownerUserId`, `upvotes`, `downvotes`, `comments`.
 One of the answers can be accepted as the correct answer.
-Both can have comments with their own owner, upvotes, downvotes.
-There are also `Badges` that users can earn for their contributions.
+Both Questions and Answers can have comments with their own `text`, `ownerUserId`, `score`.
+There are also `Badges` with `class` columns that users can earn for their contributions.
 Posts can be linked to other posts, e.g. duplicates or related questions as `PostLinks`.
 
 The dump doesn't have any information of indexes or foreign keys so, we need to discover them as we go.
 
 // TODO data model picture in arrows?
+image::so-model.png[]
 
 === Loading the Data into DuckDB
 
-Now we're ready to import the files into DuckDB, which is much easier than our previous steps.
+Now we're ready to import the files into DuckDB, which is so much easier than our previous steps.
 
-With `read_csv` we can read the CSV files directly from the compressed gzipped files.
+With the `read_csv` function, we can read the CSV files directly from the compressed gzipped files.
 As we have header-less files, we need to provide the column names as a list.
 The `auto_detect` option will try to guess the column types, which works well for the StackOverflow data.
+
+Let's look at the `Tags` file first and query it for structure and content.
 
 [source,sql]
 ----
@@ -245,17 +251,17 @@ order by Count desc limit 5;
 ----
 
 We could either create the tables first and read the data into them or we can create the tables on the fly as we read the data.
-I won't show all of them but you can find them in the [GitHub repository^].
+I won't show all of the import statements, only Users and Posts, but you can imagine what it will look like.
+
 
 .Creating Tables in DuckDB
 [source,sql]
 ----
-create table users as 
-
+create table users as
 select * from read_csv('Users.csv.gz',auto_detect=true,
 column_names=['Id','Reputation','CreationDate','DisplayName','LastAccessDate','AboutMe','Views','UpVotes','DownVotes']);
 
--- 19942787
+-- 19942787 rows
 
 -- we can leave off the select * 
 create table posts as 
@@ -266,18 +272,21 @@ from read_csv('Posts.csv.gz',auto_detect=true,
     'Tags','AnswerCount','CommentCount','FavoriteCount',
     'CommunityOwnedDate','ContentLicense']);
 
--- 58329356
+-- 58329356 rows
 ----
 
 === Exploratory Queries
 
-Now that we have our tables, we can run a a few queries to see what we have.
+Now that we have our tables loaded, we can run a a few queries to see what we have.
 
-First we see who are our top users and when did they last login (from this dump), this computes on my machine in 0.126 seconds for 20 million users.
+First we check who our top users are and when did they last login (from this dump), this computes on my machine in 0.126 seconds for 20 million users.
 
 [source,sql]
 ----
 .timer on
+
+select DisplayName, Reputation, LastAccessDate 
+from users order by Reputation desc limit 5;
 
 ┌─────────────────┬────────────┬─────────────────────────┐
 │   DisplayName   │ Reputation │     LastAccessDate      │
@@ -330,9 +339,9 @@ Our DuckDB database file is 18GB, which is a two times as big as the ultra-compr
 
 === Export the Data to Parquet
 
-We could continue to use our local database file, but we wanted to explore MotherDuck, so let's upload it to the cloud.
+We could continue to use our local database file, but we wanted to explore MotherDuck, so let's upload the data to the cloud.
 
-Alternatively we can just export our tables to Parquet files for safekeeping and easier storage and processing in other ways.
+We can export our tables to Parquet files for safekeeping and easier storage and processing in other ways.
 Parquet as a columnar format compresses better, includes the schema and supports optimized reading with column selection and predicate pushdown.
 
 [source,sql]
@@ -359,11 +368,18 @@ You can also export your whole database as Parquet files `EXPORT DATABASE 'targe
 1.6M tags.parquet
 ----
 
-I uploaded them to S3 you can find them here:
-
-// TODO general s3 bucket
+I uploaded them to S3 you can find them here: `s3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05`
 
 So if you don't want to wait for the second part in the series, where we load the data into MotherDuck and query it with AI prompts, you can import the public parquet files into your own database and play around with them.
+
+[source,sql]
+----
+create database so_test;
+
+create table users as 
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/users.parquet';
+----
+
 Please share any interesting queries or issues on the https://slack.motherduck.com/[MotherDuck Slack channel^].
 
 == Part 2: From Local to Cloud - Loading our Database into MotherDuck and Querying it with AI Prompts
@@ -451,7 +467,7 @@ You can do this in the web interface or on your local machine, connected to Moth
 create database stackoverflow;
 
 create table users as 
-from 's3://data.xxx.com/stackoverflow/2023-05/users.parquet';
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/users.parquet';
 -- Run Time (s): real 10.401 user 0.006417 sys 0.003527
 describe users;
 ┌────────────────┬─────────────┐
