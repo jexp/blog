@@ -370,8 +370,13 @@ You can also export your whole database as Parquet files `EXPORT DATABASE 'targe
 
 I uploaded them to S3 you can find them here: `s3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05`
 
-So if you don't want to wait for the second part in the series, where we load the data into MotherDuck and query it with AI prompts, you can import the public parquet files into your own database and play around with them.
+So if you don't want to wait for the second part in the series, where we load the data into MotherDuck and query it with AI prompts, you can use this share `_share/stackoverflow/6c318917-6888-425a-bea1-5860c29947e5` and look at the https://motherduck.com/docs/sample-data-queries/stackoverflow[StackOverflow Example in the docs^].
 
+Please share any interesting queries or issues on the https://slack.motherduck.com/[MotherDuck Slack channel^].
+
+== Part 2: From Local to Cloud - Loading our Database into MotherDuck and Querying it with AI Prompts
+
+////
 [source,sql]
 ----
 create database so_test;
@@ -379,10 +384,7 @@ create database so_test;
 create table users as 
 from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/users.parquet';
 ----
-
-Please share any interesting queries or issues on the https://slack.motherduck.com/[MotherDuck Slack channel^].
-
-== Part 2: From Local to Cloud - Loading our Database into MotherDuck and Querying it with AI Prompts
+////
 
 === Getting started with MotherDuck
 
