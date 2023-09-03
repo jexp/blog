@@ -382,17 +382,9 @@ Today we want to move from our local evironment to MotherDuck, where we want to 
 
 ////
 Hey Michael, here are some feedback on the part 2!
-As this is released in different part on our blog, it would be great to have in the intro :
-
-A reminder about what this blog post series is about
-What we covered in the part 1 (with a link)
-
-| Then you need the motherduck extension and you’re ready to go. I just put that into my $HOME/duckdbrc config file. 
-This sound a bit confusing as one could understand they need to do something extra on the setup. 
-Maybe rephrase and do something in these lines :  anywhere you can run duckdb you can run motherduck as the motherduck extension is part of the official duckdb extensions and will be downloaded & loaded as soon as you try to connect to a motherduck database through .open md:`
-There's a problem with an image, getting a 404 here
 
 | And for the size of our StackOverflow database it took quite some time to finish the upload, not 100% sure but I think around 2 hours. Maybe highlight that here, the problem is not really motherduck/duckdb but rather , when dealing with large DB, your internet connection is limited compared to cloud provider network. Sounds obvious but the way it is written right now sound like there's some limit we could improve (which may be true to some extend), but it's rather a pattern we want to avoid.
+
 I'm missing a conclusion on this part :
 explain what you did and what would be next
 Give your take on the AI feature or in general how you feel about LLM & SQL :slightly_smiling_face:
@@ -427,11 +419,9 @@ image::https://motherduck.com/docs/assets/images/md-diagram_v1.2-fde6f7192947deb
 
 Motherduck also integrates with Python and all the other access libraries and integrations for DuckDB.
 
-If you already got an invite to MotherDuck, you can create an account, if not you can request one via the form on the https://motherduck.com/[homepage^].
+If you already got an *invite to MotherDuck*, you can create an account, if not you can request one via the form on the https://motherduck.com/[homepage^].
 
-As the MotherDuck extension
-
-Anywhere you can run DuckDB you can use MotherDuck as its extension is an official DuckDB extension and will be downloaded & loaded as soon as you connect to a motherduck database through `.open md:` or similar commands.
+Anywhere you can run DuckDB you can use MotherDuck as it connects through an official DuckDB extension which is downloaded & loaded as soon as you connect to a motherduck database through `.open md:` or similar commands.
 
 ////
 To get started you need the `motherduck` extension and you're ready to go.
@@ -459,7 +449,7 @@ You can store it as an environment variable to avoid having to log in again:
   $ export motherduck_token='eyJhbGciOiJI..._Jfo'
 ----
 
-Once you have an account you get a *access token*, which you need to connect to MotherDuck.
+Once you have an account you get a *motherduck_token*, which you need to connect to MotherDuck.
 Best to set the token as an environment variable, instead of a database variable, because opening a new database wipes the settings in DuckDB (trust me, I tried).
 
 If you want to explore the MotherDuck UI first, feel free to do so, you can create new databases, upload files and create tables from those.
@@ -467,7 +457,7 @@ You can run queries and get a nice pivotable, sortable output table with inline 
 
 image::motherduck-ui.png[]
 
-=== Loading the Data into MotherDuck
+=== Loading our StackOverflow Data into MotherDuck
 
 You have the option of uploading your local database with single command, which is really neat.
 
@@ -479,17 +469,20 @@ CREATE DATABASE remote_database_name FROM CURRENT_DATABASE();
 CREATE DATABASE remote_database_name FROM '<local database name>';
 ----
 
+TODO: check
 There are only two caveats, *the local and remote name must be different*, otherwise you might get the error below.
 
 ----
 Catalog Error: error while importing share: Schema with name <local-database-name> does not exist!
 ----
 
-And for the size of our StackOverflow database it took quite some time to finish the upload, not 100% sure but I think around 2 hours.
+TODO: check
+And for the size of our StackOverflow database and the  it took quite some time to finish the upload, not 100% sure but I think around 2 hours.
 
-So we can rather create the database on the MotherDuck UI and import our tables directly from our Parquet files on S3.
+So we can either create the database on the MotherDuck UI and import our tables from our Parquet files on S3, or upload the database from our local system.
 
-You can do this in the web interface or on your local machine, connected to MotherDuck.
+For creating the database and tables from Parquest, we use the web interface or DuckDB on the local machine, connected to MotherDuck.
+Here are the SQL commands you need to run.
 
 [source,sql]
 ----
@@ -498,6 +491,7 @@ create database so;
 create table users as 
 from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/users.parquet';
 -- Run Time (s): real 10.401 user 0.006417 sys 0.003527
+
 describe users;
 ┌────────────────┬─────────────┐
 │  column_name   │ column_type │
@@ -542,7 +536,7 @@ create table tags as
 from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/tags.parquet';
 ----
 
-In the left sidebar of your web interface, now the database `so`  and the tables should show up, if not, refresh the page.
+In the left sidebar of the web interface, now the database `so`  and the tables should show up, if not, refresh the page.
 
 image::motherduck-ui-so.png[width=300]
 
@@ -551,12 +545,12 @@ image::motherduck-ui-so.png[width=300]
 A while ago MotherDuck released a new https://motherduck.com/docs/key-tasks/using-ml-to-query[generative AI feature^] that allows you to
 
 * query your data using natural language
-* generate SQL statements and 
+* generate and fix SQL statements and 
 * describe your data.
 
-As LLMs, GPT and foundational models are https://medium.com/@mesirii[close to my heart^], I was really excited to try this out.
+As LLMs, GPT and foundational models are https://medium.com/@mesirii[close to my heart^], I was really excited to try these out.
 
-It works actually already quite well, let's see how it does.
+It works actually already quite well, let's see how it does on this dataset.
 
 The schema description is a bit uninspiring, I could have seen the same by just looking at the table list.
 As expected from probabilistic models it returns different results on each run.
@@ -610,6 +604,7 @@ call prompt_sql('What are the most popular tags?');
 ----
 
 Looks good to me, it's even smart enough to use the attribute and ordering and limit to get "most popular" tags.
+The runtime for these AI prompts is between 2 and 10 seconds almost exclusively depending on the processing time of the LLM.
 
 That was pretty easy, so let's see how it deals a few more involved questions.
 
@@ -649,7 +644,7 @@ LIMIT 1;
 Run Time (s): real 3.683 user 0.001970 sys 0.000994
 ----
 
-Ok, not bad, it's nice that it detects that `PostTypeId = 1` are questions, now lets go for the next one.
+Ok, not bad, it's nice that it detects that `PostTypeId = 1` are questions (or known that from its training data on Stackoverflow), now lets go for the next one.
 
 [source,sql]
 ----
@@ -724,8 +719,12 @@ That's a really neat feature, hope they use it in their UI when your query would
 
 To https://motherduck.com/docs/key-tasks/sharing-a-motherduck-database[make this data available to others^], we can use the `CREATE SHARE` command.
 
+TODO check:
+
 If we run it, we will get a shareable link, that others can use with `ATTACH` to https://motherduck.com/docs/key-tasks/querying-a-shared-motherduck-database[attach our database^].
 Currently it takes a while to create the share, but in the future it will be a zero-copy operation.
+
+TODO check:
 
 [source,sql]
 ----
@@ -738,7 +737,16 @@ CREATE SHARE so_2023_05 FROM so;
 ATTACH 'md:_share/so/373594a2-06f7-4c33-814e-cf59028482ca' AS so;
 ----
 
+Today we explored the MotherDuck interface, created a database and populated it with tables using Parquet data on S3.
+That worked really well and you should be able to do this with your own data easily.
+
+Then we tried the new AI prompts on MotherDuck, which work quite well, of course not 100% but often good enough to get a starting point or learn something new.
+Given the amount of SQL information that was used to the train the LLMs plus the additional schema information, that is not surprising.
+SQL (derived from structured english query language SEQUEL) is just another langauge for the LLM to translate into, much like Korean or Klingon.
+
 So while you're waiting for the third part of the blog series, you can attach our share (which is public) and run your own queries on it.
+
+In the third part we want to connect to our StackOverflow database on MotherDuck using Python and explore some more ways accessing, querying and visualizing our data.
 
 Please share any interesting queries or issues on the https://slack.motherduck.com/[MotherDuck Slack channel^].
 
