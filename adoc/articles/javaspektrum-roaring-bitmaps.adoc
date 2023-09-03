@@ -290,17 +290,17 @@ Wenn ich dagegen 5000 Zahlen im Bereich von 2^20 (also ca 1 Million) einfüge, w
 
 Für verschiedene Füllgrade (Kardinalitäten) gibt es verschiedene Containerarten.
 
-Für spärlichen Besatz mit weniger als 4096 Einträge (6,25% Füllgrad) wird ein `ArrayContainer` (auch als Sparse Container bezeichnet) als sortiertes dynamisch wachsendes Feld genutzt, der die gesetzten, untere 16 Bit Werten (`N % 2^16`` oder `N & 0xFFFF``) unserer Zahlen enthält.
+Für spärlichen Besatz mit weniger als 4096 Einträge (6,25% Füllgrad) wird ein `ArrayContainer` (auch als Sparse Container bezeichnet) als sortiertes dynamisch wachsendes Feld genutzt, der die gesetzten, untere 16 Bit Werten (`N % 2^16` oder `N & 0xFFFF`) unserer Zahlen enthält.
 
 Für mehr als 4096 Einträge wird ein `BitMapContainer` (oder auch Dense Container) genutzt, der eine traditionelles BitMap mit 2^16 Bits also 8 Kilobytes darstellt, die komplett alloziert werden. Dabei werden Long-Werte für die Speicherung der Bits genutzt, also 1024 Long Werte. 
 Der Aufbau und Inhalt für unser Beispiel ist in Tabelle 1 zu sehen.
 
 .Tabelle 1 - Aufbau RoaringBitmap - Präfix und Containerarten
-[%autowidth,opts=header,cols="m,a,m,m"]
+[%autowidth,opts=header,cols="m,a,m,m,m"]
 |===
 | Präfix | Art | Typ | Kardinalität | Inhalt
 | 0000 0000 0000 0000 | Sparse Container | ArrayContainer | 100 | 0,1,2,3,..,99
-| ... | | | |
+| ... | | | | 
 | 0000 0000 0001 0000 | Dense Container | BitMapContainer | 5000 | 1111 1111 .. 4984x1 .. 1111 1111 0000 .... 0000
 |===
 
@@ -348,7 +348,7 @@ Dabei werden 3 der 4 Kombinationen unterschieden.
 Bei einer geringen Kardinalität eines der Felder werden dessen Einträge werden im anderen binär gesucht (Galloping Intersection). 
 Oder mittels Shotgun Intersection bei höheren Kardinalitäten, dabei werden zwei Zeiger in beiden sortierten Feldern vorwärtsbewegt. Solange der Wert in einem der Felder kleiner ist als im anderen. Bei übereinstimmendem Wert wird dieser zur Schnittmenge hinzugefügt.
 
-*Sparse/Dense:* Ergebnis ist immer ein Sparse Container, da es maximal 4096 überlappende Einträge geben kann
+*Sparse/Dense:* Ergebnis ist immer ein Sparse Container, da es maximal 4096 überlappende Einträge geben kann.
 Einträge aus dem Sparse Cointainer werden im Dense Container getested.
 
 *Dense/Dense:* Die nicht-leeren Bitset Einträge der Container (Long-Werte) werden miteinander mittels UND verknüpft und das Ergebnis ist je nach End-Kardinalität ein Dense Container bzw. Sparse Container.
@@ -423,10 +423,10 @@ import java.util.BitSet;
 
 @State(Scope.Thread)
 public class BitMapOpsComparision {
-    private final static int COUNT = 32*1024*128;
-    private final static int BM_SIZE = COUNT*5;
-    public static final int PATTERN1 = 0b11110000111100001111000011110000;
-    public static final int PATTERN2 = 0b01010101010101010101010101010101;
+    final static int COUNT = 32*1024*128;
+    final static int BM_SIZE = COUNT*5;
+    final static int PATTERN1 = 0b11110000111100001111000011110000;
+    final static int PATTERN2 = 0b01010101010101010101010101010101;
 
     private RoaringBitmap rbm1;
     private RoaringBitmap rbm2;
@@ -445,19 +445,14 @@ public class BitMapOpsComparision {
         bs1 = new BitSet(BM_SIZE);
         bs2 = new BitSet(BM_SIZE);
 
-        // prepare large patterns, alternating patterns and small patterns
+        // große, kleine, und alternierende Muster vorbereiten
         setRange(bs1,mrbm1, 0, COUNT/2, 0);
         setRange(bs2,mrbm2, 0, COUNT/2, -1);
         setRange(bs1,mrbm1, COUNT/2, COUNT, -1);
         setRange(bs2,mrbm2, COUNT/2, COUNT, -1);
         setRange(bs1,mrbm1, COUNT, COUNT*2, -1);
         setRange(bs2,mrbm2, COUNT, COUNT*2, 0);
-        setRange(bs1,mrbm1, COUNT*2, COUNT*3, PATTERN1);
-        setRange(bs2,mrbm2, COUNT*2, COUNT*3, ~PATTERN1);
-        setRange(bs1,mrbm1, COUNT*3, COUNT*4, PATTERN2);
-        setRange(bs2,mrbm2, COUNT*3, COUNT*4, PATTERN2);
-        setRange(bs1,mrbm1, COUNT*4, COUNT*5, PATTERN2);
-        setRange(bs2,mrbm2, COUNT*4, COUNT*5, ~PATTERN2);
+        // ... weitere Bitmuster
 
         rbm1 = mrbm1.toRoaringBitmap();
         rbm2 = mrbm2.toRoaringBitmap();
@@ -493,6 +488,18 @@ public class BitMapOpsComparision {
         result.and(bs2);
         return result;
     }
+    // weitere Tests ..
+}
+----
+
+////
+        setRange(bs1,mrbm1, COUNT*2, COUNT*3, PATTERN1);
+        setRange(bs2,mrbm2, COUNT*2, COUNT*3, ~PATTERN1);
+        setRange(bs1,mrbm1, COUNT*3, COUNT*4, PATTERN2);
+        setRange(bs2,mrbm2, COUNT*3, COUNT*4, PATTERN2);
+        setRange(bs1,mrbm1, COUNT*4, COUNT*5, PATTERN2);
+        setRange(bs2,mrbm2, COUNT*4, COUNT*5, ~PATTERN2);
+
     @Benchmark
     public RoaringBitmap rbmAND_NOT() {
         return RoaringBitmap.andNot(rbm1, rbm2);
@@ -513,11 +520,13 @@ public class BitMapOpsComparision {
         result.xor(bs2);
         return result;
     }
-}
-----
+        
+////
+
 
 Die Ergebnisse des Durchlaufs sind in Listing {counter:listing} zu sehen.
-Es ist zu erkennen, das Roaring Bitmaps in allen Operationen schneller sind als die JDK Bitsets, zwischen zwei- und zweihundert?? mal so schnell.
+Es ist zu erkennen, dass die JDK Bitsets in allen Operationen schneller sind als die Roaring Bitmaps Bitsets, bis zu 5 mal so schnell.
+Das war unerwartet, da die Roaring Bitmaps Bitsets ja keine Performanceinbussen haben sollen. Es kann sein, dass durch die relativ dichten Muster in den Bitsets, die Roaring Bitmaps nicht so gut abschneiden, wie bei spärlich besetzten Bitsets.
 
 .Listing {listing} - JMH Performance Test Ergebnisse
 ----

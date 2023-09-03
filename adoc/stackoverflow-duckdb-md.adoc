@@ -376,7 +376,29 @@ Please share any interesting queries or issues on the https://slack.motherduck.c
 
 == Part 2: From Local to Cloud - Loading our Database into MotherDuck and Querying it with AI Prompts
 
+In the https://motherduck.com/blog/exploring-stackoverflow-with-duckdb-on-motherduck-1/[first part of the series^] we looked at the full StackOverflow dump as an interesting dataset to explore with DuckDB.
+We downloaded the data, converted it to CSV and loaded it into DuckDB and explored tags, users and posts a bit before exporting the database to Parquet.
+Today we want to move from our local evironment to MotherDuck, where we want to look at importing these parquet files into a database, sharing that database with you and exploring the data with the new AI prompt features.
+
 ////
+Hey Michael, here are some feedback on the part 2!
+As this is released in different part on our blog, it would be great to have in the intro :
+
+A reminder about what this blog post series is about
+What we covered in the part 1 (with a link)
+
+| Then you need the motherduck extension and you’re ready to go. I just put that into my $HOME/duckdbrc config file. 
+This sound a bit confusing as one could understand they need to do something extra on the setup. 
+Maybe rephrase and do something in these lines :  anywhere you can run duckdb you can run motherduck as the motherduck extension is part of the official duckdb extensions and will be downloaded & loaded as soon as you try to connect to a motherduck database through .open md:`
+There's a problem with an image, getting a 404 here
+
+| And for the size of our StackOverflow database it took quite some time to finish the upload, not 100% sure but I think around 2 hours. Maybe highlight that here, the problem is not really motherduck/duckdb but rather , when dealing with large DB, your internet connection is limited compared to cloud provider network. Sounds obvious but the way it is written right now sound like there's some limit we could improve (which may be true to some extend), but it's rather a pattern we want to avoid.
+I'm missing a conclusion on this part :
+explain what you did and what would be next
+Give your take on the AI feature or in general how you feel about LLM & SQL :slightly_smiling_face:
+Let me know what you think about these, and looking forward to publish this one too!!
+
+
 [source,sql]
 ----
 create database so_test;
@@ -389,25 +411,30 @@ from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/users.p
 === Getting started with MotherDuck
 
 DuckDB itself is focusing on local, and in-process execution of the analytical database engine.
-While you can access remote data, it's downloaded to your machine every time you access the remote files, so you really want to move your DuckDB instance to where the data lives
+While you can access remote data, it's downloaded to your machine every time you access the remote files, so you really might want to move your DuckDB execution to where the data lives
 
-To make it easier to query data that resides in other, remote locations, MotherDuck offers a managed service, that allows you to run DuckDB in the cloud.
+To make it easier to query data that resides in other, remote locations, MotherDuck offers a managed service that allows you to run DuckDB in the cloud.
 
 With MotherDuck you can query the data on your cloud storage transparently as if it was local.
-But what's even better, is you can join and combine local data transparently with data residing in the cloud.
+But what's even better, is you can join and combine local tables transparently with data in tables residing in the cloud.
 The MotherDuck UI runs a build of DuckDB WASM in your browser, so the operations in the database that can be executed and rendered locally, are executed inside your web-browser.
+
 // https://motherduckcommunity.slack.com/archives/C059BKPAPC5/p1688374661605709?thread_ts=1688374256.430699&cid=C059BKPAPC5
 
 Here is a picture of the architecture from the https://motherduck.com/docs/architecture-and-capabilities/[documentation^]:
 
 image::https://motherduck.com/docs/assets/images/md-diagram_v1.2-fde6f7192947deb7a58934c66e8de1d3.png[]
 
-It also integrates with Python and all the other access libraries for DuckDB.
+Motherduck also integrates with Python and all the other access libraries and integrations for DuckDB.
 
-If you already got an invite to MotherDuck, you can create an account, if not, you can join the mailing list or hit me up. 
-Alternatively I heard there might invites on the https://slack.motherduck.com/[MotherDuck Slack^] available, if you come up with a good duck pun.
+If you already got an invite to MotherDuck, you can create an account, if not you can request one via the form on the https://motherduck.com/[homepage^].
 
-Then you need the `motherduck` extension and you're ready to go.
+As the MotherDuck extension
+
+Anywhere you can run DuckDB you can use MotherDuck as its extension is an official DuckDB extension and will be downloaded & loaded as soon as you connect to a motherduck database through `.open md:` or similar commands.
+
+////
+To get started you need the `motherduck` extension and you're ready to go.
 I just put that into my `$HOME/duckdbrc` config file.
 
 With `.open md:` or `.open md:databasename` you open a remote connection.
@@ -417,21 +444,23 @@ duckdb
 
 install motherduck;
 load motherduck;
+////
 
+----
 .open md:
 Attempting to automatically open the SSO authorization page 
    in your default browser.
 1. Please open this link to login into your account: 
     https://auth.motherduck.com/activate
-2. Enter the following code: XLXM-MJLQ
+2. Enter the following code: XXXX-XXXX
 
 Token successfully retrieved ✅
 You can store it as an environment variable to avoid having to log in again:
-  $ export motherduck_token='eyJhbGciOiJI...qzeisIuf8_WdQex_Jfo'
+  $ export motherduck_token='eyJhbGciOiJI..._Jfo'
 ----
 
-Once you have an account you get a token, which you need to connect to MotherDuck.
-Best to set the token as an environment variable, as opening a new database wipes the settings in DuckDB (trust me, I tried).
+Once you have an account you get a *access token*, which you need to connect to MotherDuck.
+Best to set the token as an environment variable, instead of a database variable, because opening a new database wipes the settings in DuckDB (trust me, I tried).
 
 If you want to explore the MotherDuck UI first, feel free to do so, you can create new databases, upload files and create tables from those.
 You can run queries and get a nice pivotable, sortable output table with inline frequency charts in the header.
@@ -450,23 +479,21 @@ CREATE DATABASE remote_database_name FROM CURRENT_DATABASE();
 CREATE DATABASE remote_database_name FROM '<local database name>';
 ----
 
-There are only two caveats, *the local and remote name must be different*, otherwise you get the error below.
+There are only two caveats, *the local and remote name must be different*, otherwise you might get the error below.
 
 ----
 Catalog Error: error while importing share: Schema with name <local-database-name> does not exist!
 ----
 
-// TODO unnest
-
 And for the size of our StackOverflow database it took quite some time to finish the upload, not 100% sure but I think around 2 hours.
 
-So we rather create the database on MotherDuck and import our tables directly from our Parquet files on S3.
+So we can rather create the database on the MotherDuck UI and import our tables directly from our Parquet files on S3.
 
 You can do this in the web interface or on your local machine, connected to MotherDuck.
 
 [source,sql]
 ----
-create database stackoverflow;
+create database so;
 
 create table users as 
 from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/users.parquet';
@@ -500,6 +527,19 @@ describe users;
 Run Time (s): real 0.032 user 0.026184 sys 0.002383
 
 -- do the same for the other tables
+
+create table comments as 
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/comments.parquet';
+create table posts as 
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/posts.parquet';
+create table votes as 
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/votes.parquet';
+create table badges as 
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/badges.parquet';
+create table post_links as 
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/post_links.parquet';
+create table tags as 
+from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/tags.parquet';
 ----
 
 In the left sidebar of your web interface, now the database `so`  and the tables should show up, if not, refresh the page.
@@ -508,7 +548,7 @@ image::motherduck-ui-so.png[width=300]
 
 == Querying the Data with AI 🤖
 
-Last week MotherDuck released a new https://motherduck.com/docs/key-tasks/using-ml-to-query[generative AI feature^] that allows you to
+A while ago MotherDuck released a new https://motherduck.com/docs/key-tasks/using-ml-to-query[generative AI feature^] that allows you to
 
 * query your data using natural language
 * generate SQL statements and 
@@ -640,7 +680,7 @@ LIMIT 5;
 Run Time (s): real 4.795 user 0.002301 sys 0.001346
 ----
 
-This is what it looks like in the MotherDuck UI
+This is what it looks like in the MotherDuck UI:
 
 image::md-query-ai.png[]
 
@@ -657,7 +697,6 @@ ORDER BY CommentCount DESC
 LIMIT 5;
 Run Time (s): real 3.587 user 0.001733 sys 0.000865
 ----
-
 
 You can also use `prompt_fixup` to fix the SQL for a query, e.g. the infamous, "I forgot GROUP BY".
 
@@ -700,6 +739,7 @@ ATTACH 'md:_share/so/373594a2-06f7-4c33-814e-cf59028482ca' AS so;
 ----
 
 So while you're waiting for the third part of the blog series, you can attach our share (which is public) and run your own queries on it.
+
 Please share any interesting queries or issues on the https://slack.motherduck.com/[MotherDuck Slack channel^].
 
 == Part 3: Advanced Queries from Python, Visualizations, and Dashboards of the StackOverflow Data in MotherDuck
