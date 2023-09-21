@@ -1,0 +1,355 @@
+== Smartere Anwendungen mit Spring AI
+
+:imagesdir: ../../img/
+
+Ich habe mich in den letzten 9 Monaten sehr intensiv mit Generativer Künstlicher Intelligenz (GenAI) beschäftigt, da ich die Initiativen in diesem Bereich bei Neo4j [Neo4jGenAI] koordiniere und natürlich auch persönlich sehr interessiert bin.
+
+image::https://cdn.discordapp.com/attachments/1063163608768462899/1154344827878654082/michaelhunger_An_artificial_intelligence_brain_made_out_of_gree_b99c3561-98b1-4912-9a9f-d8b89b193791.png[]
+
+=== Generative Künstliche Intelligenz
+
+Daher war ich sehr angetan, neben den üblichen Python-basierten Integrationen von KI-Modellen in Anwendungen, mit [SpringAI] einen Ansatz im Java-Umfeld zu sehen, der mit dem Spring Ökosystem integriert ist.
+
+Traditionell ist maschinelles Lernen und Künstliche Intelligenz ein Bereich, der mehr von Mathematikern, Statistikern und Data Scientists, als von Softwareentwicklern dominiert wird.
+Hauptsächlich werden die statistischen und neuronalen Netze in Python oder R programmiert und dann in C oder Fortran Bibliotheken auf CPU, GPU oder TPU Architekturen ausgeführt.
+
+Mit dem Erscheinen der Transformer Architektur [Transformer] und dem damit verbundenen Durchbruch in der Sprachverarbeitung durch große Sprachmodelle (large language models, LLMs) wie GPT, Palm, Claude, oder Llama, hat sich das geändert.
+
+Dabei ist vor allem interessant, wie diese Modelle im Unternehmenskontext eingesetzt werden können, wo Korrektheit, Verlässlichkeit, Sicherheit, Nachvollziehbarkeit und Regulatorien eine große Rolle spielen.
+Desweiteren muss dort auch die Nutzung der eigenen Daten und nicht des öffentlichen Trainingskorpuses im Vordergrund stehen.
+
+Im Umfeld von großen Sprachmodellen ist zur Zeit das Trainieren eigener Modelle zu aufwändig und teuer und das Feintuning noch nicht ausgereift.
+
+Daher wird zumeist unter dem Begriff "Retrieval Augmented Generation" [RAG] ein Ansatz gewählt in dem die Anfragen an LLM mit kontextuellen Informationen aus Dokumenten oder Datenbanken versehen wird, um eine relevante and korrekte Antwort für den Nutzer zu generieren.
+
+image::retrieval-augmented-generation.png[]
+
+Es werden nur die Sprachfähigkeiten der Modelle genutzt und nicht die Fähigkeit, neue Informationen aus den Trainingsdaten zu generieren.
+
+=== Spring AI
+
+Da diese Modelle meist durch eine API verfügbar sind, können sie auch von Softwareentwicklern angesprochen und integriert werden.
+Das gilt sowohl für zentral gehostete als auch für lokal installierte Modelle.
+
+Trotzdem sind die meisten Integrationsbibliotheken wie [LangChain], LlamaIndex, GuardRails oder Guidance in Python implementiert, teilweise auch in Javascript.
+Java führt in diesem Bereich zur Zeit noch ein Schattendasein.
+
+Das will das [SpringAI] Projekt ändern, ähnlich wie LangChain ist Spring ja dafür bekannt, dass es die Integration von Java mit externen Diensten und Frameworks vereinfacht.
+Damit sollen Konzepte wie Agenten, Transformer, Pipelines, Vektor-Datenbanken, etc. auch in Java insbesondere Spring-Anwendungen verfügbar gemacht werden.
+
+Das Spring AI Projekte wurde auf der SpringOne im August 2023 in einem Workshop von Mark Pollack vorgestellt. 
+Es beinhaltet die Basisabstraktionen und Komponenten, die einfach in Spring-Anwendungen integriert werden können.
+Die Implementierung der Abstraktionen für die verschiedenen Anbieter, wie OpenAI, GCP Vertex AI, Anthropic oder AWS Bedrock wird in separaten Projekten vorgenommen.
+
+=== Abstraktionen in Spring AI
+
+Folgende Grundabstrakionen sind verfügbar:
+
+* Modell-Interaktionen: 
+** AI-Modelle - Integration mit Modell-Endpunkten, meist über HTTP APIs
+** Prompts - parametrisierte Textvorlagen, die an das Modell übergeben werden
+** Output Parser - Extraktion von Informationen aus den Modellantworten
+
+* Datenmanagement:
+** Datenbank Integration - Integration eigener Datenquellen für Kontextdaten (z.b. Datenbanken, Dokumente, öffentliche APIs) um Modellen relevante Informationen zur Beantwortung von Fragen zur Verfügung zu stellen (Retrieval Augmented Generation - RAG)
+** Vektor-Datenbanken - Speicherung und Suche von Embedding-Vektoren in Datenbanken, die auf Vektor-Operationen optimiert sind
+
+* Chains: Feste Verkettung mehrerer Operationen um eine Anfrage zu beantworten, dazu können Daten vom Modell extrahiert oder angereichert werden und aus zusätzlichen Quellen weitere Informationen geladen werden, bevor das ML-Modell die Antwort generiert.
+
+* Speicher: Zwischenspeicherung von vorherigen Antworten mit passenden Datenspeichern (z.b. Datenbanken, Vektor-Datenbanken oder im Hauptspeicher)
+
+* Agenten: beschriebene Operationen, die dann vom Modell dynamisch ausgewählt werden können.
+
+Wichtige Klassen von Spring AI:
+
+* `AiClient` - Ai Model Abstraktion für Generierung von Antworten
+* `EmbeddingClient` - Abstraktion für Generierung von Vektor-Embeddings
+* `VectorStore` - Abstraktion für Vektor-Indizes und -Datenbanken
+* `PromptTemplate` - Abstraktion für parametrisierte Textvorlagen
+* `Generation` - Ergebnisinformationen und Metadaten des Modellaufrufes
+
+=== Erste Schritte mit Spring AI
+
+Hier in Listing {counter:listing} ein Hello-World-Beispiel, um eine einfache REST API zu erstellen, die eine Aufgabe an das OpenAI GPT-3 Modell stellt und die Antwort zurückgibt.
+
+.Listing {listing} Hello World mit Spring AI - RestController mit Completion
+[source,java]
+----
+@RestController
+public class SimpleAiController {
+
+	private final AiClient aiClient;
+
+	@Autowired
+	public SimpleAiController(AiClient aiClient) {
+		this.aiClient = aiClient;
+	}
+
+	@GetMapping("/ai/simple")
+	public Completion completion(@RequestParam(value = "message", defaultValue = "Was ist Java?") String message) {
+		return new Completion(aiClient.generate(message).getGeneration().getText());
+	}
+    public record Completion(String message) {}
+}
+----
+
+In das Spring Boot Projekt wird Spring AI durch die Abhängigkeit von `spring-ai-azure-openai-spring-boot-starter` bzw. `spring-ai-starter-openai` integriert (siehe Listing {counter:listing}) weitere Integrationen werden folgen.
+
+.Listing {listing} Spring Boot Starter Dependency für Spring AI
+[source,xml]
+----
+<dependency>
+    <groupId>org.springframework.experimental.ai</groupId>
+    <artifactId>spring-ai-azure-openai-spring-boot-starter</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+</dependency>
+----
+
+Nachdem man den eigenen [OpenAI API Schlüssel] bereitgestellt hat, kann die Anwendung gestartet und über einen REST-Aufruf getestet werden, wie in Listing {counter:listing} zu sehen.
+
+.Listing {listing} Ausführung der Hello-World Anwendung
+[source,shell]
+----
+export SPRING_AI_OPENAI_API_KEY=sk-...
+./mvnw spring-boot:run
+curl http://localhost:8080/ai/simple
+
+curl http://localhost:8080/ai/simple?message=Warum+ist+der+Himmel+blau%3F
+----
+
+=== Vordefinierte Vorlagen für Prompts
+
+In LLM-Anwendungen liegt ein Hauptaugenmerk auf der textuellen Aufgabe an das Modell, auch Prompt genannt.
+Damit wird nicht nur die Anfrage des Nutzers, sondern auch der relevante Kontext, Beispiele oder andere Informationen an das Modell übergeben, um die Antwort zu verbessern.
+
+Im Prompt werden Richtlinien für das Modell definiert, um die Art der Antwort zu kontrollieren und unnütze Antworten zu vermeiden.
+
+.Listing {listing} Beispielprompt: `my-prompt.st`
+----
+Gib mir Anwendungsbeispiele für `{topic}` Projekte in einer IT Organisation.
+
+Beschränke Dich dabei auf eine Aufzählungsliste von maximal 5 Einträgen.
+----
+
+In Listing {counter:listing} wird ein parameterisiertes PromptTemplate verwendet, um die Anfrage an das Modell zu konfigurieren, der Text dafür kommt aus einer Datei im Klassenpfad, oder aus einem statischen String.
+Die Parameter dagegen werden aus der Nutzeranfrage und/oder aus anderen relevanten Datenquellen ermittelt.
+
+Listing {listing} Nutzung von PromptTemplate
+[source,java]
+----
+    @Value("classpath:/prompts/my-prompt.st")
+    private Resource promptResource;
+
+    @GetMapping("/ai/prompt")
+    public Generation completion(@RequestParam(value = "topic", defaultValue = "data science") String topic) {
+        PromptTemplate promptTemplate = new PromptTemplate(promptResource);
+        Prompt prompt = promptTemplate.create(Map.of("topic", topic));
+        return aiClient.generate(prompt).getGeneration();
+    }
+----
+
+Die Antwort des Modells wird als `Generation` Objekt zurückgegeben, das neben dem Text auch die Metadaten der Antwort enthält.
+
+=== Ausgabenbehandlung
+
+Für die Nutzung in Anwendungen sind natürlichsprachliche Antworten des LLMs nicht optimal, da sie schlecht strukturiert zu verarbeiten sind.
+
+Daher kann mittels `BeanOutputParser` eine JavaBean Klasse (es funktioniert auch mit Records) angegeben werden, die das Schema der Antwort definiert, und die Antwort dann in ein JSON-Objekt des Typs des Schemas deserialisiert.
+Die Vorgaben im Prompt zur Serialisierung werden automatisch von Spring AI vorgenommen, ein Beispiel ist in Listing {counter:listing} zu sehen.
+
+.Listing {listing} Nutzung von BeanOutputParser
+[source,java]
+----
+    record ActorsFilms(String actor, List<String> movies) {}
+
+    @GetMapping("/ai/output")
+    public ActorsFilms generate(@RequestParam(value = "actor", defaultValue = "Jeff Bridges") String actor) {
+        BeanOutputParser<ActorsFilms> outputParser = new BeanOutputParser<>(ActorsFilms.class);
+
+        String format = outputParser.getFormat();
+        String template = """
+				Erzeuge die Filmography für den Schauspieler {actor}.
+				{format}
+				""";
+        PromptTemplate promptTemplate = new PromptTemplate(template, Map.of("actor", actor, "format", format));
+        Prompt prompt = new Prompt(promptTemplate.createMessage());
+        Generation generation = aiClient.generate(prompt).getGeneration();
+
+        ActorsFilms actorsFilms = outputParser.parse(generation.getText());
+        return actorsFilms;
+    }
+----
+
+=== Eigene Daten verwenden mit RAG
+
+Wie schon erwähnt ist RAG ein Ansatz um Anfragen an LLMs mit Daten aus eigenen Datenquellen zu versehen, um nicht auf die öffentlichen Trainingsdaten angewiesen zu sein.
+Die Informationen können aus Datenbanken, Dokumenten oder anderen Quellen stammen, und mittels Volltext, Vektor oder anderen Suchverfahren gefunden werden.
+
+Im einfachsten Fall kann die Information aus einer Datenbank geladen werden.
+Üblich ist der Einsatz von Vektor-Embeddings, die von entsprechenden Embedding-Modellen erzeugt werden und die "Essenz" multimodaler Informationen (Text, Bilder, Video, Audio) in einem multidimensionalen Vektor darstellen und über geometrische, euklidsche Distanz bzw. Winkel-Differenz (Cosinus) verglichen werden können.
+Sowohl spezialisierte Vektor-Datenbanken, aber auch reguläre Datenbanken wie Postgres, MongoDB, Neo4j unterstützen mittlerweile Vektor-Indizes, um diese Suche effizient zu gestalten.
+
+Für gespeicherte Textfragmente werden diese Vektoren erzeugt und gespeichert werden, und dann für die Suche nach ähnlichen Textfragmenten verwendet werden.
+Dazu wird die Nutzeranfrage auch in ein solchen Vektor umgewandelt und dann im Vektorindex gesucht.
+
+Im Beispiel in Listing {counter:listing} wird eine Liste von Fahrradinformationen aus einer JSON-Datei geladen, die Vektor-Embeddings für die Dokumente erzeugt und in einem Vektorindex gespeichert.
+Dann werden die Anfragen der Nutzer mit dem Vektorindex verglichen und die ähnlichsten Dokumente zurückgegeben die dann vom LLM zur Beantwortung der Frage verwendet werden.
+
+// rag https://github.com/rd-1-2022/ai-azure-retrieval-augmented-generation
+
+.Listing {listing} - Nutzung von Retrieval Augmented Generation (RAG)
+[source,java]
+----
+@Configuration
+public class RagConfiguration {
+
+    @Bean
+    public RagService ragService(AiClient aiClient, EmbeddingClient embeddingClient) {
+        return new RagService(aiClient, embeddingClient);
+    }
+}
+
+@RestController
+public class RagController {
+
+    private final RagService ragService;
+
+    @Autowired
+    public RagController(RagService ragService) {
+        this.ragService = ragService;
+    }
+
+    @GetMapping("/ai/rag")
+    public Generation generate(@RequestParam(value = "message", defaultValue = "Was ist das beste Citybike?") String message) {
+        return ragService.retrieve(message);
+    }
+}
+
+public class RagService {
+
+    private final AiClient aiClient;
+    private final EmbeddingClient embeddingClient;
+
+    public RagService(AiClient aiClient, EmbeddingClient embeddingClient) {
+        this.aiClient = aiClient;
+        this.embeddingClient = embeddingClient;
+        setupVectorStore();
+    }
+
+    @Value("classpath:/data/bikes.json")
+    private Resource bikesResource;
+
+    private void setupVectorStore() {
+        // JSON Dateien als "Document" Liste laden
+        JsonLoader jsonLoader = new JsonLoader(bikesResource,
+                "name", "price", "shortDescription", "description");
+        List<Document> documents = jsonLoader.load();
+
+        // Vektor Embeddings für Dokumente erzeugen und in Vektorindex speichern
+        VectorStore vectorStore = new InMemoryVectorStore(embeddingClient);
+        vectorStore.add(documents);
+    }
+
+    public Generation retrieve(String message) {
+        // Ähnliche Dokumente für die Anfragetext finden
+        VectorStoreRetriever vectorStoreRetriever = new VectorStoreRetriever(vectorStore);
+        List<Document> similarDocuments = vectorStoreRetriever.retrieve(message);
+
+        Message systemMessage = getSystemMessage(similarDocuments);
+        UserMessage userMessage = new UserMessage(message);
+
+        // AI Modell mit System und Nutzerprompt aufrufen
+        Prompt prompt = new Prompt(List.of(systemMessage, userMessage));
+        AiResponse response = aiClient.generate(prompt);
+        return response.getGeneration();
+    }
+
+/*
+Du bist ein Verkaufsassistent eines Fahrradherstellers. Deine Aufgabe ist es Anfragen über Produkte in einem Fahrradkatalog zu beantworten.
+Benutze dazu nur die Informationen aus dem DOKUMENTE-Abschnitt, keine anderen Informationen, um korrekte Antworten zu geben.
+Falls die Frage sich auf Preis oder Abmessungen des Fahrrads bezieht, nenne den Namen des Fahrrads in der Antwort.
+Falls Du unsicher bist, oder keine Dokumente vorliegen, gib unbedingt an, dass Du die Frage nicht beantworten kannst.
+
+DOKUMENTE:
+{documents}
+*/
+    @Value("classpath:/prompts/system-qa.st")
+    private Resource systemBikePrompt;
+
+    private Message getSystemMessage(List<Document> similarDocuments) {
+        // Gefundene Dokumente in "SystemMessage" mit dem `system-qa.st` Template integrieren
+        String documents = similarDocuments.stream()
+            .map(entry -> entry.getContent()).collect(Collectors.joining("\n"));
+        SystemPromptTemplate systemPromptTemplate = new SystemPromptTemplate(systemBikePrompt);
+        Message systemMessage = systemPromptTemplate.createMessage(Map.of("documents", documents));
+        return systemMessage;
+    }
+}
+----
+
+////
+// stuff https://github.com/rd-1-2022/ai-azure-stuff-prompt
+
+[source,java]
+----
+@RestController
+public class StuffController {
+
+    private final AiClient aiClient;
+
+    @Value("classpath:/docs/wikipedia-curling.md")
+    private Resource docsToStuffResource;
+
+/*
+Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+{context}
+
+Question: {question}
+Helpful Answer:
+*/
+    @Value("classpath:/prompts/qa-prompt.st")
+    private Resource qaPromptResource;
+
+    @GetMapping("/ai/stuff")
+    public Completion completion(@RequestParam(value = "message", 
+                                defaultValue = "Which athletes won the gold medal in curling at the 2022 Winter Olympics?'") String message,
+                                 @RequestParam(value = "stuffit", defaultValue = "false") boolean stuffit) {
+        PromptTemplate promptTemplate = new PromptTemplate(qaPromptResource);
+        Map map = Map.of("question", message, "context", stuffit ? docsToStuffResource : "");
+        Prompt prompt = promptTemplate.create(map);
+        AiResponse aiResponse = aiClient.generate(prompt);
+        return new Completion(aiResponse.getGeneration().getText());
+    }
+
+}
+----
+
+// eval https://github.com/rd-1-2022/ai-azure-openai-evaluation
+// agents 
+////
+
+=== Fazit & Ausblick
+
+Es ist schön, dass jetzt auch im Java-Umfeld eine Integration von Generativer Künstlicher Intelligenz möglich ist, und das auch noch mit Spring.
+
+Zur Zeit ist die Dokumentation [SpringAIDocs] noch ziemlich dürftig, ohne in die Beispiele und den Quellcode zu schauen, und ohne Vorkenntnisse ist es schwer, die Möglichkeiten von Spring AI zu verstehen.
+
+Ich bin gespannt, welche Integrationen im Spring AI Projekt noch erfolgen, wir wollen definitiv auch Neo4j als Datenquelle für Vektorsuche und Knowledge-Graphen integrieren.
+
+Wichtig ist die Integration anderer Anbieter wie Google, Anthropic und AWS damit eine breite Auswahl an Modellen zur Verfügung steht.
+
+=== Resources
+
+* [Neo4jGenAI] https://neo4j.com/genai
+* [Transformer] https://de.wikipedia.org/wiki/Generativer_vortrainierter_Transformer
+* [RAG] https://neo4j.com/developer-blog/fine-tuning-retrieval-augmented-generation/
+* [SpringAIVideo] https://www.youtube.com/watch?v=0P8UU5vkvI8
+* [SpringAI-Github] https://github.com/spring-projects-experimental/spring-ai
+* [SpringAIDocs] https://docs.spring.io/spring-ai/reference/
+* [SpringAIWorkshop] https://github.com/markpollack/spring-ai-azure-workshop
+* [SpringAIWorkshopBeispiele] https://github.com/rd-1-2022
+* [SpringAIBeispielprojekt] https://github.com/coffee-software-show/spring-ai
+* [InfoQ] https://www.infoq.com/news/2023/08/spring-ai/
+* [OpenAI API Schlüssel] https://help.openai.com/en/articles/4936850-where-do-i-find-my-secret-api-key
+// https://devops.com/vmware-previews-spring-ai-to-accelerate-java-development/
