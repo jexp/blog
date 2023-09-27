@@ -403,7 +403,7 @@ from 's3://us-prd-motherduck-open-datasets/stackoverflow/parquet/2023-05/users.p
 === Getting started with MotherDuck
 
 DuckDB itself is focusing on local, and in-process execution of the analytical database engine.
-While you can access remote data, it's downloaded to your machine every time you access the remote files, so you really might want to move your DuckDB execution to where the data lives
+While you can access remote data, it's downloaded to your machine every time you access the remote files, so you really might want to move your DuckDB execution to where the data lives.
 
 To make it easier to query data that resides in other, remote locations, MotherDuck offers a managed service that allows you to run DuckDB in the cloud.
 
@@ -419,7 +419,7 @@ image::https://motherduck.com/docs/assets/images/md-diagram_v1.2-fde6f7192947deb
 
 Motherduck also integrates with Python and all the other access libraries and integrations for DuckDB.
 
-If you already got an *invite to MotherDuck*, you can create an account, if not you can request one via the form on the https://motherduck.com/[homepage^].
+If you already signed up, you can just log-in to MotherDuck, otherwise you can create an account on the https://motherduck.com/[homepage^] (via Google, GitHub or email auth).
 
 Anywhere you can run DuckDB you can use MotherDuck as it connects through an official DuckDB extension which is downloaded & loaded as soon as you connect to a motherduck database through `.open md:` or similar commands.
 
@@ -469,15 +469,15 @@ CREATE DATABASE remote_database_name FROM CURRENT_DATABASE();
 CREATE DATABASE remote_database_name FROM '<local database name>';
 ----
 
-TODO: check
+// TODO: check
 There are only two caveats, *the local and remote name must be different*, otherwise you might get the error below.
 
 ----
 Catalog Error: error while importing share: Schema with name <local-database-name> does not exist!
 ----
 
-TODO: check
-And for the size of our StackOverflow database and the  it took quite some time to finish the upload, not 100% sure but I think around 2 hours.
+// TODO: check
+And for the size of our StackOverflow database and the  it took quite some time to finish the upload, around 1 hour, sending 15GB of data for our 11GB database.
 
 So we can either create the database on the MotherDuck UI and import our tables from our Parquet files on S3, or upload the database from our local system.
 
@@ -679,7 +679,7 @@ This is what it looks like in the MotherDuck UI:
 
 image::md-query-ai.png[]
 
-Hmm, actually the comment count is a column on the posts table, so it could have used that, let's see if we can make it stay in one table.
+Actually the comment count is a column on the posts table, so it could have used that, let's see if we can make it use only the one table.
 
 [source,sql]
 ----
@@ -692,6 +692,8 @@ ORDER BY CommentCount DESC
 LIMIT 5;
 Run Time (s): real 3.587 user 0.001733 sys 0.000865
 ----
+
+Nice, that worked!
 
 You can also use `prompt_fixup` to fix the SQL for a query, e.g. the infamous, "I forgot GROUP BY".
 
@@ -719,12 +721,8 @@ That's a really neat feature, hope they use it in their UI when your query would
 
 To https://motherduck.com/docs/key-tasks/sharing-a-motherduck-database[make this data available to others^], we can use the `CREATE SHARE` command.
 
-TODO check:
-
 If we run it, we will get a shareable link, that others can use with `ATTACH` to https://motherduck.com/docs/key-tasks/querying-a-shared-motherduck-database[attach our database^].
-Currently it takes a while to create the share, but in the future it will be a zero-copy operation.
-
-TODO check:
+Currently it takes about a minute to create the share, but in the future it will be a zero-copy operation.
 
 [source,sql]
 ----
@@ -735,6 +733,14 @@ CREATE SHARE so_2023_05 FROM so;
 
 -- ATTACH '<share URL>' [AS <database name>];
 ATTACH 'md:_share/so/373594a2-06f7-4c33-814e-cf59028482ca' AS so;
+
+-- show the contents of the share
+DESCRIBE SHARE "so_2023_05";
+
+LIST SHARES;
+
+-- After making changes to the shared database, you need to update the share
+UPDATE SHARE "so_2023_05";
 ----
 
 Today we explored the MotherDuck interface, created a database and populated it with tables using Parquet data on S3.
