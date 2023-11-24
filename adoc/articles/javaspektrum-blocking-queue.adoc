@@ -1,7 +1,8 @@
 == Schlange sehen - Blocking Queues in Java
 :imagesdir: ../../img/
 :figure-caption: Abbildung
-:figure-number: 1
+:figure-number: 0
+:table-caption: Tabelle
 
 In Anwendungen in denen mehrere Threads Daten erzeugen und konsumieren, benötigt man einen Mechanismus und eine Datenstruktur zur Synchronisation und Datenaustausch, die das ermöglichen. 
 
@@ -17,23 +18,23 @@ Die Threads werden erst wieder freigegeben, wenn die Warteschlange wieder Daten 
 
 Ich habe selbst Blocking Queues genutzt, wenn Daten aus parallelen Quellen als Produzenten in einen einzelnen Java Stream als Konsument umgewandelt werden mussten.
 Andere Beispiele sind die Verarbeitung von Daten aus einer oder mehreren Quellen (z.b. API Aufrufe oder Datenbanken) die von mehreren Konsumenten asynchron und parallel verarbeitet werden sollen, wobei der Durchsatz des Systems kontrollierbar bleiben muss.
-Oder wenn mehreren Quellen in einen singulären Konsumenten (z.b. single threaded Datenbankzugriff in sqlite) der Batches von Updates auf einmal ausführen soll, zusammengeführt werden sollen.
+Oder um mehrere Quellen mit einen einzelnen Konsumenten zu verarbeiten, z.B. um Updates in Batches in einem Single-Threaded Datenbankzugriff wie z.B. bei DuckDB oder SQLite durchzuführen.
 
 Das `BlockingQueue` Interface und seine Implementierungen sind einige der nützlichsten Bestandteile der `java.util.concurrent` Package für den Datenaustausch zwischen nebenläufigen Parteien.
 
-Wir werden uns einige einfache Beispiele anschauen, die die Blocking Queue in Aktion zeigen und dann kurz in die Implementierung der ArrayBlockingQueue in Java eintauchen.
+Wir werden uns einige Beispiele anschauen, die die Blocking Queue in Aktion zeigen und dann kurz in die Implementierung der ArrayBlockingQueue in Java eintauchen.
 Desweiteren wollen wir auch untersuchen, wie sich virtuelle Threads in diesem Fall verhalten, und ob ein System das virtuelle Threads mit Blocking Queues nutzt skalierbarer ist, als ein System, das mit Platformthreads arbeitet.
 
 === Hintergrund
 
-Im einfachsten Beispiel, haben wir einen Produzenten und einen Konsumenten von Daten, die unabhängig voneinander und mit verschiedenen Geschwindigkeiten arbeiten.
+Im einfachsten Beispiel haben wir einen Produzenten und einen Konsumenten von Daten, die unabhängig voneinander und mit verschiedenen Geschwindigkeiten arbeiten.
 Um sie beide gleichzeitig in unserer Anwendung auszuführen, müssen wir sie in verschiedenen Threads laufen lassen.
 
 Damit der Produzent die erzeugten Daten asynchron bereitstellen kann, braucht es einen Mechanismus der nicht nur die Daten bereitstellt, sondern auch die Information darüber, dass neue Informationen vorhanden sind.
 
 Prinzipiell könnte man dieses mit für einen Datenwert mit einer Semaphore und einem Speicherplatz lösen, wobei die Semaphore anzeigt ob neue Daten vorhanden sind und der Speicherplatz die Daten enthält.
 // TODO Für mehrere Daten wäre das mit einem `CountDownLatch` möglich, der die Anzahl der Plätze enthält.
-Der Speicherplatz selbst muss für den Zugriff durch mehrere Threads geeignet sein, also entweder `volatil` oder als `AtomicReference` implementiert werden.
+Der Speicherplatz selbst muss für den Zugriff durch mehrere Threads geeignet sein, also entweder `volatile` oder als `AtomicReference` implementiert werden.
 
 Stattdessen können wir aber die dafür vorgesehenen Mechanismen der Java Concurrency API nutzen, die uns die Arbeit erleichtern und die Fehleranfälligkeit reduzieren.
 
@@ -54,7 +55,7 @@ Dieses spezielle Stopsignal wird auch als Poison Pill (Giftpille) oder Tombstone
 Wie schon aus der Platzierung im Paket `java.util.concurrent` hervorgeht, und auch aus der vorgesehenen Nutzung zum Datenaustausch zwischen mehreren Threads sind die Implementierungen von BlockingQueue thread-safe.
 Ihre Methoden stellen atomare Operationen dar und benutzen intern Locks [LockSupport], um die Datenstruktur zu schützen.
 
-Die Blocking Queue implementierungen werfen eine `NullPointerException`, wenn ein Null-Eintrag eingefügt wird.
+Die Blocking Queue Implementierungen werfen eine `NullPointerException`, wenn ein Null-Eintrag eingefügt wird.
 
 Wie alle Klassen des Collections Frameworks sind BlockingQueues generifiziert, so dass sie mit verschiedenen Datentypen genutzt werden können.
 
@@ -66,8 +67,9 @@ Wir haben ein Record `Message` das wir in die auf 10 Einträge limitierte Wartes
 Ein Produzent erzeugt 100 Einträge und fügt sie mittels der blockierenden Operation `put` in die Warteschlange ein, und dann ein Stopsignal (`Message.POISON_PILL`)für jeden der 5 Konsumenten.
 Falls der Thread unterbrochen wird, wird die Exception behandelt und das interrupt Flag auf dem Thread gesetzt.
 
-Die 5 Konsumenten laufen in einer Endlosschleife und entnehmen die Elemente aus der Warteschlange und "verarbeiten" sie mittels `Thread.sleep`, bis sie das Stopsignal erhalten.
+Die 5 Konsumenten-Threads laufen jeweils in einer Endlosschleife und entnehmen die Elemente aus der Warteschlange und "verarbeiten" sie mittels `Thread.sleep` für bis zu 500 Millisekunden (random), bis sie das Stopsignal erhalten.
 Die Interruptbehandlung ist äquivalent zum Produzenten.
+Somit haben wir insgesamt 5+1 Threads die auf die entsprechenden Hardware-Threads des Systems gemappt werden.
 
 .Listing {listing} Blocking Queue mit einem Produzenten und mehreren Konsumenten
 [source,java]
@@ -104,12 +106,12 @@ try (var executor = Executors.newFixedThreadPool(6)) {
             try {
                 while (true) {
                     Message message = queue.take();
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(500));
                     System.out.println(consumer+". "+Thread.currentThread() + " result: " + 
                                     message + " " +(System.currentTimeMillis()-start)+" ms");
                     if (message.equals(Message.POISON_PILL)) {
                         return;
                     }
-                    Thread.sleep(ThreadLocalRandom.current().nextInt(500));
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -120,7 +122,7 @@ try (var executor = Executors.newFixedThreadPool(6)) {
 ----
 
 Wenn wir diesen Code, z.b. in jshell ausführen dauert es ca. 5 Sekunden bis alle Elemente verarbeitet sind.
-Die durchschnittliche Wartezeit ist 250ms bei 20 Elementen (100/5) ergibt das 5s, in 5 parallelen Threads.
+Die durchschnittliche Wartezeit ist 250ms bei 20 Elementen pro Konsument (100/5) ergibt das in Summe 5s, in 5 parallelen Threads.
 In der Ausgabe sehen wir dass er Produzent die Einträge erzeugt und die Warteschlange fast immer voll ist.
 
 [source,text]
@@ -212,8 +214,6 @@ Busy waiting is a technique where a thread repeatedly checks a condition until i
 Es ist wichtig, dass wir unsere Konsumenten-Threads stoppen, wenn sie auf ein Element warten, das nie erscheinen wird, das wird mit der "Poison Pill" als Anzeige für das Ende der Produktion erreicht.
 Da jeder Konsumetn-Thread ein Stopsignal erhält und konsumiert bevor er sich beendet, muss der Produzent entsprechend so viele Stopsignale einfügen, wie es Konsumenten gibt.
 
-
-
 === BlockingQueue Interface
 
 Im `java.util.concurrent` Paket ist das Interface `[BlockingQueue]` definiert, das die Methoden für den Zugriff auf die Warteschlange definiert.
@@ -222,33 +222,31 @@ Damit wird sowohl die Syntax definiert als auch die Semantik dokumentiert.
 
 Die wichtigsten Methoden sind für das Hinzufügen von Elementen:
 
-* boolean add(E) - fügt ein Element in die Warteschlange ein, wenn wenn möglich, sonst IllegalStateException
-* put(E) - fügt ein Element in die Warteschlange ein, blockiert wenn die Warteschlange voll ist
-* put(E, timeout, TimeUnit) - fügt ein Element in die Warteschlange ein, blockiert wenn die Warteschlange voll ist oder bis das Timeout abgelaufen ist und wirft dann eine Exception
-* boolean offer(e) - versucht Element einzufügen, gibt true zurück wenn erfolgreich, sonst false
-* boolean offer(e, timeout, TimeUnit) - versucht Element einzufügen, oder wartet bis der Timeout abgelaufen ist und gibt dann false zurück
+* `boolean add(E)` - fügt ein Element in die Warteschlange ein, wenn wenn möglich, sonst IllegalStateException
+* `put(E)` - fügt ein Element in die Warteschlange ein, blockiert wenn die Warteschlange voll ist
+* `boolean offer(e)` - versucht Element einzufügen, gibt true zurück wenn erfolgreich, sonst false
+* `boolean offer(e, timeout, TimeUnit)` - versucht Element einzufügen, oder wartet bis der Timeout abgelaufen ist und gibt dann false zurück
 
 Entnehmen:
 
-* E take() - entfernt ein Element aus der Warteschlange, blockiert wenn die Warteschlange leer ist
-* E take(timeout, TimeUnit) - entfernt ein Element aus der Warteschlange, blockiert wenn die Warteschlange leer ist oder bis das Timeout abgelaufen ist und wirft dann eine Exception
-* E poll(timeout, TimeUnit) - versucht Element zu entfernen, oder wartet bis der Timeout abgelaufen ist und gibt dann null zurück
+* `E take()` - entfernt ein Element aus der Warteschlange, blockiert wenn die Warteschlange leer ist
+* `E poll()` - versucht Element zu entfernen, oder gibt bei leerer Warteschlange null zurück
+* `E poll(timeout, TimeUnit)` - versucht Element zu entfernen, oder wartet bei leerer Warteschlange bis der Timeout abgelaufen ist und gibt dann null zurück
+* `int drainTo(Collection[, elemente])` - entfernt alle Elemente aus der Warteschlange und fügt sie in die Collection ein
+* `remove(E)` - entfernt das Element aus der Warteschlange, wenn es vorhanden ist
 
 Desweiteren gibt es noch:
 
-* E peek() - liefert das erste Element der Warteschlange, ohne es zu entfernen
-* int size() - liefert die Anzahl der Elemente in der Warteschlange
-* boolean isEmpty() - liefert true, wenn die Warteschlange leer ist
-* putAll(Collection) - fügt alle Elemente einer Collection in die Warteschlange ein
-* contains(E) - liefert true, wenn die Warteschlange das Element enthält
-* int drainTo(Collection[, elemente]) - entfernt alle Elemente aus der Warteschlange und fügt sie in die Collection ein
-* int remainingCapacity() - liefert die Anzahl der noch verfügbaren Plätze in der Warteschlange
-* remove(E) - entfernt das Element aus der Warteschlange, wenn es vorhanden ist
+* `E peek()` - liefert das erste Element der Warteschlange, ohne es zu entfernen
+* `int size()` - liefert die Anzahl der Elemente in der Warteschlange
+* `boolean isEmpty()` - liefert true, wenn die Warteschlange leer ist
+* `contains(E)` - liefert true, wenn die Warteschlange das Element enthält
+* `int remainingCapacity()` - liefert die Anzahl der noch verfügbaren Plätze in der Warteschlange
 
 [%autowidth,opts=header,cols="a,m,m,m,m"]
-.Methoden und Semantik von BlockingQueue Interface
+.Übersicht Methoden und Semantik von BlockingQueue Interface
 |===
-| Aktion | 	Wirft Exception |	Immer Ergebnis |	Blockiert	| TimeOut
+| Aktion | 	Wirft Exception |	Immer Ergebnis |	Blockiert	| Time Out
 | Einfügen |	add(o)	| offer(o)	| put(o)	| offer(o, timeout, timeunit)
 | Entfernen |	remove(o) |	poll()	| take()	| poll(timeout, timeunit)
 | Testen |	element() |	peek()  |   |	
@@ -267,9 +265,9 @@ If the attempted operation is not possible immedidately, the method call blocks 
 
 === Implementierungen
 
-Die Implementierungen von `BlockingQueue` sind in der `java.util.concurrent` Package zu finden, wie in Abbildung 3 zu sehen.
+Die Implementierungen von `BlockingQueue` sind in der `java.util.concurrent` Package zu finden, wie in Abbildung 2 zu sehen.
 
-.BlockingQueue Klassenhierarchie
+.Klassenhierarchie der BlockingQueues
 image::blocking-queue-hiearchy.png[]
 
 * `ArrayBlockingQueue` - begrenzte Warteschlange, die auf einem Objekt-Array basiert, blockiert beim Einfügen, wenn die Warteschlange voll ist, oder beim Entfernen, wenn die Warteschlange leer ist.
@@ -282,7 +280,7 @@ Eine `Deque` (double ended queue) ist eine zweiseite Warteschlange in die man di
 Ihre API entspricht der Queue nur dass es für alle Methoden eine Variante mit First/Last Suffix gibt, wie z.B. `addFirst`, `addLast`, `removeFirst`, `removeLast` usw.
 
 Eine unbegrenzte Warteschlange blockiert nicht beim Hinzufügen, nur beim Entfernen aus einer leeren Warteschlange.
-Wichtig ist hier dass die Konsumenten genauso schnell oder schneller sind als die Produzenten, sonst läuft die Warteschlange voll und die JVM bekommt ein Speicherproblem.
+Wichtig ist hier, dass die Konsumenten genauso schnell oder schneller sind als die Produzenten, sonst läuft die Warteschlange voll und die JVM bekommt ein Speicherproblem.
 
 ////
 The PriorityBlockingQueue is an unbounded concurrent queue. It uses the same ordering rules as the java.util.PriorityQueue class. You cannot insert null into this queue.
@@ -319,7 +317,11 @@ Zum einen können wir im Beispiel den Executor durch einen `VirtualThreadPerTask
 Dabei würde sich aber das Verhalten nicht ändern, da wir nur 1+5 Threads einsetzen, da die Konsumenten die Verarbeitung in einer Schleife innerhalb des Threads ausführen.
 
 Stattdessen wollen wir wirklich das Konzept des "Ein Task, ein Thread" wie wir auch in [HunXx] zu Virtuellen Threads gesehen haben, nutzen und jedem Konsum-Task einen eigenen virtuellen Thread zuordnen. 
-Dazu erzeugen wir eine Klasse `Consumer` die `Runnable` implementiert und in der `run()` Methode die Verarbeitung eines Elemente vornimmt, und dann einen neuen `Consumer` erzeugt und in einem neuen virtuellen Thread startet.
+
+Daher nutzen wir hier nur *einen* Konsumenten der Elemente aus der Warteschlange entnimmt (es könnten auch mehrere, sogar 100 sein, das würde keinen Unterschied machen), aber dann jedes Element in einem eigenen virtuellen Thread verarbeitet.
+Damit benötigen wir hier auch nur eine "Poison Pill".
+
+Wir müssen die Handhabung des Executors anpassen, da dieser in einem try-with-resources, schon beendet, ist bevor unsere Verarbeitung-Tasks submitted werden könenn, und dann übergebene virtuelle Threads einfach nichts tun (auch keine Fehlermeldung).
 
 [source,java]
 ----
@@ -330,12 +332,12 @@ BlockingQueue<Message> queue = new ArrayBlockingQueue<>(10);
 var executor = Executors.newVirtualThreadPerTaskExecutor();
 
 long start = System.currentTimeMillis();
-// Producer
+// ein Produzent
 executor.submit(() -> {
     try {
         for (int i = 0; i < 100; i++) {
             System.out.println("Produced " + i + " remaining " + queue.remainingCapacity()+ 
-                               " " +(System.currentTimeMillis()-start)+" ms");
+                            " " +(System.currentTimeMillis()-start)+" ms");
             queue.put(new Message(i, "Message " + i));
         }
         queue.put(Message.POISON_PILL);
@@ -344,51 +346,108 @@ executor.submit(() -> {
         Thread.currentThread().interrupt();
     }
 });
-class Consumer implements Runnable {
-    private final int c;
-    public Consumer(int c) { this.c = c; }
-    public void run() {
-        try {
+
+// ein Konsument
+executor.submit(() -> {
+    try {
+        while (true) {
             Message message = queue.take();
-            System.out.println(c+". "+Thread.currentThread() + " result: " + message+ 
-                               " " +(System.currentTimeMillis()-start)+" ms");
-            if (message.equals(Message.POISON_PILL)) {
-                // keine weiteren Konsumenten, Executor beenden
-                executor.shutdown();
-            } else {
-                // nächsten Konsumenten starten
-                executor.submit(new Consumer(c+1));
-                Thread.sleep(ThreadLocalRandom.current().nextInt(500));
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            if (message.equals(Message.POISON_PILL)) return;
+            // Verarbeitungs-Task
+            executor.submit(() -> {
+                try {
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(500));
+                    System.out.println(Thread.currentThread() + " result: " + 
+                                message+" "+(System.currentTimeMillis()-start)+" ms");
+                } catch(InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
         }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    } finally {
+        executor.shutdown();
     }
-}
-executor.submit(new Consumer(0));
+});
+executor.awaitTermination(5, TimeUnit.MINUTES);
 ----
 
-Wie wir in der Ausgabe in Listing {counter:counter} sehen können, werden alle virtuellen Threads als Konsumenten parallel, da das `Thread.sleep` nicht wirklich blockiert sonder nur die Kontrolle abgibt und somit 100 virtuelle Threads instantan erzeugt werden und die Verarbeitung der Elemente parallel stattfindet.
+Wie wir in der Ausgabe in Listing {counter:counter} sehen können, werden alle virtuellen Threads als Verarbeitungs-Tasks parallel ausgeführt, da das `Thread.sleep` nicht wirklich blockiert sonder nur die Kontrolle abgibt und somit 100 virtuelle Threads instantan erzeugt werden und die Verarbeitung der Elemente parallel stattfindet.
 
 Die Gesamtlaufzeit beruht sich dann nur einmalig auf die 500ms Pausenzeit, die maximal von einem der Konsumenten benötigt werden.
 
 .Listing {counter} Ausgabe mit virtuellen Threads
 [source,text]
 ----
-4. VirtualThread[#591]/runnable@FJP-1-worker-32 result: Message[id=4, content=Message 4] 35 ms
-5. VirtualThread[#593]/runnable@FJP-1-worker-31 result: Message[id=5, content=Message 5] 35 ms
-Produced 16 remaining 0 35 ms
-6. VirtualThread[#594]/runnable@FJP-1-worker-31 result: Message[id=6, content=Message 6] 35 ms
-Produced 17 remaining 0 35 ms
-7. VirtualThread[#595]/runnable@FJP-1-worker-31 result: Message[id=7, content=Message 7] 35 ms
-Produced 18 remaining 0 35 ms
+Produced 96 remaining 0 32 ms
+Produced 97 remaining 0 32 ms
+Produced 98 remaining 4 32 ms
+Produced 99 remaining 5 32 ms
+VirtualThread[#1342]/runnable@FJP-1-worker-21 result: Message[id=10, content=Message 10] 41 ms
+VirtualThread[#1372]/runnable@FJP-1-worker-21 result: Message[id=35, content=Message 35] 43 ms
+VirtualThread[#1411]/runnable@FJP-1-worker-21 result: Message[id=74, content=Message 74] 48 ms
 ...
-96. VirtualThread[#684]/runnable@FJP-1-worker-31 result: Message[id=96, content=Message 96] 38 ms
-97. VirtualThread[#685]/runnable@FJP-1-worker-31 result: Message[id=97, content=Message 97] 38 ms
-98. VirtualThread[#686]/runnable@FJP-1-worker-31 result: Message[id=98, content=Message 98] 38 ms
-99. VirtualThread[#687]/runnable@FJP-1-worker-32 result: Message[id=99, content=Message 99] 38 ms
-100. VirtualThread[#688]/runnable@FJP-1-worker-32 result: Message[id=-1, content=POISON PILL] 38 ms
+VirtualThread[#1417]/runnable@FJP-1-worker-23 result: Message[id=80, content=Message 80] 496 ms
+VirtualThread[#1362]/runnable@FJP-1-worker-21 result: Message[id=25, content=Message 25] 496 ms
+VirtualThread[#1407]/runnable@FJP-1-worker-17 result: Message[id=70, content=Message 70] 509 ms
+VirtualThread[#1374]/runnable@FJP-1-worker-17 result: Message[id=37, content=Message 37] 512 ms
+VirtualThread[#1385]/runnable@FJP-1-worker-17 result: Message[id=48, content=Message 48] 513 ms
+VirtualThread[#1329]/runnable@FJP-1-worker-17 result: Message[id=0, content=Message 0] 518 ms
+VirtualThread[#1387]/runnable@FJP-1-worker-17 result: Message[id=50, content=Message 50] 529 ms
 ----
+
+Man könnte das ganze auch mit Structured Concurrency handhaben, und dann die Verarbeitung beenden und den Executor herunterfahren lassen, sobald die Poison Pill angekommen ist.
+Das wäre ähnlich zur `StructuredTaskScope.ShutdownOnFailure` funktionieren nur dass der Executor nicht beim ersten "Fehler" eines Tasks beendet wird sondern beim Auftreten der "Poison Pill" Nachricht.
+
+////
+[source,java]
+----
+record Message(int id, String content) {
+    public static final Message POISON_PILL = new Message(-1, "POISON PILL");
+}
+BlockingQueue<Message> queue = new ArrayBlockingQueue<>(10);
+long start = System.currentTimeMillis();
+
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+
+    executor.submit(() -> {
+        try {
+            for (int i = 0; i < 100; i++) {
+                System.out.println("Produced " + i + " remaining " + queue.remainingCapacity()+ 
+                                " " +(System.currentTimeMillis()-start)+" ms");
+                queue.put(new Message(i, "Message " + i));
+            }
+            queue.put(Message.POISON_PILL);
+            
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    });
+    try (var scope = new StructuredTaskScope<Message>()) {
+        for (int i=0;i<101;i++) {
+            scope.fork(() -> {
+            try {
+                Message message = queue.take();
+                if (message.equals(Message.POISON_PILL)) 
+                    throw new RuntimeException("End of processing "+message);
+                // Verarbeitungs-Task
+                Thread.sleep(ThreadLocalRandom.current().nextInt(500));
+                System.out.println(Thread.currentThread() + " result: " + 
+                        message+" "+(System.currentTimeMillis()-start)+" ms");
+                return message;
+            } catch(InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        });
+        }
+        scope.join();
+}
+}
+----
+////
+
 ////
 Im Artikel zu virtuellen Threads hatten wir eine CSP-Implementierung (CSP Concurrent Synchronous Programming) von Game of Life betrachtet, die jeder Zelle einen eigenen virtuellen Thread zuordnet und die Struktur mittels Channels abbildet. (TODO Blocking Queues?)
 
@@ -469,7 +528,7 @@ Auch die Verteilung eines eingehenden singulären Stroms auf mehrere Konsumenten
 Mit virtuellen Threads besteht die Möglichkeit, dass die Verarbeitung jedes Elements in eigenen Task bzw. Thread stattfindet und damit die Resourcen des Systems besser ausgenutzt und der Durchsatz erhöht werden kann.
 
 Wie schon im Disruptor Artikel und Paper vor vielen Jahren beschrieben sind in echten Systemem die Geschwindigkeiten von Produzenten und Konsumenten selten balanciert, so dass die Warteschlangen entweder immer leer (Konsumenten schneller) oder immer voll sind (Produzent schneller).
-Sie haben auch das Problem, dass sie einen Contention Point, da mehrere Threads gleichzeitig auf diesselben synchronisierten Informationen zum Warteschlangenstatus und auf das Kopf-Element zugreifen.
+Warteschlangen haben auch das Problem, dass sie einen Contention Point bilden, da mehrere Threads gleichzeitig auf diesselben synchronisierten Informationen zum Warteschlangenstatus und auf das Kopf-Element zugreifen.
 Zumindest in hochperformanten Systemen, wo die Verarbeitung von elementen im Mikrosekundenbereich liegt, ist das ein Problem, da die Synchronisation der Threads die Verarbeitung verlangsamt. 
 Dann bieten sich alternative Ansätze wie LMAX Disruptor an.
 
