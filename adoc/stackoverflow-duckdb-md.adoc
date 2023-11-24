@@ -31,11 +31,13 @@ or dayofweek(date)
 
 create type Weekday as enum ('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday');
 
-select count(*), cast(dayname(CreationDate) as Weekday) as day
+
+select count(*) as freq, dayname(CreationDate) as day, 
+       bar(freq, 0, 150000,20) as plot
 from posts where posttypeid = 1 
-and tags like '%>sql<%'
+and tags like '%<sql>%'
 group by all 
-order by day asc;
+order by freq desc;
 
 -- ┌──────────────┬───────────┐
 -- │ count_star() │    day    │

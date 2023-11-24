@@ -1,0 +1,27 @@
+== Gute Nachbarschaft - Foreign Memory und Foreign Function API in Java 21
+
+Java, als interpretierte und just-in-time compilierte Sprache auf einer virtuellen Maschine, hat sich nie mit einer leichten Integration with nativen Bibliotheken und Code hervorgetan.
+
+Trotz Ansätzen wie Java Native Interface (JNI) und (JNA)
+
+Java Native Interface
+
+
+* [Java Native Interface - Wikipedia](https://en.wikipedia.org/wiki/Java_Native_Interface)
+
+Seit Java xx sind die ForeignMemory und ForeignFunction API als preview-Features verfügbar.
+Mit Java 21 werden diese im dritten Preview (JEP 442) bereitgestellt.
+
+* [JEP 442: Foreign Function & Memory API (Third Preview)](https://openjdk.org/jeps/442)
+* [JEP 424: Foreign Function & Memory API (Preview)](https://openjdk.org/jeps/424)
+* [Foreign Function and Memory API in Java - GeeksforGeeks](https://www.geeksforgeeks.org/foreign-function-and-memory-api-in-java/)
+* [(7) Foreign Function and Memory API by Per Minborg](https://www.youtube.com/watch?v=8sFt1_7RxGk)
+* [Does Java 18 finally have a better alternative to JNI? | Okta Developer](https://developer.okta.com/blog/2022/04/08/state-of-ffi-java)
+* [GraalVM Foreign Function & Memory API in Native Image](https://www.graalvm.org/dev/reference-manual/native-image/dynamic-features/foreign-interface/)
+* [Lets talk about FFI in Java](https://archive.fosdem.org/2022/schedule/event/foreignfunctions/attachments/slides/5165/export/events/attachments/foreignfunctions/slides/5165/Lets_talk_about_FFI_in_Java.pdf)
+* [Panama: Not-so-Foreign Memory. Using MemorySegment as a high-performance ByteBuffer replacement.](https://gavinray97.github.io/blog/panama-not-so-foreign-memory)
+* [(7) Project Panama - Foreign Function & Memory API](https://www.youtube.com/watch?v=kUFysMkMS00)
+* [Guide to Java Project Panama | Baeldung](https://www.baeldung.com/java-project-panama)
+* [Foreign function & memory api live – Inside.java](https://inside.java/2023/02/16/ffm-api/)
+* [Java's Quantum Leap: Bridging The Native Divide With FFM API :: Saltmarch](https://saltmarch.com/insight/javas-quantum-leap-bridging-the-native-divide-with-ffm-api)
+* 

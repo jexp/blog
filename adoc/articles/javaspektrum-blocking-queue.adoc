@@ -1,0 +1,494 @@
+== Schlange sehen - Blocking Queues in Java
+:imagesdir: ../../img/
+:figure-caption: Abbildung
+:figure-number: 1
+
+In Anwendungen in denen mehrere Threads Daten erzeugen und konsumieren, benötigt man einen Mechanismus und eine Datenstruktur zur Synchronisation und Datenaustausch, die das ermöglichen. 
+
+image::coffee-marble-run.png[]
+
+In der vergangenen Kolumnen haben wir uns ausgefeilte Mechanismen dazu angeschaut, wie zum Beispiel LMAX Disruptor [Hun11], einen hochperformanten Ringpuffer mit verschiedenen Koordinierungsstrategien, der eine sehr effiziente Interaktion zwischen Produzenten und Konsumenten ermöglicht. 
+
+Aber auch die Java Concurrency API bietet mit den integrierten Synchronisationsmechanismen und den verschiedenen Warteschlangen Möglichkeiten, um Threads zu synchronisieren und Daten zwischen ihnen auszutauschen.
+
+In dieser Kolumne schauen wir uns die Konzepte und Implementierungen von Blocking Queue an, einer Warteschlange, die dafür vorgesehen ist, von mehreren Threads gleichzeitig genutzt zu werden, um thread-sicher Daten in die Warteschlange einfügen und entfernen. 
+Die Warteschlange, wie der Name schon sagt, ist so implementiert, dass sie die Threads blockiert, wenn sie versuchen Daten einzufügen wenn die Warteschlange voll oder zu entnehmen, aber die Warteschlange leer ist. 
+Die Threads werden erst wieder freigegeben, wenn die Warteschlange wieder Daten enthält bzw. wieder Platz für Daten hat.
+
+Ich habe selbst Blocking Queues genutzt, wenn Daten aus parallelen Quellen als Produzenten in einen einzelnen Java Stream als Konsument umgewandelt werden mussten.
+Andere Beispiele sind die Verarbeitung von Daten aus einer oder mehreren Quellen (z.b. API Aufrufe oder Datenbanken) die von mehreren Konsumenten asynchron und parallel verarbeitet werden sollen, wobei der Durchsatz des Systems kontrollierbar bleiben muss.
+Oder wenn mehreren Quellen in einen singulären Konsumenten (z.b. single threaded Datenbankzugriff in sqlite) der Batches von Updates auf einmal ausführen soll, zusammengeführt werden sollen.
+
+Das `BlockingQueue` Interface und seine Implementierungen sind einige der nützlichsten Bestandteile der `java.util.concurrent` Package für den Datenaustausch zwischen nebenläufigen Parteien.
+
+Wir werden uns einige einfache Beispiele anschauen, die die Blocking Queue in Aktion zeigen und dann kurz in die Implementierung der ArrayBlockingQueue in Java eintauchen.
+Desweiteren wollen wir auch untersuchen, wie sich virtuelle Threads in diesem Fall verhalten, und ob ein System das virtuelle Threads mit Blocking Queues nutzt skalierbarer ist, als ein System, das mit Platformthreads arbeitet.
+
+=== Hintergrund
+
+Im einfachsten Beispiel, haben wir einen Produzenten und einen Konsumenten von Daten, die unabhängig voneinander und mit verschiedenen Geschwindigkeiten arbeiten.
+Um sie beide gleichzeitig in unserer Anwendung auszuführen, müssen wir sie in verschiedenen Threads laufen lassen.
+
+Damit der Produzent die erzeugten Daten asynchron bereitstellen kann, braucht es einen Mechanismus der nicht nur die Daten bereitstellt, sondern auch die Information darüber, dass neue Informationen vorhanden sind.
+
+Prinzipiell könnte man dieses mit für einen Datenwert mit einer Semaphore und einem Speicherplatz lösen, wobei die Semaphore anzeigt ob neue Daten vorhanden sind und der Speicherplatz die Daten enthält.
+// TODO Für mehrere Daten wäre das mit einem `CountDownLatch` möglich, der die Anzahl der Plätze enthält.
+Der Speicherplatz selbst muss für den Zugriff durch mehrere Threads geeignet sein, also entweder `volatil` oder als `AtomicReference` implementiert werden.
+
+Stattdessen können wir aber die dafür vorgesehenen Mechanismen der Java Concurrency API nutzen, die uns die Arbeit erleichtern und die Fehleranfälligkeit reduzieren.
+
+Um Daten zwischen den beiden Threads auszutauschen, nutzen wir eine geeignete Blocking Queue Implementierung, die wir als gemeinsame Datenstruktur zwischen den beiden Threads nutzen.
+
+Es gibt sowohl begrenzte als auch unbegrenzte Warteschlangen, die wir nutzen können, wobei die letzteren zu vermeiden sind, da sie keine Kontrollmechanismen bieten, um die bereitgestellte Datenmenge zu begrenzen und somit zu Speicherproblemen führen können.
+
+Begrenzte, blockiertende Warteschlangen stellen ein gutes Design für nebenläufige Anwendungen dar, da hier die Kapazität des System kontrolliert werden kann und Produzenten und Konsumenten synchronisiert werden und trotzdem ein Puffer für Abweichungen in der Verarbeitungsgeschwindigkeit vorhanden ist.
+Damit kann unmittelbar ein Rückstau (Backpressure) im System implementiert werden, so dass Konsumenten nicht von Produzenten überfordert werden und die Kontrolle der Produktion bei den Konsumenten liegt.
+
+.Blocking Queue mit Produzenten und Konsumenten
+image::blocking-queue.png[]
+
+Wenn Daten eines einzelnen Produzenten in einzelnen Einträgen in der Warteschlange abgelegt werden, kann der Konsument die Daten in der Reihenfolge abrufen, in der sie erzeugt wurden.
+Um anzuzeigen, dass ein Produzent keine Daten mehr erzeugt, kann ein spezielles Element in die Warteschlange eingefügt werden, das anzeigt, dass keine weiteren Daten mehr erzeugt werden. 
+Dieses spezielle Stopsignal wird auch als Poison Pill (Giftpille) oder Tombstone (Grabstein) Eintrag bezeichnet.
+
+Wie schon aus der Platzierung im Paket `java.util.concurrent` hervorgeht, und auch aus der vorgesehenen Nutzung zum Datenaustausch zwischen mehreren Threads sind die Implementierungen von BlockingQueue thread-safe.
+Ihre Methoden stellen atomare Operationen dar und benutzen intern Locks [LockSupport], um die Datenstruktur zu schützen.
+
+Die Blocking Queue implementierungen werfen eine `NullPointerException`, wenn ein Null-Eintrag eingefügt wird.
+
+Wie alle Klassen des Collections Frameworks sind BlockingQueues generifiziert, so dass sie mit verschiedenen Datentypen genutzt werden können.
+
+=== Beispiele
+
+Im folgenden Beispiel (Listing {counter:listing}) sehen wir die diskutierten Aspekte im Einsatz.
+Wir haben ein Record `Message` das wir in die auf 10 Einträge limitierte Warteschlange `ArrayBlockingQueue` einfügen und vearbeiten wollen.
+
+Ein Produzent erzeugt 100 Einträge und fügt sie mittels der blockierenden Operation `put` in die Warteschlange ein, und dann ein Stopsignal (`Message.POISON_PILL`)für jeden der 5 Konsumenten.
+Falls der Thread unterbrochen wird, wird die Exception behandelt und das interrupt Flag auf dem Thread gesetzt.
+
+Die 5 Konsumenten laufen in einer Endlosschleife und entnehmen die Elemente aus der Warteschlange und "verarbeiten" sie mittels `Thread.sleep`, bis sie das Stopsignal erhalten.
+Die Interruptbehandlung ist äquivalent zum Produzenten.
+
+.Listing {listing} Blocking Queue mit einem Produzenten und mehreren Konsumenten
+[source,java]
+----
+record Message(int id, String content) {
+    public static final Message POISON_PILL = new Message(-1, "POISON PILL");
+}
+static int CONSUMERS = 5;
+BlockingQueue<Message> queue = new ArrayBlockingQueue<>(10);
+try (var executor = Executors.newFixedThreadPool(6)) {
+    long start = System.currentTimeMillis();
+    // Producer
+    executor.submit(() -> {
+        try {
+            for (int i = 0; i < 100; i++) {
+                System.out.println("Produced " + i + " remaining " + queue.remainingCapacity()+ 
+                                   " " +(System.currentTimeMillis()-start)+" ms");
+                queue.put(new Message(i, "Message " + i));
+            }
+            for (int j = 0; j < CONSUMERS; j++) {
+                System.out.println("Produced " + j + "PP" + " remaining " + 
+                                   queue.remainingCapacity()+ 
+                                   " " +(System.currentTimeMillis()-start)+" ms");
+                queue.put(Message.POISON_PILL);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    });
+    // Consumers
+    for (int c = 0; c < CONSUMERS; c++) {
+        int consumer = c;
+        executor.submit(() -> {
+            try {
+                while (true) {
+                    Message message = queue.take();
+                    System.out.println(consumer+". "+Thread.currentThread() + " result: " + 
+                                    message + " " +(System.currentTimeMillis()-start)+" ms");
+                    if (message.equals(Message.POISON_PILL)) {
+                        return;
+                    }
+                    Thread.sleep(ThreadLocalRandom.current().nextInt(500));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+}
+----
+
+Wenn wir diesen Code, z.b. in jshell ausführen dauert es ca. 5 Sekunden bis alle Elemente verarbeitet sind.
+Die durchschnittliche Wartezeit ist 250ms bei 20 Elementen (100/5) ergibt das 5s, in 5 parallelen Threads.
+In der Ausgabe sehen wir dass er Produzent die Einträge erzeugt und die Warteschlange fast immer voll ist.
+
+[source,text]
+----
+Produced 0 remaining 10 1 ms
+Produced 1 remaining 9 3 ms
+Produced 2 remaining 8 3 ms
+...
+Produced 14 remaining 1 4 ms
+Produced 15 remaining 0 4 ms // 5 consumer haben das 1. Element verarbeitet
+4. Thread[#582,pool-4-thread-6,5,main] result: Message[id=4, content=Message 4] 3 ms
+0. Thread[#578,pool-4-thread-2,5,main] result: Message[id=0, content=Message 0] 3 ms
+3. Thread[#581,pool-4-thread-5,5,main] result: Message[id=3, content=Message 3] 3 ms
+2. Thread[#580,pool-4-thread-4,5,main] result: Message[id=2, content=Message 2] 3 ms
+1. Thread[#579,pool-4-thread-3,5,main] result: Message[id=1, content=Message 1] 3 ms
+Produced 16 remaining 0 162 ms
+1. Thread[#579,pool-4-thread-3,5,main] result: Message[id=5, content=Message 5] 162 ms
+2. Thread[#580,pool-4-thread-4,5,main] result: Message[id=6, content=Message 6] 174 ms
+Produced 17 remaining 0 174 ms
+Produced 18 remaining 0 209 ms
+1. Thread[#579,pool-4-thread-3,5,main] result: Message[id=7, content=Message 7] 209 ms
+0. Thread[#578,pool-4-thread-2,5,main] result: Message[id=9, content=Message 9] 253 ms
+
+...
+0. Thread[#578,pool-4-thread-2,5,main] result: Message[id=97, content=Message 97] 4140 ms
+2. Thread[#580,pool-4-thread-4,5,main] result: Message[id=98, content=Message 98] 4196 ms
+2. Thread[#580,pool-4-thread-4,5,main] result: Message[id=99, content=Message 99] 4206 ms
+1. Thread[#579,pool-4-thread-3,5,main] result: Message[id=-1, content=POISON PILL] 4212 ms
+4. Thread[#582,pool-4-thread-6,5,main] result: Message[id=-1, content=POISON PILL] 4229 ms
+3. Thread[#581,pool-4-thread-5,5,main] result: Message[id=-1, content=POISON PILL] 4358 ms
+2. Thread[#580,pool-4-thread-4,5,main] result: Message[id=-1, content=POISON PILL] 4382 ms
+0. Thread[#578,pool-4-thread-2,5,main] result: Message[id=-1, content=POISON PILL] 4528 ms
+----
+
+=== Weitere Betrachtungen
+
+Fehlerszenarien
+
+* BlockingQueue ist voll und ein Element soll eingefügt werden - Produzent wird blockiert
+* Outpacing falls die Produzenten schneller sind als die Konsumenten werden nie alle Elemente verarbeitet
+
+Best Practices für Blocking Queues
+
+* richtige Implementierung wählen - 
+* sizing - puffer für backpressure - geschwindigkeitsmultiplikator
+* korrektes Exception-Handling - insbesondere InterruptedException
+* busy waiting vermeiden - immer mit Timeout arbeiten
+* korrekt beenden damit resource freigegeben werden - queue.clear() + poison pill alle threads beenden lassen oder thread.join
+
+// TODO Diagramm zeichnen
+
+* Probleme siehe lmax disruptor - https://lmax-exchange.github.io/disruptor/files/Disruptor-1.0.pdf
+* queue ist contention punkt - empty oder full cases - size checking
+
+
+////
+For instance, if you have a fixed number of threads that produce and consume elements, `ArrayBlockingQueue` can be an excellent choice since it’s bounded and uses a fixed-size array as its backing storage. On the other hand, if you have an unbounded number of threads, `LinkedBlockingQueue` can be a better fit as it doesn’t have any capacity restrictions and uses a linked list as its backing storage.
+
+- If the queue is too small, the producer threads may block, waiting for space to be available in the queue, leading to inefficient use of resources.
+
+- If the queue is too large, it can lead to a situation where a large number of elements are waiting in the queue, leading to high memory usage.
+
+So, you need to strike a balance between the two and set the queue size based on the expected rate of production and consumption.
+
+Here, we expect to produce and consume 10 elements per second. Therefore, we set the capacity of the `LinkedBlockingQueue` to expectedRate * 10, which gives us enough capacity for 10 seconds of production and consumption. By setting an appropriate size, we can avoid both blocking and high memory usage.
+
+`BlockingQueue` methods can throw `InterruptedException` when a thread is blocked while waiting for an operation to complete. It’s important to handle these exceptions correctly to prevent your application from crashing or entering a deadlock.
+
+When an `InterruptedException` occurs, you should catch the exception and then either re-throw it or set the thread’s interrupt flag to allow the thread to exit gracefully. Ignoring the exception can cause your application to hang indefinitely or produce unexpected results.
+
+        public void run() {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Message element = queue.take();
+                    System.out.println("Consumed: " + element);
+                } catch (InterruptedException e) {
+                    // Properly handle the exception
+                    Thread.currentThread().interrupt();
+                    System.err.println("Interrupted while taking an element.");
+                }
+            }
+
+#4 Avoid Busy Waiting
+Busy waiting is a technique where a thread repeatedly checks a condition until it’s true, leading to high CPU usage and a waste of resources. Avoid busy waiting when using `BlockingQueue` by using the blocking methods provided by the queue. These methods, such as `take()`, `put()`, and `offer()`, block the thread until the operation is completed, reducing the CPU usage and increasing the efficiency of your application.
+
+////
+
+
+Es ist wichtig, dass wir unsere Konsumenten-Threads stoppen, wenn sie auf ein Element warten, das nie erscheinen wird, das wird mit der "Poison Pill" als Anzeige für das Ende der Produktion erreicht.
+Da jeder Konsumetn-Thread ein Stopsignal erhält und konsumiert bevor er sich beendet, muss der Produzent entsprechend so viele Stopsignale einfügen, wie es Konsumenten gibt.
+
+
+
+=== BlockingQueue Interface
+
+Im `java.util.concurrent` Paket ist das Interface `[BlockingQueue]` definiert, das die Methoden für den Zugriff auf die Warteschlange definiert.
+
+Damit wird sowohl die Syntax definiert als auch die Semantik dokumentiert.
+
+Die wichtigsten Methoden sind für das Hinzufügen von Elementen:
+
+* boolean add(E) - fügt ein Element in die Warteschlange ein, wenn wenn möglich, sonst IllegalStateException
+* put(E) - fügt ein Element in die Warteschlange ein, blockiert wenn die Warteschlange voll ist
+* put(E, timeout, TimeUnit) - fügt ein Element in die Warteschlange ein, blockiert wenn die Warteschlange voll ist oder bis das Timeout abgelaufen ist und wirft dann eine Exception
+* boolean offer(e) - versucht Element einzufügen, gibt true zurück wenn erfolgreich, sonst false
+* boolean offer(e, timeout, TimeUnit) - versucht Element einzufügen, oder wartet bis der Timeout abgelaufen ist und gibt dann false zurück
+
+Entnehmen:
+
+* E take() - entfernt ein Element aus der Warteschlange, blockiert wenn die Warteschlange leer ist
+* E take(timeout, TimeUnit) - entfernt ein Element aus der Warteschlange, blockiert wenn die Warteschlange leer ist oder bis das Timeout abgelaufen ist und wirft dann eine Exception
+* E poll(timeout, TimeUnit) - versucht Element zu entfernen, oder wartet bis der Timeout abgelaufen ist und gibt dann null zurück
+
+Desweiteren gibt es noch:
+
+* E peek() - liefert das erste Element der Warteschlange, ohne es zu entfernen
+* int size() - liefert die Anzahl der Elemente in der Warteschlange
+* boolean isEmpty() - liefert true, wenn die Warteschlange leer ist
+* putAll(Collection) - fügt alle Elemente einer Collection in die Warteschlange ein
+* contains(E) - liefert true, wenn die Warteschlange das Element enthält
+* int drainTo(Collection[, elemente]) - entfernt alle Elemente aus der Warteschlange und fügt sie in die Collection ein
+* int remainingCapacity() - liefert die Anzahl der noch verfügbaren Plätze in der Warteschlange
+* remove(E) - entfernt das Element aus der Warteschlange, wenn es vorhanden ist
+
+[%autowidth,opts=header,cols="a,m,m,m,m"]
+.Methoden und Semantik von BlockingQueue Interface
+|===
+| Aktion | 	Wirft Exception |	Immer Ergebnis |	Blockiert	| TimeOut
+| Einfügen |	add(o)	| offer(o)	| put(o)	| offer(o, timeout, timeunit)
+| Entfernen |	remove(o) |	poll()	| take()	| poll(timeout, timeunit)
+| Testen |	element() |	peek()  |   |	
+|===
+
+////
+Throws Exception:
+If the attempted operation is not possible immediately, an exception is thrown.
+Special Value:
+If the attempted operation is not possible immediately, a special value is returned (often true / false).
+Blocks:
+If the attempted operation is not possible immedidately, the method call blocks until it is.
+Times Out:
+If the attempted operation is not possible immedidately, the method call blocks until it is, but waits no longer than the given timeout. Returns a special value telling whether the operation succeeded or not (typically true / false).
+////
+
+=== Implementierungen
+
+Die Implementierungen von `BlockingQueue` sind in der `java.util.concurrent` Package zu finden, wie in Abbildung 3 zu sehen.
+
+.BlockingQueue Klassenhierarchie
+image::blocking-queue-hiearchy.png[]
+
+* `ArrayBlockingQueue` - begrenzte Warteschlange, die auf einem Objekt-Array basiert, blockiert beim Einfügen, wenn die Warteschlange voll ist, oder beim Entfernen, wenn die Warteschlange leer ist.
+* `LinkedBlockingQueue` - begrenzte oder unbegrenzte Warteschlange, die auf einer Linked List basiert
+* `PriorityBlockingQueue` - unbegrenzte Warteschlange, die die Elemente nach ihrer Priorität sortiert, Elemente müssen `Comparable` implementieren, wie `PriorityQueue`
+* `DelayQueue` - unbegrenzte Warteschlange, die die Elemente nach ihrer Verzögerung sortiert, Elemente müssen `Delayed` implementieren  
+* `SynchronousQueue` - Warteschlange, die nur ein Element aufnehmen kann, das von einem Konsumenten entfernt werden muss, bevor ein weiteres Element eingefügt werden kann
+
+Eine `Deque` (double ended queue) ist eine zweiseite Warteschlange in die man die von beiden Seiten einfügen und entfernen kann.
+Ihre API entspricht der Queue nur dass es für alle Methoden eine Variante mit First/Last Suffix gibt, wie z.B. `addFirst`, `addLast`, `removeFirst`, `removeLast` usw.
+
+Eine unbegrenzte Warteschlange blockiert nicht beim Hinzufügen, nur beim Entfernen aus einer leeren Warteschlange.
+Wichtig ist hier dass die Konsumenten genauso schnell oder schneller sind als die Produzenten, sonst läuft die Warteschlange voll und die JVM bekommt ein Speicherproblem.
+
+////
+The PriorityBlockingQueue is an unbounded concurrent queue. It uses the same ordering rules as the java.util.PriorityQueue class. You cannot insert null into this queue.
+All elements inserted into the PriorityBlockingQueue must implement the java.lang.Comparable interface. The elements thus order themselves according to whatever priority you decide in your Comparable implementation.
+Notice that the PriorityBlockingQueue does not enforce any specific behaviour for elements that have equal priority (compare() == 0).
+Also notice, that in case you obtain an Iterator from a PriorityBlockingQueue, the Iterator does not guarantee to iterate the elements in priority order.
+
+
+SynchronousQueue - a queue that can only contain a single element internally. A thread inserting an element into the queue is blocked until another thread takes that element from the queue. Likewise, if a thread tries to take an element and no element is currently present, that thread is blocked until a thread insert an element into the queue.
+////
+
+
+////
+=== Betrachtungen für Blocking Queues
+
+Wie in [Morling] beschrieben, ist eine interessante Frage wie man (extern) feststellen kann dass das System überlastet ist, weil die Produzenten fast ausschliesslich blockiert sind und die Konsumenten nicht schnell genug arbeiten um die Warteschlange zu leeren.
+
+Zum einen kann mit async-profiler und der "wall-clock" [async-wall] festgestellt werden, wenn und wie lange Threads blockiert wurden.
+
+Falls das keine Option ist, kann wie so oft der JDK Flight Recorder (JFR) zur Hilfe genommen werden.
+Leider werden die Locks der BlockingQueues nicht direkt sichtbar, da sie nicht `synchronized` benutzen, aber es können eigene JFR Events erzeugt werden, falls die Warteschlange voll ist (z.b. mittels `offer()` das false zurückgibt wenn das der Fall ist).
+
+Alternativ kann mittels des JMC-Agents der Bytecoder ArrayBlockingQueue instrumentiert werden, um Events zu erzeugen, wenn die `put` Methode aufgerufen wird.
+
+// https://github.com/openjdk/jmc/blob/master/agent/README.md
+
+LockSupport.park() emitted einen JFR Event
+////
+
+=== Virtuelle Threads und Blocking Queues
+
+Unser einfaches Beispiel mit einem Produzenten und mehreren Konsumenten, die in verschiedenen Threads laufen, kann auch mit virtuellen Threads implementiert werden.
+Zum einen können wir im Beispiel den Executor durch einen `VirtualThreadPerTaskExecutor` ersetzen, der virtuelle Threads statt echte Threads erzeugt. 
+Dabei würde sich aber das Verhalten nicht ändern, da wir nur 1+5 Threads einsetzen, da die Konsumenten die Verarbeitung in einer Schleife innerhalb des Threads ausführen.
+
+Stattdessen wollen wir wirklich das Konzept des "Ein Task, ein Thread" wie wir auch in [HunXx] zu Virtuellen Threads gesehen haben, nutzen und jedem Konsum-Task einen eigenen virtuellen Thread zuordnen. 
+Dazu erzeugen wir eine Klasse `Consumer` die `Runnable` implementiert und in der `run()` Methode die Verarbeitung eines Elemente vornimmt, und dann einen neuen `Consumer` erzeugt und in einem neuen virtuellen Thread startet.
+
+[source,java]
+----
+record Message(int id, String content) {
+    public static final Message POISON_PILL = new Message(-1, "POISON PILL");
+}
+BlockingQueue<Message> queue = new ArrayBlockingQueue<>(10);
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+
+long start = System.currentTimeMillis();
+// Producer
+executor.submit(() -> {
+    try {
+        for (int i = 0; i < 100; i++) {
+            System.out.println("Produced " + i + " remaining " + queue.remainingCapacity()+ 
+                               " " +(System.currentTimeMillis()-start)+" ms");
+            queue.put(new Message(i, "Message " + i));
+        }
+        queue.put(Message.POISON_PILL);
+        
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    }
+});
+class Consumer implements Runnable {
+    private final int c;
+    public Consumer(int c) { this.c = c; }
+    public void run() {
+        try {
+            Message message = queue.take();
+            System.out.println(c+". "+Thread.currentThread() + " result: " + message+ 
+                               " " +(System.currentTimeMillis()-start)+" ms");
+            if (message.equals(Message.POISON_PILL)) {
+                // keine weiteren Konsumenten, Executor beenden
+                executor.shutdown();
+            } else {
+                // nächsten Konsumenten starten
+                executor.submit(new Consumer(c+1));
+                Thread.sleep(ThreadLocalRandom.current().nextInt(500));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+executor.submit(new Consumer(0));
+----
+
+Wie wir in der Ausgabe in Listing {counter:counter} sehen können, werden alle virtuellen Threads als Konsumenten parallel, da das `Thread.sleep` nicht wirklich blockiert sonder nur die Kontrolle abgibt und somit 100 virtuelle Threads instantan erzeugt werden und die Verarbeitung der Elemente parallel stattfindet.
+
+Die Gesamtlaufzeit beruht sich dann nur einmalig auf die 500ms Pausenzeit, die maximal von einem der Konsumenten benötigt werden.
+
+.Listing {counter} Ausgabe mit virtuellen Threads
+[source,text]
+----
+4. VirtualThread[#591]/runnable@FJP-1-worker-32 result: Message[id=4, content=Message 4] 35 ms
+5. VirtualThread[#593]/runnable@FJP-1-worker-31 result: Message[id=5, content=Message 5] 35 ms
+Produced 16 remaining 0 35 ms
+6. VirtualThread[#594]/runnable@FJP-1-worker-31 result: Message[id=6, content=Message 6] 35 ms
+Produced 17 remaining 0 35 ms
+7. VirtualThread[#595]/runnable@FJP-1-worker-31 result: Message[id=7, content=Message 7] 35 ms
+Produced 18 remaining 0 35 ms
+...
+96. VirtualThread[#684]/runnable@FJP-1-worker-31 result: Message[id=96, content=Message 96] 38 ms
+97. VirtualThread[#685]/runnable@FJP-1-worker-31 result: Message[id=97, content=Message 97] 38 ms
+98. VirtualThread[#686]/runnable@FJP-1-worker-31 result: Message[id=98, content=Message 98] 38 ms
+99. VirtualThread[#687]/runnable@FJP-1-worker-32 result: Message[id=99, content=Message 99] 38 ms
+100. VirtualThread[#688]/runnable@FJP-1-worker-32 result: Message[id=-1, content=POISON PILL] 38 ms
+----
+////
+Im Artikel zu virtuellen Threads hatten wir eine CSP-Implementierung (CSP Concurrent Synchronous Programming) von Game of Life betrachtet, die jeder Zelle einen eigenen virtuellen Thread zuordnet und die Struktur mittels Channels abbildet. (TODO Blocking Queues?)
+
+- CSP Game of Thrones
+- Mario Fusco - alternative Datenstrukturen für Channels
+////
+
+=== Implementierungsdetails
+
+Um zu verstehen, wie eine Wartequeue implementiert werden kann, schauen wir uns kurz die Implementierung der [ArrayBlockingQueue] an.
+Wir finden diese auf GitHub im OpenJDK Repository [OpenJDKRepo].
+
+Die `ArrayBlockingQueue` ist eine begrenzte Warteschlange, die auf einem Objekt-Array mit fixer Größe entsprechend der Kapazität basiert.
+
+Um die Zugriffe auf die Warteschlange zu synchronisieren, wird ein `ReentrantLock` verwendet, dass es erlaubt, dass derselbe Thread mehrmals das Lock betreten kann, ohne ein Deadlock gegen sich selbst zu verursachen.
+Jede Betreten des Locks erhöht erhöht einen Zähler für den Thread und erniedrigt ihn beim Verlassen.
+
+Die Bedingungen für `notFull` und `notEmpty` werden mittels Konditions-Objekten [Condition] realisiert, die mit dem Lock verknüpft sind und die `await()` und `signal()` Methoden implementieren, die die `Object.wait()` und `Object.notify()` Methoden ersetzen.
+Diese benutzen unter der Haube `LockSupport.park()` um den aktuellen Thread zu pausieren, damit werden auch, anders als bei `synchronized` virtuelle Threads mit unterstützt.
+
+Im Konstruktor (Listing {counter:listing}) wird das Array, das Lock und die Konditionen initialisiert.
+
+.Listing {listing} Konstruktor der ArrayBlockingQueue
+[source,java]
+----
+
+public ArrayBlockingQueue(int capacity, boolean fair) {
+    if (capacity <= 0)
+        throw new IllegalArgumentException();
+    // begrenzte Warteschlange
+    this.items = new Object[capacity];
+    // Lock für Schreibzugriff
+    lock = new ReentrantLock(fair);
+    // Condition für Warteschlange voll und leer
+    // Condition externalisiert Object.wait() und notify()
+    // verknüpft mit dem Lock, so dass condition.await()
+    // das lock freigibt und den Thread parkt
+    notEmpty = lock.newCondition();
+    notFull =  lock.newCondition();
+}
+----
+
+Die `put` Methode in Listing {counter:listing} führt zuerst den Null-Test durch, und sperrt dann den Zugriff über das Lock der Warteschlange.
+Dann wird in einer Schleife solange gewartet (Thread blockiert und Lock gelöst) solange keine Platz in der Warteschlange ist.
+Wenn das dann der Fall ist, wird das Element hinzugefügt und schlussendlich das Lock wieder freigegeben.
+
+.Listing {listing} `put` Methode der `ArrayBlockingQueue`
+[source,java]
+----
+public void put(E e) throws InterruptedException {
+    Objects.requireNonNull(e);
+    // Lock für Schreiben auf Warteschlange
+    final ReentrantLock lock = this.lock;
+    lock.lockInterruptibly();
+    try {
+        // solange die Warteschlange voll ist, warten
+        while (count == items.length) {
+            // notFull ist ein Condition Objekt
+            // ein Thread wird mit 
+            // notFull.signal() aufgeweckt wenn
+            // ein Element entfernt wurde
+            notFull.await();
+        }
+        // Element einfügen
+        enqueue(e);
+    } finally {
+        // Lock freigeben
+        lock.unlock();
+    }
+}
+----
+
+=== Fazit
+
+Blocking Queues sind nützliche Werkzeuge für nebenläufige Anwendungen, die Daten zwischen mehreren Threads austauschen müssen bzw. zwischen Produzenten und Konsumenten synchronisieren müssen.
+Auch die Verteilung eines eingehenden singulären Stroms auf mehrere Konsumenten oder die Zusammenführung von mehreren Quellen in einen singulären Konsumenten kann mit Blocking Queues einfach implementiert werden.
+
+Mit virtuellen Threads besteht die Möglichkeit, dass die Verarbeitung jedes Elements in eigenen Task bzw. Thread stattfindet und damit die Resourcen des Systems besser ausgenutzt und der Durchsatz erhöht werden kann.
+
+Wie schon im Disruptor Artikel und Paper vor vielen Jahren beschrieben sind in echten Systemem die Geschwindigkeiten von Produzenten und Konsumenten selten balanciert, so dass die Warteschlangen entweder immer leer (Konsumenten schneller) oder immer voll sind (Produzent schneller).
+Sie haben auch das Problem, dass sie einen Contention Point, da mehrere Threads gleichzeitig auf diesselben synchronisierten Informationen zum Warteschlangenstatus und auf das Kopf-Element zugreifen.
+Zumindest in hochperformanten Systemen, wo die Verarbeitung von elementen im Mikrosekundenbereich liegt, ist das ein Problem, da die Synchronisation der Threads die Verarbeitung verlangsamt. 
+Dann bieten sich alternative Ansätze wie LMAX Disruptor an.
+
+=== Referenzen
+
+* [Hun11] JavaSpektrum 05/2011 - LMAX Disruptor
+* [Morling] https://www.morling.dev/blog/is-your-blocking-queue-blocking/
+* [JenkovBQVideo] https://www.youtube.com/watch?v=d3xb1Nj88pw
+* [PatelCustomQueue] https://javabypatel.blogspot.com/2020/09/custom-blocking-queue-implementation-in-java.html
+* [BQ Explainer] https://bito.ai/resources/blocking-queue-java-implementation-java-explained/
+* [Baeldung-BQ] https://www.baeldung.com/java-blocking-queue
+// * [async-wall] https://krzysztofslusarski.github.io/2022/12/12/async-manual.html#wall
+* [LockSupport] https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/locks/LockSupport.html
+* [OpenJDKRepo] https://github.com/openjdk/jdk
+* [Condidition] https://github.com/openjdk/jdk/blob/jdk-17%2B35/src/java.base/share/classes/java/util/concurrent/locks/Condition.java#L54-L74
+* [ArrayBlockingQueue] https://github.com/openjdk/jdk/blob/jdk-17%2B35/src/java.base/share/classes/java/util/concurrent/ArrayBlockingQueue.java#L370
+// * [Deque] https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Deque.html
+* [BQ Implementation] https://www.javacodemonk.com/blocking-queue-implementation-in-java-044ee033
+* [ABQ Implementation] https://topdeveloperacademy.com/articles/java-arrayblockingqueue-a-thread-safe-bound-size-queue
+// https://technotailor.wordpress.com/2022/03/08/threadpoolexecutor-and-blockingqueue-with-an-example/
+// https://www.devglan.com/datastructure/blocking-queue-implementation-in-java
+// https://www.edureka.co/blog/blockingqueue-interface-in-java/

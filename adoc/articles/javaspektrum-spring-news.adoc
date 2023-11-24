@@ -1,0 +1,598 @@
+== Smartere Anwendungen mit Spring AI
+
+Ich habe mich in den letzten 9 Monaten sehr intensiv mit Generativer Künstlicher Intelligenz (GenAI) beschäftigt, da ich die Initiativen in diesem Bereich bei Neo4j koordiniere und natürlich auch persönlich sehr interessiert bin.
+
+=== Generative Künstliche Intelligenz
+
+Daher war ich sehr angetan, neben den üblichen Python-basierten Integrationen von KI-Modellen in Anwendungen, mit Spring AI einen Ansatz im Java-Umfeld zu sehen, die mit dem Spring Ökosystem integriert ist.
+
+Traditionell ist maschinelles Lernen und Künstliche Intelligenz ein Bereich, der mehr von Mathematikern, Statistikern und Data Scientists, als von Softwareentwicklern dominiert wird.
+Hauptsächlich werden die statistischen und neuronalen Netze in Python oder R programmiert und dann in C oder Fortran Bibliotheken auf CPU, GPU oder TPU Architekturen ausgeführt.
+
+Mit dem Erscheinen der Transformer Architektur und dem damit verbundenen Durchbruch in der Sprachverarbeitung durch große Sprachmodelle (large language models, LLMs), hat sich das geändert.
+
+Dabei ist vor allem interessant, wie diese Modelle, im Unternehmenskontext eingesetzt werden können, wo Korrektheit, Verlässlichkeit, Sicherheit, Nachvollziehbarkeit und Regulatorien eine große Rolle spielen.
+Desweiteren muss dort auch die Nutzung der eigenen Daten und nicht des öffentlichen Trainingskorpuses im Vordergrund stehen.
+
+Im Umfeld von großen Sprachmodellen ist zur Zeit das Trainieren eigener Modelle zu aufwändig und teuer und das Feintuning noch nicht ausgereift.
+
+Daher wird zumeist unter dem Begriff "Retrieval Augmented Generation" (RAG) ein Ansatz gewählt in dem die Anfragen an LLM mit kontextuellen Informationen aus Dokumenten oder Datenbanken versehen wird, um eine relevante and korrekte Antwort für den Nutzer zu generieren.
+
+Es werden sozusagen nur die Sprachfähigkeiten der Modelle genutzt und nicht die Fähigkeit, neue Informationen zu  aus den Traingsdaten zu generieren.
+
+=== Spring AI
+
+Da diese Modelle meist durch eine API verfügbar sind, können sie auch von Softwareentwicklern angesprochen und integriert werden.
+Das gilt sowohl für zentral gehostete als auch für lokal installierte Modelle.
+
+Trotzdem sind die meisten Integrationsbibliotheken wie LangChain, LlamaIndex, GuardRails oder Guidance in Python implementiert, teilweise auch in Javascript.
+Java führt in diesem Bereich zur Zeit noch ein Schattendasein.
+
+Das will das [SpringAI] Projekt ändern, ähnlich wie LangChain ist Spring ja dafür bekannt, dass es die Integration von Java mit externen Diensten und Frameworks vereinfacht.
+Damit sollen Konzepte wie Agenten, Transformer, Pipelines, Vektor-Datenbanken, etc. auch in Java insbesondere Spring-Anwendungen verfügbar gemacht werden.
+
+Das Spring AI Projekte wurde auf der SpringOne im August 2023 in einem Workshop von Mark Pollack vorgestellt. 
+Es beinhaltet die Basisabstraktionen und Komponenten, die einfach in Spring-Anwendungen integriert werden können.
+Die Implementierung der Abstraktionen für die verschiendenen Anbieter, wie OpenAI, Vertex AI, Anthropic oder Bedrock wird in separaten Projekten vorgenommen.
+
+=== Abstraktionen in Spring AI
+
+Folgende Grundabstrakionen sind verfügbar:
+
+* Modell-Interaktionen: 
+** AI-Modelle - Integration mit Modell-Endpunkten, meist über HTTP APIs
+** Prompts - parametrisierte Textvorlagen, die an das Modell übergeben werden
+** Output Parser - Extraktion von Informationen aus den Modellantworten
+
+* Datenmanagement:
+** Datebank Integration - Integration eigener Datenquellen für Kontextdaten (z.b. Datenbanken, Dokumente, öffentliche APIs) um Modellen relevante Informationen zur Beantwortung von Fragen zur Verfügung zu stellen (Retrieval Augmented Generation - RAG)
+** Vektor-Datenbanken - Speicherung und Suche von Embedding-Vektoren in Datenbanken, die auf Vektor-Operationen optimiert sind
+
+* Chains: Feste Verkettung mehrerer Operationen um eine Anfrage zu beantworten, dazu können Daten vom Modell extrahiert oder angereichert werden und aus zusätzlichen Quellen weitere Informationen geladen werden, bevor das ML-Modell die Antwort generiert.
+
+* Speicher: Zwischenspeicherung von vorherigen Antworten mit passenden Datenspeichern (z.b. Datenbanken, Vektor-Datenbanken oder im Hauptspeicher)
+
+* Agenten: beschriebene Operationen, die dann vom Modell dynamisch ausgewählt werden können.
+
+Wichtige Klassen von Spring AI:
+
+* `AiClient` - Ai Model Abstraktion für Generierung von Antworten
+* `EmbeddingClient` - Abstraktion für Generierung von Vektor-Embeddings
+* `VectorStore` - Abstraktion für Vektor-Indizes und -Datenbanken
+* `PromptTemplate` - Abstraktion für parametrisierte Textvorlagen
+* `Generation` - structured output details from the AI model
+
+Hier in Listing {counter:listing} ein Hello-World-Beispiel, um eine einfache REST API zu erstellen, die eine Aufgabe an das OpenAI GPT-3 Modell stellt und die Antwort zurückgibt.
+
+.Listing {listing} Hello World mit Spring AI - RestController mit Completion
+[source,java]
+----
+@RestController
+public class SimpleAiController {
+
+	private final AiClient aiClient;
+
+	@Autowired
+	public SimpleAiController(AiClient aiClient) {
+		this.aiClient = aiClient;
+	}
+
+	@GetMapping("/ai/simple")
+	public Completion completion(@RequestParam(value = "message", defaultValue = "Tell me a joke") String message) {
+		return new Completion(aiClient.generate(message).getGeneration().getText());
+	}
+    public record Completion(String message) {}
+}
+----
+
+In das Spring Boot Projekt wird Spring AI durch die Abhängigkeit von `spring-ai-azure-openai-spring-boot-starter` bzw. `spring-ai-starter-openai` integriert (siehe Listing {counter:listing}) weitere Integrationen werden folgen.
+
+.Listing {listing} Spring Boot Starter Dependency für Spring AI
+[source,xml]
+----
+<dependency>
+    <groupId>org.springframework.experimental.ai</groupId>
+    <artifactId>spring-ai-azure-openai-spring-boot-starter</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+</dependency>
+----
+
+Nachdem man den eigenen [OpenAI API Schlüssel] bereitgestellt hat, kann die Anwendung gestartet und über einen REST-Aufruf getested werden, wie in Listining {counter:listing} zu sehen.
+
+.Listing {listing} Ausführung der Hello-World Anwendung
+[source,shell]
+----
+export SPRING_AI_OPENAI_API_KEY=sk-...
+./mvnw spring-boot:run
+curl http://localhost:8080/ai/simple
+----
+
+In LLM-Anwendungen liegt ein Hauptaugenmerk auf der textuellen Aufgabe an das Modell, auch Prompt genannt.
+Damit wird nicht nur die Anfrage des Nutzers, sondern auch der relevante Kontext, Beispiele oder andere Informationen an das Modell übergeben, um die Antwort zu verbessern.
+
+Im Prompt werden Richtlinien für das Modell definiert, um die Art der Antwort zu kontrollieren und unnütze Antworten zu vermeiden.
+
+.Listing {listing} Beispielprompt: `my-prompt.st`
+----
+Gib mir Anwendungsbeispiele für ein `{topic}` Projekte in einer IT Organisation.
+
+Beschränke Dich dabei auf eine Aufzählungsliste von maximal 5 Einträgen.
+----
+
+In Listing {counter:listing} wird ein parameterisiertes PromptTemplate verwendet, um die Anfrage an das Modell zu konfigurieren, der Text dafür kommt aus einer Datei im Klassenpfad, oder aus einem statischen String.
+Die Parameter dagegen werden aus der Nutzeranfrage und/oder aus anderen relevanten Datenquellen ermittelt.
+
+Listing {listing} Nutzung von PromptTemplate
+[source,java]
+----
+    @Value("classpath:/prompts/my-prompt.st")
+    private Resource promptResource;
+
+    @GetMapping("/ai/prompt")
+    public Generation completion(@RequestParam(value = "topic", defaultValue = "data science") String topic) {
+        PromptTemplate promptTemplate = new PromptTemplate(promptResource);
+        Prompt prompt = promptTemplate.create(Map.of("topic", topic));
+        return aiClient.generate(prompt).getGeneration();
+    }
+----
+
+Die Antwort des Modells wird als `Generation` Objekt zurückgegeben, das neben dem Text auch die Metadaten der Antwort enthält.
+
+Für die Nutzung in Anwendungen sind natürlichsprachliche Antworten des LLMs nicht optimal, da sie schlecht strukturiert zu verarbeiten sind.
+
+Daher kann mittels `BeanOutputParser` eine JavaBean Klasse angegeben werden, die das Schema der Antwort definiert, und die Antwort dann in ein JSON-Objekt des Typs des Schemas deserialisiert.
+Die Vorgaben im Prompt werden automatisch von Spring AI vorgenommen, ein Beispiel ist in Listing {counter:listing} zu sehen.
+
+.Listing {listing} Nutzung von BeanOutputParser
+[source,java]
+----
+    record ActorsFilms(String actor, List<String> movies) {}
+    // todo does it work with records?
+    @GetMapping("/ai/output")
+    public ActorsFilms generate(@RequestParam(value = "actor", defaultValue = "Jeff Bridges") String actor) {
+        BeanOutputParser<ActorsFilms> outputParser = new BeanOutputParser<>(ActorsFilms.class);
+
+        String format = outputParser.getFormat();
+        String template = """
+				Generate the filmography for the actor {actor}.
+				{format}
+				""";
+        PromptTemplate promptTemplate = new PromptTemplate(template, Map.of("actor", actor, "format", format));
+        Prompt prompt = new Prompt(promptTemplate.createMessage());
+        Generation generation = aiClient.generate(prompt).getGeneration();
+
+        ActorsFilms actorsFilms = outputParser.parse(generation.getText());
+        return actorsFilms;
+    }
+----
+
+
+// rag https://github.com/rd-1-2022/ai-azure-retrieval-augmented-generation
+
+[source,java]
+----
+@Configuration
+public class RagConfiguration {
+
+    @Bean
+    public RagService ragService(AiClient aiClient, EmbeddingClient embeddingClient) {
+        return new RagService(aiClient, embeddingClient);
+    }
+}
+
+@RestController
+public class RagController {
+
+    private final RagService ragService;
+
+    @Autowired
+    public RagController(RagService ragService) {
+        this.ragService = ragService;
+    }
+
+    @GetMapping("/ai/rag")
+    public Generation generate(@RequestParam(value = "message", defaultValue = "What bike is good for city commuting?") String message) {
+        return ragService.retrieve(message);
+    }
+}
+
+public class RagService {
+
+    private static final Logger logger = LoggerFactory.getLogger(RagService.class);
+
+    @Value("classpath:/data/bikes.json")
+    private Resource bikesResource;
+
+/*
+You're assisting with questions about products in a bicycle catalog.
+Use the information from the DOCUMENTS section to provide accurate answers.
+The the answer involves referring to the price or the dimension of the bicycle, include the bicycle name in the response.
+If unsure, simply state that you don't know.
+
+DOCUMENTS:
+{documents}
+*/
+    @Value("classpath:/prompts/system-qa.st")
+    private Resource systemBikePrompt;
+
+    private final AiClient aiClient;
+    private final EmbeddingClient embeddingClient;
+
+    public RagService(AiClient aiClient, EmbeddingClient embeddingClient) {
+        this.aiClient = aiClient;
+        this.embeddingClient = embeddingClient;
+    }
+
+    public Generation retrieve(String message) {
+
+        // Step 1 - Load JSON document as Documents
+
+        logger.info("Loading JSON as Documents");
+        JsonLoader jsonLoader = new JsonLoader(bikesResource,
+                "name", "price", "shortDescription", "description");
+        List<Document> documents = jsonLoader.load();
+        logger.info("Loading JSON as Documents");
+
+        // Step 2 - Create embeddings and save to vector store
+
+        logger.info("Creating Embeddings...");
+        VectorStore vectorStore = new InMemoryVectorStore(embeddingClient);
+        vectorStore.add(documents);
+        logger.info("Embeddings created.");
+
+        // Step 3 retrieve related documents to query
+
+        VectorStoreRetriever vectorStoreRetriever = new VectorStoreRetriever(vectorStore);
+        logger.info("Retrieving relevant documents");
+        List<Document> similarDocuments = vectorStoreRetriever.retrieve(message);
+        logger.info(String.format("Found %s relevant documents.", similarDocuments.size()));
+
+        // Step 4 Embed documents into SystemMessage with the `system-qa.st` prompt template
+
+        Message systemMessage = getSystemMessage(similarDocuments);
+        UserMessage userMessage = new UserMessage(message);
+
+        // Step 4 - Ask the AI model
+
+        logger.info("Asking AI model to reply to question.");
+        Prompt prompt = new Prompt(List.of(systemMessage, userMessage));
+        logger.info(prompt.toString());
+        AiResponse response = aiClient.generate(prompt);
+        logger.info("AI responded.");
+        logger.info(response.getGeneration().toString());
+        return response.getGeneration();
+    }
+
+    private Message getSystemMessage(List<Document> similarDocuments) {
+
+        String documents = similarDocuments.stream().map(entry -> entry.getContent()).collect(Collectors.joining("\n"));
+        SystemPromptTemplate systemPromptTemplate = new SystemPromptTemplate(systemBikePrompt);
+        Message systemMessage = systemPromptTemplate.createMessage(Map.of("documents", documents));
+        return systemMessage;
+
+    }
+}
+----
+
+// stuff https://github.com/rd-1-2022/ai-azure-stuff-prompt
+
+[source,java]
+----
+@RestController
+public class StuffController {
+
+    private final AiClient aiClient;
+
+    @Value("classpath:/docs/wikipedia-curling.md")
+    private Resource docsToStuffResource;
+
+/*
+Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+{context}
+
+Question: {question}
+Helpful Answer:
+*/
+    @Value("classpath:/prompts/qa-prompt.st")
+    private Resource qaPromptResource;
+
+    @GetMapping("/ai/stuff")
+    public Completion completion(@RequestParam(value = "message", 
+                                defaultValue = "Which athletes won the gold medal in curling at the 2022 Winter Olympics?'") String message,
+                                 @RequestParam(value = "stuffit", defaultValue = "false") boolean stuffit) {
+        PromptTemplate promptTemplate = new PromptTemplate(qaPromptResource);
+        Map map = Map.of("question", message, "context", stuffit ? docsToStuffResource : "");
+        Prompt prompt = promptTemplate.create(map);
+        AiResponse aiResponse = aiClient.generate(prompt);
+        return new Completion(aiResponse.getGeneration().getText());
+    }
+
+}
+----
+
+// eval https://github.com/rd-1-2022/ai-azure-openai-evaluation
+// agents 
+
+=== Resources
+
+* [SpringAIVideo] https://www.youtube.com/watch?v=0P8UU5vkvI8
+////
+* [Schauder23] https://spring.io/blog/2023/08/31/this-is-the-beginning-of-the-end-of-the-n-1-problem-introducing-single-query
+* https://docs.spring.io/spring-boot/docs/current/reference/html/cli.html
+* https://docs.spring.io/spring-boot/docs/1.5.10.RELEASE/reference/html/cli-using-the-cli.html
+* https://github.com/spring-projects-experimental/spring-cli
+* https://docs.spring.io/spring-cli/reference/
+////
+* [SpringAI-Github] https://github.com/spring-projects-experimental/spring-ai
+* https://docs.spring.io/spring-ai/reference/
+* AI Workshop https://github.com/markpollack/spring-ai-azure-workshop
+* AI Workshop Beispiele https://github.com/rd-1-2022
+* Spring AI Beispielprojekt https://github.com/coffee-software-show/spring-ai
+* https://www.infoq.com/news/2023/08/spring-ai/
+
+* [OpenAI API Schlüssel] https://help.openai.com/en/articles/4936850-where-do-i-find-my-secret-api-key
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+////
+In den letzten Wochen bin ich über 3 interessante Neuerungen in Spring gestolpert, die ich hier heute vorstellen möchte.
+
+Zum einen hat Jens Schauder einen interessanten Artikel über das Laden von abhängigen Objekten mittels einer einzigen SQL Abfrage mit Spring Data geschrieben.
+
+Zum zweiten wurde Spring AI von Mark Pollack auf der Spring One vorgestellt, das eine leichte Integration von Machine Learning in Spring Boot ermöglichen soll.
+
+Und letztlich wurde der Workshop für Spring AI mit Spring CLI erstellt, die ich hiermit auch kurz vorstellen möchte.
+
+=== Spring Data - Laden abhängiger Objekte
+
+Ein typisches Problem in Anwendungen, die Daten aus Datenbanken laden, ist das "Kopf-Positions" Problem, das besonderes auch in Aggregaten im Domain-Driven_Design (DDD) auftritt.
+Wie lädt man Objekte effizient, die jeweils eine oder mehrere Listen von abhängigen Objekten enthalten?
+
+Für ein einfaches Beispiel können wir die Northwind Datenbank benutzen, die ein Retail-System abbildet, mit Produkten, Kunden, Kategorien und Lieferanten.
+
+TODO image
+
+----
+create table product (
+    id int primary key,
+    name varchar(255)
+    price decimal(10,2)
+)
+
+create table category (
+    id int primary key,
+    name varchar(255)
+)
+
+create table product_category (
+    product_id int,
+    category_id int,
+    primary key (product_id, category_id)
+)
+
+create table supplier (
+    id int primary key,
+    name varchar(255)
+)
+
+create table product_supplier (
+    product_id int,
+    supplier_id int,
+    primary key (product_id, supplier_id)
+)
+----
+
+insert ...
+TODO Domänenmodell
+
+In SQL führt das oft zu dem N+1-Select Problem.
+Dabei wird für jedes abhängige Objekt pro Hauptobjekt ein zusätzliches Select mit der Id des Hauptobjekts ausgeführt.
+Das kann für eine Liste von Objekten optimiert werden, indem alle Ids von Hauptobjekten als Liste übergeben werden.
+
+select * from product;
+select supplier.* from product_supplier JOIN supplier ON (supplier_id = supplier.id) where product_id = ?
+select category.* from product_category JOIN category ON (category_id = category.id) where product_id = ?
+
+
+select product_id, supplier.* from product_supplier JOIN supplier ON (supplier_id = supplier.id) where product_id in (?,?,?)
+select product_id, category.* from product_category JOIN category ON (category_id = category.id) where product_id in (?,?,?)
+
+TODO Beispiel 
+
+Alternativ kann das Hauptobjekt mit einigen oder allen abhängigen Objekten in einem Join geladen werden.
+Das führt aber oft zu Abfragen, die eine Menge duplikater Daten enthalten, die dann in der Anwendung gefiltert werden müssen.
+
+[source,sql]
+----
+select product.*, supplier.*, category.*
+from product
+join product_supplier on (product_id = product.id)
+join supplier on (supplier_id = supplier.id)
+join product_category on (product_id = product.id)
+join category on (category_id = category.id)
+----
+
+TODO Beispiel 
+
+Man kann auch die Daten der abhängigen Objekte als Subselects in der Hauptabfrage laden, dabei geht aber bei einigen Datenbanken die Typinformation verloren.
+
+[source,sql]
+----
+select product.*, 
+    (select supplier.* from product_supplier 
+            JOIN supplier ON (supplier_id = supplier.id) where product_id = product.id) as suppliers, 
+    (select category.* from product_category 
+            JOIN category ON (category_id = category.id) where product_id = product.id) as category
+from product
+----
+
+Andere relationale Datenbanken erlauben dass Subselect als Array oder Liste von Structs zu laden, womit die Typinformation erhalten bleiben.
+
+[source,sql]
+----
+select product.*, 
+    (select supplier.* from product_supplier 
+            JOIN supplier ON (supplier_id = supplier.id) where product_id = product.id) as suppliers, 
+    (select category.* from product_category 
+            JOIN category ON (category_id = category.id) where product_id = product.id) as category
+from product
+----
+
+Für einen "generischen" Ansatz hat Jens Schauder [Schauder23], WINDOW Funktionen verwendet, um abhängige Objekte mit localen fortlaufenden Zählern zu versehen und über mehrere Joins Zuordnungen vorzunehmen und duplikate Informationen zu entfernen.
+
+Das Feature ist unter `Single Query Loading` in Spring Data JDBC 3.2.0-M2 verfügbar `setSingleQueryLoadingEnabled(true)` für einfache Aggregate-Root-Objekte.
+In CrudRepository wird es für die Methoden `findAll`, `findById`, and `findAllByIds` unterstützt und sollte bei allen relationalen Datenbanken ausser H2 und HSQLDB funktionieren.
+
+Es funktioniert wie folgt:
+
+0. Das Hauptobjekte wird selektiert
+1. für jedes abhängige Objekt wird über WINDOW Funktion auf der Hauptobjekts-Id ein fortlaufender Zähler mittels rownum() erzeugt
+2. es wird auch die Anzahl der abhängigen Objekte ermittelt mittels `count(*)`
+3. es werden die Daten des abhängigen Objektes geladen
+4. das Hauptobjekt und die Unterobjekte werden über full-outer-joins miteinander verbunden
+5. mittels Filtern auf der Zähler-Spalte werden werden duplikate Einträge entfern, also durch `null` ersetzt
+
+TODO Beispiel
+
+select * from product;
+
+select supplier.*,
+     rownum() OVER (PARTITION BY product_id) as supplier_rownum,
+     count(*) OVER (PARTITION BY product_id) as supplier_count
+     from product_supplier JOIN supplier ON (supplier_id = supplier.id) where product_id = product.id) as suppliers
+
+select category.*,
+     rownum() OVER (PARTITION BY product_id) as as category_rownum,
+     count(*) OVER (PARTITION BY product_id) as category_count
+     from product_category JOIN category ON (category_id = category.id) where product_id = product.id) as categories
+
+
+...
+
+Wie handhaben andere Datenbanken das Problem?
+
+Im Dokument-Datenmodell wird das meist mit verschachtelten Objekten abgebildet, in denen die abhängigen Objekte innerhalb des Hauptobjekts gepspeichert werden, und dann auf einen Schlag geladen werden können.
+
+{ products: {
+    id: 1,
+    name: "Chai",
+    price: 18.00,
+    categories: [
+        { id: 1, name: "Beverages" },
+        { id: 2, name: "Condiments" }
+    ],
+    suppliers: [
+        { id: 1, name: "Exotic Liquids" },
+        { id: 2, name: "New Orleans Cajun Delights" }
+    ]},
+    ...
+}
+
+TODO Beispiel MongoDB
+
+[source,mongodb]
+----
+products.find({id:1})
+----
+
+In Graph-Datenbanken wie Neo4j kann das mit Beziehungen abgebildet werden, die dann mit dem Objekt geladen werden.
+
+[source,cypher]
+----
+MATCH (p:Product)
+RETURN p, 
+       collect { MATCH (p)-[:CATEGORY]->(c:Category) RETURN c } as categories
+       collect { MATCH (p)<-[:SHIPS]-(s:Shipper) RETURN s } as shippers
+----
+////
+
+
+=== Spring CLI
+
+Die Spring CLI ist ein sehr neues Tool, das es erlaubt, Spring Boot Anwendungen mit einem einzigen Befehl zu erstellen und zu starten.
+
+* `boot new` clont ein externes Projekt und passt es an die eigenen Vorgaben an, das ist besonders für geteilte Musterprojekte interessant.
+* `boot add` integriert ein externes Projekt in das eigene Projekt, und führt dabei eine intelligente Zusammenführung von Abhängigkeiten, Plug-ins, Annotationen, Konfigurationsdateien und Refactoring des Codes in die eigene Paketstruktur durch.
+* `boot run` startet die Anwendung
+* 
+
+Um Spring CLI zu installieren, muss man zur Zeit noch entweder den Quellcode bauen oder das Artefakt-Jar herunterladen und als Shell-Alias integrieren.
+
+Kann mit Spring Initializr (start.spring.io) verwendet werden.
+
+//// confused with spring boot cli
+spring init --dependencies=web,data-jpa my-project
+spring init --list
+ ////
+
+URLs von GitHub/GitLab Projekten und Repositories können mit einem Alias versehen, und dann in der Kurzform verwendet werden.
+
+----
+spring project-catalog add azure-ai https://github.com/rd-1-2022/ai-azure-catalog
+
+spring boot new myai ai-azure-hello-world --package-name com.xkcd.ai
+
+spring boot add ai-azure-prompt-templating
+----
+
+TODO native image of spring cli ?
+
+////
+The command boot new clones an external project and optinally perform a package refactoring to your chosen package name. You can also optionally specify the new project’s group id, artifact id, and version
+
+The command boot add will merge an external project to your current project. It performs an intelligent merge of project dependencies, plug-ins, annotations, application configuration files, and refactoring of the external project code into your current project’s package structure.
+
+User-provided commands provides a user-friendly way to define and execute custom commands that can perform everyday tasks on your project. With declarative command definitions living alongside your code, you can easily create new controllers, add dependencies, or configure files. You can also execute other command-line applications as needed resembling a client-side GitHub Actions like experience.
+
+
+////

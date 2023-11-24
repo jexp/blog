@@ -347,8 +347,7 @@ Wichtig ist die Integration anderer Anbieter wie Google, Anthropic und AWS damit
 * [SpringAIVideo] https://www.youtube.com/watch?v=0P8UU5vkvI8
 * [SpringAI-Github] https://github.com/spring-projects-experimental/spring-ai
 * [SpringAIDocs] https://docs.spring.io/spring-ai/reference/
-* [SpringAIWorkshop] https://github.com/markpollack/spring-ai-azure-workshop
-* [SpringAIWorkshopBeispiele] https://github.com/rd-1-2022
+* [SpringAIWorkshop] https://github.com/Azure-Samples/spring-ai-azure-workshop
 * [SpringAIBeispielprojekt] https://github.com/coffee-software-show/spring-ai
 * [InfoQ] https://www.infoq.com/news/2023/08/spring-ai/
 * [OpenAI API Schlüssel] https://help.openai.com/en/articles/4936850-where-do-i-find-my-secret-api-key

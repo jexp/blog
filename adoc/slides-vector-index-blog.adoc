@@ -1,0 +1,447 @@
+== Similarity Search for Content Discovery with the new Neo4j Vector Index and Vertex AI
+:imagesdir: ../img
+
+I'm really excited about the link:https://neo4j.com/blog/neo4j-vector-search-deeper-insights-ai-applications/[addition of a vector index to Neo4j^].
+Now we can combine similarity search in the vector space with graph patterns in our knowledge graphs to provide relevant information to our user's natural language questions.
+
+In this blog post I wanted to give a practical example of how to https://neo4j.com/docs/cypher-manual/current/indexes-for-vector-search/[populate and use the new vector index^].
+// In part 2 we will look at how to integrate and in the upcoming part 2 to power a small chat bot application that searches through a list of all Neo4j presentations.
+
+We are going to use the following parts:
+
+1. Colab Notebooks for the Python code to download the data and create the embeddings.
+2. Neo4j's complete list of presentations given over the years as hosted on slideshare.net/neo4j 
+3. Vertex AI Embedding Model for generating the initial embeddings and embedding user questions
+4. Vertex AI Completion Model for extracting the authors and keywords
+5. Neo4j 5.11 on AuraDB Free Tier
+// 6. Streamlit for a quick Chat UI
+
+You can use the code examples directly from the https://colab.research.google.com/drive/1VPL3DDFa317TOHGqx4faOjvwuMuByEmy#scrollTo=zFtCutseBvfm[Google Colab Notebook^]
+
+=== The Database
+
+We are going to use the new Neo4j 5.11 on the AuraDB Free Tier for this project, so if you haven't signed up, go to https://console.neo4j.io?ref=hunger-llm[console.neo4j.io^] and do so now.
+
+Create a new free database, and download the credentials and connection details.
+
+image::auradb-createdb.png[]
+
+TLDR: If you don't want to create the data and embeddings yourself, you can also https://data.neo4j.com/slides-embeddings.dump[download this database dump^] and import it into your AuraDB instance (on the "Import Database" tab) and skip ahead to the "<<querying-with-an-embedding-for-a-user-question>>" section.
+
+=== The ML Infrastructure
+
+In this blog post we're using Google's VertexAI but it works exactly the same with (Azure) OpenAI or AWS Bedrock.
+The main difference are the API calls, and that e.g. the embedding dimension is 1536 for OpenAI, instead of 768 for VertexAI.
+
+With the `gcloud` CLI, create a project and enable Vertex AI for that project, and then output your access-token which you can use as API-Key.
+
+// https://cloud.google.com/sdk/gcloud/reference/services/enable
+
+[source,shell]
+----
+gcloud create project neo4j-vector-search # projectId
+gcloud services list --available | grep -i vertex
+glcoud services enable aiplatform.googleapis.com # enable vertex ai
+gcloud auth print-access-token # apiKey
+----
+
+If you want to use AuraDB Pro on GCP you can also enable and create an instance for your project, and then use the same project and API key. `neo4j-aura-gcp.endpoints.neo4j-aura-gcp.cloud.goog`
+
+=== The Data
+
+Slideshare has a really dated API that is not actively maintained anymore.
+Fortunately we still had one of the old API keys lying around, so that I could use a short Python script to download the metadata for all presentations.
+You can find the code in the notebook as well.
+
+////
+[source,cypher]
+----
+# docs https://www.slideshare.net/developers/documentation
+# pip install xmltodict requests
+
+import requests
+import time
+from hashlib import sha1
+import os
+import json
+import xmltodict
+
+user = 'neo4j'
+api_key = os.environ.get("SLIDESHARE_KEY")
+api_secret = os.environ.get("SLIDESHARE_SECRET")
+
+# compute current time seconds since epoch
+ts = str(int(time.time()))
+hash = sha1(bytes(api_secret + ts,"ascii")).hexdigest()
+
+url = f"https://www.slideshare.net/api/2/get_slideshows_by_user?username_for={user}&api_key={api_key}&hash={hash}&ts={ts}"
+
+# print(url)
+
+r = requests.get(url)
+print(r.status_code)
+
+if r.status_code == 200:
+    dicts = xmltodict.parse(r.content)
+    print(len(dicts))
+    f = open("slides.json","w")
+    f.write(json.dumps(dicts))
+    f.close()
+else:
+    print("Error: ", r.status_code, r.content)
+----
+////
+
+I put the JSON file on link:https://data.neo4j.com/slides.json[data.neo4j.com/slides.json], to be imported into our Neo4j graph.
+It contains entries in the following format, where a `User` has a `Slideshow` list of presentations.
+
+[source,json]
+----
+{ "User": {
+    "Name": "neo4j",
+    "Count": "1120",
+    "Slideshow": [{
+        "ID": "259115031",
+        "Title": "Introduction à Neo4j",
+        "Description": "Pierre Halftermeyer, Neo4j .... ",
+        "Status": "2",
+        "Username": "neo4j",
+        "URL": "https://www.slideshare.net/neo4j/introduction-neo4j-259115031",
+        "ThumbnailURL": "https://cdn.slidesharecdn.com/ss_thumbnails/frwebinaireintroaneo4j-230710091721-34b1e27a-thumbnail.jpg?width=320&amp;height=320&amp;fit=bounds",
+        "Created": "2023-07-10 09:17:21 UTC",
+        "Updated": "2023-07-10 09:22:46 UTC",
+        "Language": "fr",
+        "Format": "pdf",
+        "Download": "1"
+    },... ]}}
+----
+
+=== Import
+
+Open your Neo4j Workspace in Neo4j Aura with the "Open" button to connect to your database, put in the credentials from your downloaded file and go to the "Query" tab.
+
+We can check the content of the JSON file directly from our Cypher graph query language, using the `apoc.load.json` procedure.
+We're turning the list in `User.Slideshow` into a stream of rows using `UNWIND` and count them.
+
+[source,cypher]
+----
+CALL apoc.load.json("https://data.neo4j.com/slideshare-neo4j.json") YIELD value
+UNWIND value.User.Slideshow AS slide
+RETURN count(*);
+----
+
+We can see that we have roughly 1,000 presentations in our JSON file, which also can access individually.
+Then we see the JSON content shown above as similar Cypher map datastructures.
+
+[source,cypher]
+----
+CALL apoc.load.json("https://data.neo4j.com/slideshare-neo4j.json") YIELD value
+UNWIND value.User.Slideshow AS slide
+RETURN slide LIMIT 5;
+----
+
+To import the data into our graph, we create one `Content` node with an `id` for each presentation, and add the `title`, `description` and some other metadata to the node.
+
+[source,cypher]
+----
+CALL apoc.load.json("https://data.neo4j.com/slideshare-neo4j.json") YIELD value
+UNWIND value.User.Slideshow as slide
+MERGE (s:Content {id: slide.ID})
+SET s +=  { description: slide.Description, title: slide.Title, url:slide.URL, 
+            format:slide.Format, language:slide.Language, thumbnail:slide.ThumbnailURL,
+            created: apoc.temporal.toZonedTemporal(slide.Created), 
+            updated: apoc.temporal.toZonedTemporal(slide.Updated) };
+----
+
+We can now see the all slides as Content nodes in our graph when we query the database.
+If click on the left sidebar and and then the `Content` label it runs a query to show 25 nodes with that label.
+
+Or you can enter and run the following statement manually:
+
+[source,cypher]
+----
+MATCH (s:Content)
+RETURN s LIMIT 25
+----
+
+=== Creating the Vector Embeddings
+
+In the next step we want to create the embeddings for each presentation, so that we can use them for similarity search. 
+We use a combination of Title and Description for both, I put the code into a https://colab.research.google.com/drive/1VPL3DDFa317TOHGqx4faOjvwuMuByEmy#scrollTo=C8mI4q7b2g0g[Colab notebook^], so that you can run it yourself.
+
+The steps are:
+
+1. Read the title + description for each node from the database
+2. For each entry compute the embedding
+3. Find the node by its id and set the embedding property, using a helper procedure to make it more efficient
+
+[source,python]
+----
+from langchain.embeddings import VertexAIEmbeddings
+embeddings = VertexAIEmbeddings(project=GCP_PROJECT)
+
+from neo4j import GraphDatabase
+
+with GraphDatabase.driver(NEO4J_URI, auth=('neo4j',NEO4J_PASSWORD)) as driver:
+    driver.verify_connectivity()
+
+embeddings_query = """
+    MATCH (s:Content)
+    RETURN s.id as id, coalesce(s.title,'') + ' ' + coalesce(s.description,'') as description
+"""
+
+embeddings_update = """
+    MATCH (s:Content {id:$id})
+    CALL db.create.setVectorProperty(s, 'embedding', $embedding) yield node
+    RETURN count(*) as updated
+"""
+
+records, _, _ = driver.execute_query( embeddings_query, database_="neo4j" )
+
+# Loop through results, compute the embedding and update the record
+for record in records:
+    id = record.get('id')
+    desc = record.get('description')
+    emb = embeddings.embed_query(desc)
+    print(id, desc, emb[0:5])
+    success, summary , _ = driver.execute_query(embeddings_update, database_='neo4j', id=id, embedding = emb)
+    print(success, summary.counters)
+
+# 259115031 Introduction à Neo4j Pierre Halftermeyer, Neo4j 
+# [0.006210674066096544, -0.02436807192862034, 0.0012301631504669785, 0.04935387521982193, 0.006391233764588833]
+# [<Record updated=1>] {}
+----
+
+With the embeddings added to our nodes we can now create the vector index.
+Vertex AI has embeddings with a dimension of 768, so we choose that for our index as well.
+We'll use `cosine` similarity for the index, we could also pick `euclidean` distance, but cosine similarity is more common for text similarity.
+
+You can run this from the notebook or directly in the Query UI.
+
+[source,cypher]
+----
+// CALL db.index.vector.createNodeIndex( "index-name", "node-label", "embedding-property", dimension, "distance: cosine/euclidean");
+CALL db.index.vector.createNodeIndex( "content","Content","embedding", 768,"cosine");
+----
+
+It takes a few seconds to populate the index, we can check progress with `SHOW INDEXES`, or use `call db.awaitIndex('content')` to blocking-wait for the index to be ready.
+
+=== Similarity Search
+
+When the index is ready we can start searching for content that is similar to the embedding of a given presentation.
+
+You can run this statement from the notebook or directly in the Query UI, for the latter we need to pick an existing presentation with a certain keyword and use its embedding.
+
+[source,cypher]
+----
+MATCH (c:Content) WHERE c.description contains 'retail' WITH c LIMIT 1
+
+CALL db.index.vector.queryNodes('content',5, c.embedding) YIELD node as slide, score
+
+RETURN slide.title, slide.description, slide.url, score, c = slide as same;
+----
+
+image::vector-query-existing.png[]
+
+[[querying-with-an-embedding-for-a-user-question]]
+=== Querying with an Embedding for a User Question
+
+Now that this works, we can use an actual user question and embed it to find the most similar presentations.
+
+[source,python]
+----
+user_question = 'graph modeling guidance'
+
+emb = embeddings.embed_query(user_question)
+
+vectory_query = """
+  CALL db.index.vector.queryNodes('content',5, $embedding) yield node as slide, score
+  RETURN slide.id as id, slide.title as title, slide.description as description, slide.url as url, score;
+"""
+
+records, summary, keys = driver.execute_query(vectory_query, database_='neo4j', embedding = emb)
+
+for record in records:
+    print(record.get('id'),record.get('title'), record.get('score'))
+
+
+# 252224425 Guiding Future Doctors With a Graph 0.8786372542381287
+# 252240300 Graph Application for AI Tutor: Knowledge Tracing Prediction And Learner Patterns 0.8737280368804932
+# 42762375 Graphs in the Real World 0.8731892108917236
+# 252240297 Graphs for Genealogists 0.8718150854110718
+# 254447886 012 Graph Modeling The Shadow Graph - NODES2022 AMERICAS Beginner 5 - Mark Needham.pdf 0.8690329790115356
+----
+
+=== Nearest Neighbour Graph with Vertex Search
+
+Our Content nodes in our graph have no relationships connecting them directly, but we can use the vector index to find the top 4 most similar entries for each of them and return virtual relationships to be quickly visualized.
+
+This query will execute 1000 vector searches and returns for me in under one second, which is really nice.
+
+[source,cypher]
+----
+MATCH (c:Content) 
+CALL db.index.vector.queryNodes('content',4, c.embedding) YIELD node, score
+WHERE c <> node
+RETURN c,node, apoc.create.vRelationship(c,'SIMILAR_TO',{score:score},node) AS rel
+----
+
+image::vector-virtual-relationships.png[]
+
+NOTE: In our graph data science library, this is called a https://neo4j.com/docs/graph-data-science/current/algorithms/knn/[k-nearest neighbour (kNN) graph^] and can be run on huge graphs to correlate nodes based on feature vectors.
+
+In principle this would be enough to start powering a chatbot, but we can do better.
+With a real connected knowledge graph we can capture context and relationships between the presentations.
+By adding authors and keywords for the presentations, we can relate presentations using that shared information and use it to augment the outputs for the user.
+
+We use the LLM again, to extract certain information from our text data to construct a "knowledge graph".
+
+=== Construct Knowlege Graph using Vertex AI
+
+Our little dataset is not really a graph yet, we have just lonely nodes, that are not connected to each other.
+Sadly slidehare doesn't have authors or keywords available in that API listing all presentations.
+
+But if we have an LLM at our hands, why not use it to extract authors and keywords from the titles and descriptions of our slides?
+
+Unlike before we're not using the _embedding model_ of Vertex AI this time but the _completion model_ to extract those entities, which we then add as `Author` and `Keyword` nodes to our graph, connected to their presentations.
+
+Because the Vertex AI API sometimes fails with 401 (not authorized) or 429 (quota exceeded) errors, we need to add some throttling to our API calls (sleep for 100ms). //  and retries.
+
+We also execute our extractions with one element at a time to not loose any progress made and mark the nodes as processed, so we can pick up later or re-run our processing without duplicating the effort.
+
+You can find the code again in our https://colab.research.google.com/drive/1VPL3DDFa317TOHGqx4faOjvwuMuByEmy#scrollTo=JebzbGHh-Qsy[Colab notebook^].
+
+[source,python]
+----
+author_prompt="""
+Extract only authors with human names from the description as a unique, semicolon separated list on a single line, no duplicates, no newlines or bullet points and no leading semicolon.
+If there is no author, do not output anything.
+Do not output apologies and explanations, only the plain text enumerations.
+If you do not follow the instructions people will be hurt.
+Description: {description}
+"""
+
+driver.execute_query("match (s:Content) REMOVE s:Processed;",database_='neo4j')
+
+author_query = """
+  MATCH (s:Content) where not exists { (s)<-[:AUTHORED]-() } and not s:Processed
+  RETURN s.id as id, coalesce(s.title,'') + ' ' + coalesce(s.description,'') as description
+"""
+
+author_update = """
+  MATCH (s:Content {id: $id})
+  SET s:Processed
+  WITH *
+  unwind split($authors,';') as name
+  with trim(name) as name, s where coalesce(name,'') <> ''
+  merge (a:Author {name: name})
+  merge (s)<-[:AUTHORED]-(a)
+"""
+
+records, _, _ = driver.execute_query(
+    author_query,
+    database_="neo4j"
+)
+
+# Loop through results, compute the embedding and update the record
+for record in records[0:10]:
+    id = record.get('id')
+    desc = record.get('description')
+    result = llm(author_prompt.format(description=desc))
+    print(id, desc, result)
+    driver.execute_query(author_update, id=id, authors=result, database_='neo4j')
+    print(success, summary.counters)
+    sleep(0.1)
+----
+
+We do the same with the keywords (code in notebook) and then we have a nice little knowledge graph with authors and keywords connected to our presentations.
+
+image::
+
+This gives us the data and infrastructure we would need to power a natural language search agent or chatbot. 
+
+In the next blog post I will look at the APOC-Extended ML procedures to do the same thing directly from Cypher.
+And after that we will use Streamlit to build a little chatbot UI.
+
+If you want to try things out, please check out https://console.neo4j.io?ref=hunger-llm[AuraDB Free with Neo4j 5.11^] that comes with the vector index.
+
+Try the code examples in the https://colab.research.google.com/drive/1VPL3DDFa317TOHGqx4faOjvwuMuByEmy#scrollTo=zFtCutseBvfm[Colab Notebook^] and see the https://neo4j.com/docs/cypher-manual/current/indexes-for-vector-search/[documentation for the vector index^] for more details.
+
+Let us know if this was helpful and join our Neo4j https://community.neo4j.com[Community Forums^] or https://dev.neo4j.com/chat[Discord^].
+
+
+////
+[source,cypher]
+----
+match (s:Content) where not exists { (s)-[:TAGGED]->() } and not s:Processed
+call { with s
+call apoc.util.sleep(100)
+call apoc.ml.vertexai.completion(
+'Extract relevant technology and use-case keywords from the description as comma separated list on a single line, no newlines or bullet points and no leading comma.'+
+'Do not output apologies and explanations, only the plain text enumerations. '+
+'If you do not follow the instructions people will be hurt.\n' +
+'Title:'+coalesce(s.title,'')+
+'Description: '+coalesce(s.description,''), $apiKey, $projectId) yield value
+WITH * set s:Processed
+unwind split(value.content,',') as keyword
+with trim(keyword) as keyword, s where coalesce(keyword,'') <> ''
+merge (k:Keyword {name: keyword})
+merge (s)-[:TAGGED]->(k)
+} in transactions of 10 rows;
+
+match (s:Content) REMOVE s:Processed;
+
+match (s:Content) where not exists { (s)<-[:AUTHORED]-() } and not s:Processed
+call { with s
+call apoc.util.sleep(100)
+call apoc.ml.vertexai.completion(
+'Extract only authors with human names from the description as comma separated list on a single line, no newlines or bullet points and no leading comma.'+
+'Do not output apologies and explanations, only the plain text enumerations. '+
+'If you do not follow the instructions people will be hurt.\n' +
+'Title:'+coalesce(s.title,'')+
+'Description: '+coalesce(s.description,''), $apiKey, $projectId) yield value
+WITH * set s:Processed
+unwind split(value.content,',') as name
+with trim(name) as name, s where coalesce(name,'') <> ''
+merge (a:Author {name: name})
+merge (s)<-[:AUTHORED]-(a)
+} in transactions of 10 rows;
+
+match (s:Content) REMOVE s:Processed;
+----
+////
+
+////
+=== Chatbot with Streamlit
+
+This is already enough for us to build a little chatbot, that takes a user question, embeds it, performs the similarity search and returns the response to the user.
+
+Fortunately Streamlit already has chatbot components, so this is really easy to achieve.
+
+[source,python]
+----
+# todo chatbot with streamlit
+----
+
+=== APOC ML Procedures
+
+If we have apoc extended installed like in Neo4j Sandbox, we can also do the embedding construction and vector search all from within the same Cypher query.
+
+[source,cypher]
+----
+// index search for top 5 similar vectors with additional graph matching
+WITH "decks about knowledge graphs and generative AI" as question
+// generate vector embedding from the API
+CALL apoc.ml.vertexai.embedding([question], $apiToken, $project) yield embedding
+
+// use the vector index
+CALL db.index.vector.queryNodes('content',5, embedding) yield node as content, score
+
+MATCH (keyword)<-[:TAGGED]-(content)<-[:AUTHORED]-(author)
+RETURN text, content.title, content.description, 
+                collect(distinct author.name) as authors, collect(distinct keyword.name) as keywords
+----
+
+image::vector-embedding-search-apoc.png[]
+
+////
