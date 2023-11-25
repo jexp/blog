@@ -123,8 +123,9 @@ try (var executor = Executors.newFixedThreadPool(6)) {
 
 Wenn wir diesen Code, z.b. in jshell ausführen dauert es ca. 5 Sekunden bis alle Elemente verarbeitet sind.
 Die durchschnittliche Wartezeit ist 250ms bei 20 Elementen pro Konsument (100/5) ergibt das in Summe 5s, in 5 parallelen Threads.
-In der Ausgabe sehen wir dass er Produzent die Einträge erzeugt und die Warteschlange fast immer voll ist.
+In der Ausgabe von Listing {counter:listing} sehen wir dass er Produzent die Einträge erzeugt und die Warteschlange fast immer voll ist.
 
+.Listing {listing} Ausgabe des Blocking Queue Beispiels
 [source,text]
 ----
 Produced 0 remaining 10 1 ms
@@ -157,6 +158,7 @@ Produced 18 remaining 0 209 ms
 0. Thread[#578,pool-4-thread-2,5,main] result: Message[id=-1, content=POISON PILL] 4528 ms
 ----
 
+////
 === Weitere Betrachtungen
 
 Fehlerszenarien
@@ -177,6 +179,7 @@ Best Practices für Blocking Queues
 * Probleme siehe lmax disruptor - https://lmax-exchange.github.io/disruptor/files/Disruptor-1.0.pdf
 * queue ist contention punkt - empty oder full cases - size checking
 
+////
 
 ////
 For instance, if you have a fixed number of threads that produce and consume elements, `ArrayBlockingQueue` can be an excellent choice since it’s bounded and uses a fixed-size array as its backing storage. On the other hand, if you have an unbounded number of threads, `LinkedBlockingQueue` can be a better fit as it doesn’t have any capacity restrictions and uses a linked list as its backing storage.
@@ -312,7 +315,7 @@ LockSupport.park() emitted einen JFR Event
 
 === Virtuelle Threads und Blocking Queues
 
-Unser einfaches Beispiel mit einem Produzenten und mehreren Konsumenten, die in verschiedenen Threads laufen, kann auch mit virtuellen Threads implementiert werden.
+Unser einfaches Beispiel mit einem Produzenten und mehreren Konsumenten, die in verschiedenen Threads laufen, kann auch mit virtuellen Threads implementiert werden, siehe Listing {counter:listing}.
 Zum einen können wir im Beispiel den Executor durch einen `VirtualThreadPerTaskExecutor` ersetzen, der virtuelle Threads statt echte Threads erzeugt. 
 Dabei würde sich aber das Verhalten nicht ändern, da wir nur 1+5 Threads einsetzen, da die Konsumenten die Verarbeitung in einer Schleife innerhalb des Threads ausführen.
 
@@ -323,6 +326,7 @@ Damit benötigen wir hier auch nur eine "Poison Pill".
 
 Wir müssen die Handhabung des Executors anpassen, da dieser in einem try-with-resources, schon beendet, ist bevor unsere Verarbeitung-Tasks submitted werden könenn, und dann übergebene virtuelle Threads einfach nichts tun (auch keine Fehlermeldung).
 
+.Listing {listing} Beispiel mit virtuellen Threads
 [source,java]
 ----
 record Message(int id, String content) {
@@ -373,11 +377,11 @@ executor.submit(() -> {
 executor.awaitTermination(5, TimeUnit.MINUTES);
 ----
 
-Wie wir in der Ausgabe in Listing {counter:counter} sehen können, werden alle virtuellen Threads als Verarbeitungs-Tasks parallel ausgeführt, da das `Thread.sleep` nicht wirklich blockiert sonder nur die Kontrolle abgibt und somit 100 virtuelle Threads instantan erzeugt werden und die Verarbeitung der Elemente parallel stattfindet.
+Wie wir in der Ausgabe in Listing {counter:listing} sehen können, werden alle virtuellen Threads als Verarbeitungs-Tasks parallel ausgeführt, da das `Thread.sleep` nicht wirklich blockiert sonder nur die Kontrolle abgibt und somit 100 virtuelle Threads instantan erzeugt werden und die Verarbeitung der Elemente parallel stattfindet.
 
 Die Gesamtlaufzeit beruht sich dann nur einmalig auf die 500ms Pausenzeit, die maximal von einem der Konsumenten benötigt werden.
 
-.Listing {counter} Ausgabe mit virtuellen Threads
+.Listing {listing} Ausgabe von virtuellen Threads
 [source,text]
 ----
 Produced 96 remaining 0 32 ms
