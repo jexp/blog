@@ -1,0 +1,1999 @@
+== Massenverarbeitung in Java - die 1 Milliarde Zeilen Herausforderung
+:table-caption: Tabelle
+
+Wenn wir größere Mengen von Daten verarbeiten wollen, werden oft komplexere Systeme herangezogen, wie zum Beispiel Apache Spark/Databricks, Apache Flink oder Snowflake.
+Aber wie wir in der Vergangenheit schon öfter diskutiert haben, kann mit effizienter Programmierung und den richtigen Werkzeugen das auch in einem lokalen Java-Programm erfolgen.
+
+Am Anfang des Jahres hatte Gunnar Morling, die Idee einen Wettbewerb zu starten, bei dem es darum geht, eine Milliarde Zeilen mit Temperaturdaten von Städten zu verarbeiten, die "One Billion Row Challenge" [1BRC].
+Dabei sollte für jede Stadt die minimale, maximale und durchschnittliche Temperatur berechnet werden.
+
+Der Wettbewerb lief während des Monats Januar und es gab keine Einschränkungen, wie die Aufgabe gelöst werden sollte, nur das die Implementierung in Java (ohne externe Bibliotheken) erfolgen sollte und Ergebnis in einem bestimmten Format vorliegen musste.
+Für die JDK Versionen wurde keine Vorgabe gemacht, es konnte jede Version genutzt werden die mittels SDKMan zur Verfügung steht, also auch Early-Access-Versionen z.b. mit Valhalla/Value-Types.
+
+image::https://github.com/gunnarmorling/1brc/blob/main/1brc.png[]
+
+Die Datei mit den Temperaturmessungen war 13 GB groß und enthielt 1 Milliarden Zeilen in folgendem Format, siehe auch Listing {counter:listing}:
+
+.Listing {listing}: Dateiformat für Temperaturmessungen
+[source,text]
+----
+Hamburg;12.0
+Bulawayo;8.9
+Palembang;38.8
+St. John's;15.2
+Cracow;12.6
+Bridgetown;26.9
+Istanbul;6.2
+Roseau;34.4
+Conakry;31.2
+Istanbul;23.0
+----
+
+Gunnar selbst hat eine erste Lösung in Java bereitgestellt, die ca. 5 Minuten (`04:49.679`) für die Verarbeitung benötigte [Baseline].
+
+Sie verfolgt folgenden Ansatz, wie auch im Listing {counter:listing} zu sehen ist.
+
+1. Lesen der Zeilen aus der Datei mittels `Files.lines` in einen Stream
+2. Split am Semikolon und Erzeugung eines `Measurement`-Records
+3. Gruppieren der Messwerte pro Stadtnamen in eine sortierte `TreeMap`
+4. Gruppierung mittels eines Collectors der die Aggregation (Minimum, Maximum, Summe, Anzahl ) der Messwerte pro Stadt durchführt
+5. Ausgabe der Ergebnisse als `toString` der Map
+
+.Listing {listing}: Baseline Lösung mit Java Streams
+[source,java]
+----
+public class CalculateAverage_baseline {
+
+    public static void main(String[] args) throws IOException {
+        Collector<Measurement, MeasurementAggregator, ResultRow> collector = Collector.of(
+                MeasurementAggregator::new,
+                // Zeilenwert in Aggregator einfließen lassen
+                (a, m) -> {
+                    a.min = Math.min(a.min, m.value);
+                    a.max = Math.max(a.max, m.value);
+                    a.sum += m.value;
+                    a.count++;
+                },
+                // zwei Aggregatoren zusammenführen
+                (agg1, agg2) -> {
+                    var res = new MeasurementAggregator();
+                    res.min = Math.min(agg1.min, agg2.min);
+                    res.max = Math.max(agg1.max, agg2.max);
+                    res.sum = agg1.sum + agg2.sum;
+                    res.count = agg1.count + agg2.count;
+                    return res;
+                },
+                // Aggregator in ResultRow umwandeln
+                agg -> {
+                    return new ResultRow(agg.min, round(agg.sum) / agg.count, agg.max);
+                });
+
+        // Sortierte TreeMap, aggregiert pro Station mit dem oben definierten Collector
+        Map<String, ResultRow> measurements = new TreeMap<>(Files.lines(Paths.get(FILE))
+                .map(l -> new Measurement(l.split(";")))
+                .collect(groupingBy(m -> m.station(), collector)));
+
+        System.out.println(measurements);
+    }
+
+    private static final String FILE = "./measurements.txt";
+
+    // Record pro Zeile
+    private static record Measurement(String station, double value) {
+        private Measurement(String[] parts) {
+            this(parts[0], Double.parseDouble(parts[1]));
+        }
+    }
+    private static record ResultRow(double min, double mean, double max) {
+        public String toString() { return round(min) + "/" + round(mean) + "/" + round(max); }
+    };
+    // Aggregator für Messwerte pro Stadt, Summe und Anzahl um Durchschnitt zu berechnen
+    private static class MeasurementAggregator {
+        private double min = Double.POSITIVE_INFINITY;
+        private double max = Double.NEGATIVE_INFINITY;
+        private double sum;
+        private long count;
+    }
+
+    private static double round(double value) { return Math.round(value * 10.0) / 10.0; }
+}
+----
+
+Das Ergebnis hat dann das Format: `{Abha=-23.0/18.0/59.2, Abidjan=-16.2/26.0/67.3, Abéché=-10.0/29.4/69.0, ...}`
+
+Teilnehmer am Wettbewerb konnten ihre Lösungen als Pull-Request auf GitHub einreichen.
+Gunnar hat dann die Laufzeit der Einreichungen auf der Test-Maschine ermittelt und in einer [Topliste] veröffentlicht.
+
+Die Testmaschine war dedizierter Linux-Rechner mit 32 Kern-AMD EPYC™ 7502P (Zen2) CPUs und 128 GB RAM, davon standen für den Test 32GB und 8 CPU-Kerne zur Verfügung.
+////
+All submissions will be evaluated by running the program on a Hetzner Cloud CCX33 instance (8 dedicated vCPU, 32 GB RAM). The time program is used for measuring execution times, i.e. end-to-end times are measured. Each contender will be run five times in a row. The slowest and the fastest runs are discarded. The mean value of the remaining three runs is the result for that contender and will be added to the leaderboard
+////
+
+Nach ersten Beiträgen von Roy van Rijn, "itaske", Hampus Ram, Sam Pullara, Elliot Barlas und anderen nahm die Beteiligung rasant zu und die Laufzeit der Lösungen ebenso rasant ab [Timeline].
+
+Es war schön zu sehen, dass die öffentliche Einreichung der Beträge zu einer lebhaften Diskussion geführt hat und der Nutzung und Verbesserung von Ideen durch andere Teilnehmer, so dass alle Lösungen beschleunigt wurden.
+
+Aus den Diskussionen sowohl im Java Umfeld, als auch den Lösungen mit Datenbanken und anderen Programmiersprachen (z.B. Rust) konnten einige interessante Aspekte und Optimierungen gelernt werden, die ich hier kurz zusammenfassen möchte.
+
+Im Nachgang des Wettbewerbes, gab es einige interessante Diskussionen und Analysen der Lösungen [Twitch], [Timeline] und [StepByStep], aus denen ich auch Inspirationen gezogen habe.
+
+Wir können aus den Lösungen einige interessante Tricks und Kniffe lernen, um andere herausfordernde Performance-Probleme in unseren Java-Programmen und -Algorithmen zu lösen.
+
+////
+Idiomatic Java Code
+
+var allStats = new BufferedReader(new FileReader("measurements.txt"))
+        .lines()
+        .parallel()
+        .collect(
+                groupingBy(line -> line.substring(0, line.indexOf(';')),
+                summarizingDouble(line ->
+                        parseDouble(line.substring(line.indexOf(';') + 1)))));
+var result = allStats.entrySet().stream().collect(Collectors.toMap(
+        Entry::getKey,
+        e -> {
+            var stats = e.getValue();
+            return String.format("%.1f/%.1f/%.1f",
+                    stats.getMin(), stats.getAverage(), stats.getMax());
+        },
+        (l, r) -> r,
+        TreeMap::new));
+System.out.println(result);
+
+This code:
+* uses parallel Java streams, which put all the CPU cores to work
+* doesn't fall into any known performance traps like Java regex
+* leans heavily into all the great building blocks provided by the JDK
+
+On a Hetzner CCX33 instance with OpenJDK 21.0.2, it takes 71 seconds to complete. But the best solution takes 1.5 seconds
+
+1. By simply downloading GraalVM and making it the default, my solution improved from 71 seconds to 66 — a solid 7.5% improvement for very little effort.
+
+2. First profile, then optimize#
+Every successful 1BRC contestant used profiling of one kind or another to guide their optimization efforts. I used a combination of three tools:
+
+* Good old VisualVM
+* Async Profiler
+* perf command-line tool
+Many people consider VisualVM outdated, but it harbors a hidden gem: The VisualGC plugin. You have to install it from the Tools→Plugins menu. Once you attach it to a running Java program, VisualGC shows up as the rightmost tab in the window.
+
+Be sure to select the shortest refresh period (100 ms), and then enjoy the show. A realtime animation of all the memory regions the garbage collector maintains, along with a graph of JIT compilations and GC runs will appear. I used to spend hours staring at this oddly satisfying, complex dance of GC's cogwheels. For the 1BRC program, I added a while (true) statement to keep processing the input file forever; otherwise things just flash by.
+
+The Async Profiler came from following Gunnar's advice on the 1BRC GitHub page. The jbang tool provides very convenient access to it. You run the program once, and get an HTML file with a flamegraph. The flamegraph then tells you which functions/methods your program is spending the most time in.
+
+The third tool, perf, has many features, but for Java the most popular choice is perf stat. It doesn't analyze any specific method, but gives you insight into low-level CPU counters. It shows:
+
+How many instructions it executed
+How many branches and memory accesses
+How many of those were branch/L1 cache misses.
+To receive these insights, I used the following command:
+
+perf stat -e branches,branch-misses,cache-references,cache-misses,cycles,instructions,idle-cycles-backend,idle-cycles-frontend,task-clock -- java --enable-preview -cp src Blog1
+VisualGC was the most useful in the initial optimization phase. Then, once I sorted out allocation, the flamegraph proved highly useful to pinpoint the bottlenecks in the code. However, once the runtime went below ~3 seconds, its usefulness declined. At this level we're squeezing out performance not from methods, but from individual CPU instructions. This is where perf stat became the best tool.
+
+For reference, here's the perf stat report for our basic implementation:
+
+   393,418,510,508      branches
+     3,112,052,890      branch-misses
+    26,847,457,554      cache-references
+       982,409,158      cache-misses
+   756,818,510,991      cycles
+ 2,031,528,945,161      instructions
+It's most helpful to interpret the numbers on a per-row basis (dividing everything by 1 billion). We can see that the program spends more than 2,000 instructions on each row. No need to get into more details; initially we'll be driving down just this metric.
+////
+
+=== Ideen
+
+Ich hatte wie gesagt, leider nicht die Zeit mich an der Challenge zu beteiligen, aber zumindest einige Ideen, wie man das Problem angehen könnte schwirrten in meinem Kopf herum.
+Die meisten davon sind auch in den Einreichungen zu finden, aber ich möchte sie hier nochmal kurz zusammenfassen.
+
+. **Memory-Mapping** - Die Datei kann in den Speicher gemappt werden, um den Zugriff zu beschleunigen, das erfolgt mittels eines ByteBuffers, dessen Zugriff mit `sun.misc.Unsafe` (`getByte/getLong`) noch beschleunigt werden kann. Bei 32GB RAM und einer 13GB großen Datei sollte das kein Problem darstellen. 
+
+. **Parallelisierung** - Die Datei kann in mehrere Teile aufgeteilt und parallel verarbeitet werden, zumindest in 8 Teile, um die 8 Kerne der Testmaschine zu nutzen, aber ggf. auch mehr um Benachteiligung einzelner Threads zu vermeiden. Dabei kann die Gruppierung der Messwerte pro Stadt parallel vorgenommen und am Ende zusammengeführt werden.
+
+. **Parsen** - Statt die Zeilen also Strings zu verarbeiten und z.b. als regulären Ausdruck zu parsen können die Trennzeichen direkt in den Bytes der `ByteBuffer` gesucht werden.
+
+. **Umwandlung** - Statt Strings zu verarbeiten, kann das Semikolon gefolgt von den Zahlen als  Bytes oder Long-Werte gelesen und verarbeitet (Vergleich, Addition) werden, ohne sie erst in einen Double-Wert umzuwandeln. Da nur eine Temperaturwerte von -40 bis +60 Grad mit einer Nachkommastelle genutzt wird, ist das Zahlenformat entsprechend kompakt und kann optimiert geparst werden.
+
+. **Gruppierung** - Abhängig von der Anzahl und Unterscheidbarkeit der Städte könnte man nur die ersten n-Bytes der Zeile verwenden, um die Stadt zu identifizieren und die Messwerte zu gruppieren, diese könnten dann sogar als numerische Indizes in einem Feld verwendet werden. Dieser Trick würde aber Wissen über die Stadt-Namen voraussetzen.
+
+. **SIMD** - Single Instruction Multiple Data - Nutzung der Vector API in Java, um mehrere Werte gleichzeitig zu aggregieren.
+
+Aspekte die ich nicht bedacht hatte, aber von Einreichungen genutzt wurden:
+
+CPU Optimierungen wie die Vermeidung von fehlgeschlagenen Branch-Predictions und -Spilling, um sicherzustellen, dass die Pipelines des Prozessors immer voll ausgelastet sind.
+Das kann durch den Verzicht auf If-Statements erreicht werden, indem stattdessen durch mathematische oder logische Operationen ein Zustand mitgeführt wird, der die Vearbeitung steuert.
+Wie zum Beispiel die Addition eines Wertes der mit einem mitgeführten Flag mit Wert 0 oder 1 multipliziert wird (oder eine entsprechende Bitmaske) um eine Bedingung zu erfüllen oder nicht.
+
+Nutzung verschiedener Garbage Kollektoren, wie Epsilon GC, ZGC und Shenandoah, um die Laufzeit zu verbessern.
+Besonders Epsilon GC, der keinen Speicher freigibt ist durch den Fakt, dass die Daten in den Speicher passen und das Programm nur einmal läuft und dann beendet wird, interessant.
+
+Ein optimiertes Speicher Mapping auf 2MB große Segmente, passend zur Huge-Page-Size in Linux und den 8 Threads mit jeweils 2MB ergibt 16MB die dem Prozessor-Cache entsprechen, das konnte die Performance nochmal verbessern.
+
+// Das kann z.B. durch das "Prozess-Forking" Trick erreicht werden, bei dem ein Thread sich selbst kopiert und die Arbeit aufgeteilt wird.
+
+// Einige der Aspekte die ich nicht bedacht hatte, sind die Verwendung von SIMD und SWAR (SIMD Within A Register) Instruktionen, die in einigen Lösungen verwendet wurden, um die Verarbeitung zu beschleunigen.
+
+Microbenchmarking - Die finale Laufzeit der Lösungen wurde mittels `time` gemessen, aber während der Entwicklung der Ansätze war es leichter zu sehen und zu vergleichen, wie sich die einzelnen Schritte der Lösungen verhalten und wie sie sich auf die Gesamtlaufzeit auswirken.
+Die einzelnen Aspekte, wie z.B. das Verarbeiten eines 2MB Segments, das Lesen der Zeilen, das Finden der Trenner, das Parsen der Temperaturen, das Gruppieren der Messwerte, das Aggregieren der Messwerte, das Schreiben der Ergebnisse, könnten in einer Microbenchmarking-Lösung getestet und optimiert werden.
+
+// TODO für das Minimum, Maximum, muss man die Zahlen nicht parsen.
+// Kann man das Semikolon ignorieren und stattdessen vom Ende der Zeile rückwärts suchen, um die Zahlen zu finden?
+// Es müssen 3-5 Bytes gelesen werden, der Dezimalpunkt kann übergangen werden ;0.0 ;-60.0
+// Table with binary values of numbers
+// byte & ~2D 
+// byte & 0x0F -> Zahl, if > 9 -> ungültig
+
+=== Schritt für Schritt - Verbessungen der Lösungen
+
+Schauen wir uns doch einmal Schritt für Schritt an, wie die Lösungen ausgehend von der Basisimplementierung von Gunnar verbessert wurden.
+Ich folge hier dem wirklich empfehlenswerten Artikel [StepByStep] von Marko Topolnik von QuestDB.
+
+==== Parallelisierung
+
+Ein einfacher Gewinn ist schon durch die Parallelisierung der Verarbeitung zu erreichen.
+Dazu wird statt des single-threaded `Files.lines` Streams, ein `parallel` Stream verwendet, der die Verarbeitung der Zeilen auf mehrere Threads verteilt.
+
+Der in Listing {counter:listing} gezeigte Code ist etwas kompakter als das Beispiel von Gunnar und fügt sowohl die Parallelisierung hinzu, als auch die Nutzung von `String.indexOf` und `String.substring` statt regulärer Ausdrücke, um die Zeilen zu verarbeiten.
+Die `summarizingDouble` Methode führt die Aggregation der Messwerte durch.
+Die Parallelisierung tritt erst nach dem Lesen der Zeilen ein, die immer noch single-threaded erfolgt und ist nur für das Parsen der Zeilen und die Aggregation aktiv.
+Daher ist die Gesamtlaufzeit von 71 Sekunden nicht 8x sondern nur 4x schneller, was aber immer noch ein beachtlicher Gewinn ist.
+
+.Listing {listing}: Parallelisierte Verarbeitung der Zeilen
+[source,java]
+----
+var allStats = new BufferedReader(new FileReader("measurements.txt"))
+        .lines()
+        .parallel()
+        .collect(
+                groupingBy(line -> line.substring(0, line.indexOf(';')),
+                summarizingDouble(line ->
+                        parseDouble(line.substring(line.indexOf(';') + 1)))));
+var result = allStats.entrySet().stream().collect(Collectors.toMap(
+        Entry::getKey,
+        e -> {
+            var stats = e.getValue();
+            return String.format("%.1f/%.1f/%.1f",
+                    stats.getMin(), stats.getAverage(), stats.getMax());
+        },
+        (l, r) -> r,
+        TreeMap::new));
+System.out.println(result);
+----
+
+==== Performancemessung
+
+Ich hatte ja schon Microbenchmarks (wie JMH) erwähnt, aber auch die in früheren Kolumnen vorgestellten Tools wie FlameGraphs, JDK Flight Recorder, JVisualVM, Async Profiler und perf können genutzt werden, um die Laufzeit der Lösungen zu analysieren und zu optimieren.
+
+Flame-Graphs (z.b. mittels async-profiler) zeigen deutlich Flaschenhälse in der Verarbeitung, wenn eine bestimmter Teil des Codes in Laufzeit oder Objektallozierung dominiert, dann kann diese Stelle optimiert und neu gemessen werden.
+
+In JVisualVM wird besonders das visual GC Plugin empfohlen, mit dem GC und JIT-Compilations in Echtzeit (Refresh-Zeit 100ms) beobachtet werden können.
+Für die aktuelle Lösung wird der Garbage Collector massiv beansprucht, was auf eine hohe Objektallokation hinweist, die durch die Objektallokationen beim Ermitteln der Zeilen, Substrings, und Verarbeitungsobjekte der jetzt parallelen Streams entsteht.
+
+Tools wie perf {counter:listing} können die Laufzeit und CPU-Performance auf einem niedrigeren Level analysieren, das wird später relevant, wenn es um die letzten Optimierungen geht bei Laufzeiten von wenigen Sekunden, dann sind Themen wie Anzahl der CPU Instruktionen, Speicherzugriffe, L1-Cache-Misses und CPU-Branch-Prediction-Misses relevant.
+
+.Listing {listing}: Aufruf von `perf`
+[source,shell]
+----
+perf stat -e branches,branch-misses,cache-references,cache-misses,cycles,instructions,\
+idle-cycles-backend,idle-cycles-frontend,task-clock \
+-- java --enable-preview -cp src CalculateAverage
+----
+
+Die Analyse erzeugt dann eine Ausgabe wie in Listing {counter:listing} zu sehen (hier für die Implementierung von Listing {listing-2}).
+Diese Ausgaben werden am besten pro Zeile betrachtet, also durch 1 Milliarde geteilt, um zu sehen, wie viele Instruktionen, Speicherzugriffe, Cache-Misses und Branch-Misses pro Zeile erfolgen, hier sind es zum Beispiel 2000 Instruktionen pro Zeile.
+
+.Listing {listing}: Ausgabe von `perf`
+----
+   393,418,510,508      branches
+     3,112,052,890      branch-misses
+    26,847,457,554      cache-references
+       982,409,158      cache-misses
+   756,818,510,991      cycles
+ 2,031,528,945,161      instructions
+----
+
+==== Auswahl geeigneter JVMs
+
+Die Standard JVM (OpenJDK oder Temurin) haben eine gute Performance aber wie ich schon in frühreren Artikeln dargestellt habe, spielt der aggressiv optimierende GraalVM JIT Compiler noch einmal in einer anderen Liga.
+Nur durch den Wechsel der JVM kann eine Laufzeitreduktion auf 66 Sekunden (-7.5%) erfolgen, ohne dass der Code verändert werden muss.
+Und das ist noch immer im JVM - JIT Modus, ohne Ahead-of-Time Compilation (AOT) für Native Images (dazu später mehr).
+
+==== Memory Mapping
+
+Der nächste Schritt beruht auf einer konzeptionellen Änderung im Ansatz - statt die Datei Zeile für Zeile zu lesen, wird die Datei in den Speicher gemappt und dann in Segmente aufgeteilt, die parallel verarbeitet werden.
+
+Dadurch können die schönen APIs des JDK nicht mehr genutzt werden, aber es kann parallel auf die Bytes der Datei direkt zugegriffen werden, was die Verarbeitung deutlich beschleunigt.
+Die Komplexität und Länge des Quelltextes steigt signifikant an, von kompakten 20 Zeilen auf über 120. 
+
+Dank der neuen Foreign Memory API im JDK 21 kann das auch ohne `sun.misc.Unsafe` erfolgen und stattdessen mit `MemorySegment` und `MemoryAddress` gearbeitet werden, siehe Listing {counter:listing}.
+Diese umgehen auch das `int` basierte Limit auf 2 GB, das für `ByteBuffer` galt, und bieten `long` basierte Zugriffe an, die größere Dateien direkt mappen können.
+
+.Listing {listing}: Memory Mapping mit `MemorySegment`
+[source,java]
+----
+var raf = new RandomAccessFile(file, "r");
+MemorySegment mappedFile = raf.getChannel().map(
+    MapMode.READ_ONLY, 0, length, Arena.global()
+);
+----
+
+Damit kann die Datei zuerst in 8 Segmente (entsprechend der Anzahl der Threads/CPUs) aufgeteilt werden, deren Verarbeitung parallel erfolgt und die Statistiken dann am Ende zusammengeführt werden.
+
+Der Split des Puffers and den korrekten Grenzen erfordert nach einer groben Division durch 8 ein Suchen der Zeilentrenner, ab dem dann das neue Segment wirklich beginnt.
+
+Auch die Statistiken werden nicht mehr mittels der Collector API aggregiert, sondern manuell in Statistik-Objekten in einer Map (pro Thread) zusammengeführt, siehe Listing {counter:listing}.
+
+.Listing {listing}: Aggregation der Statistiken eines Segments
+[source,java]
+----
+for (var cursor = 0L; cursor < chunk.byteSize();) {
+    var semicolonPos = findByte(cursor, ';');
+    var newlinePos = findByte(semicolonPos + 1, '\n');
+    var name = stringAt(cursor, semicolonPos);
+    var temp = Double.parseDouble(stringAt(semicolonPos + 1, newlinePos));
+    var stats = statsMap.computeIfAbsent(name, k -> new StationStats(name));
+    var intTemp = (int) Math.round(10 * temp);
+    stats.sum += intTemp;
+    stats.count++;
+    stats.min = Math.min(stats.min, intTemp);
+    stats.max = Math.max(stats.max, intTemp);
+    cursor = newlinePos + 1;
+}
+----
+
+Die Verarbeitung der Zeilen basiert jetzt auf Byte-Repräsentationen, so dass Strings mittels Hilfsmethoden erzeugt werden müssen (das wird später dann wegfallen), siehe Listing {counter:listing}.
+Aufgrund des limitierten Temperaturbereiches von -40.0 bis 60.0 Grad müssen dafür keine Double-Werte benutzt werden sondern kann auf Integer-Werte (Temperatur mal 10) umgestellt werden, was die Verarbeitung beschleunigt.
+Auch das Parsen der Temperaturen wird später noch durch eine effizientere Lösung ersetzt.
+
+.Listing {listing}: Hilfsmethoden auf dem Segment
+[source,java]
+----
+private long findByte(long cursor, int b) {
+    for (var i = cursor; i < chunk.byteSize(); i++) {
+        if (chunk.get(JAVA_BYTE, i) == b) {
+            return i;
+        }
+    }
+    throw new RuntimeException(((char) b) + " not found");
+}
+
+private String stringAt(long start, long limit) {
+    return new String(
+            chunk.asSlice(start, limit - start).toArray(JAVA_BYTE),
+            StandardCharsets.UTF_8
+    );
+}
+----
+
+Der Laufzeitgewinn dieser Lösung ist massiv (4x so schnell), von 66 Sekunden wird diese auf 17 Sekunden reduziert, auch die Anzahl der CPU-Instruktionen pro Zeile (aus `perf`) wird auf ca 1000 reduziert.
+
+[NOTE]
+====
+Im produktiven Systemen muss man sich aber ganz klar der Trade-offs bewusst sein, der einfache, lesbare Code der Basisimplementierung wird durch die komplexere, längere und weniger wartbare Lösung ersetzt.
+Diese Entscheidung sollte nur erfolgen wenn dies wirklich einen kritischen, häufig genutzten Pfad des Gesamtsystems darstellt und die Performanceanforderungen nicht anders erreicht werden können.
+Falls es stattdessen eine Batch-Verarbeitung ist, die nur selten ausgeführt wird, dann ist die Basisimplementierung die bessere Wahl, da sie auch mehr Flexibilität und Konfigurierbarkeit der Verarbeitung bietet.
+====
+
+////
+----
+   229,112,005,628      branches
+     2,159,757,411      branch-misses
+    11,691,731,241      cache-references
+       433,992,993      cache-misses
+   408,367,307,956      cycles
+   944,615,442,392      instructions
+----
+////
+
+=== Temperaturen effizient einlesen (parsen)
+
+Wie schon erwähnt ist das Einlesen der Temperaturdaten nicht wirklich effizient.
+Zuerst wird aus dem Byte-Array ein String erzeugt, der dann in einen Double-Wert geparst wird, obwohl wir das ganze ohne Präzisionsverlust  als Integer-Wert (Temperatur mal 10) darstellen können.
+
+Die Zahlen liegen in einem fixen Format vor, es gibt immer eine Nachkommastelle und optional ein Minuszeichen als Vorzeichen, also müssen maximal 5 Bytes verarbeitet werden (z.B. für `-12.0`) und minimal 3 (für `1.0`).
+
+Im Endeffekt entspricht der Code zum Parsen von Zehnerpotenzen aus den Bytes (siehe Listing {counter:listing} der klassischen Implementierung von Dezimalzahlen, von jedem Byte-Zeichen kann `'0'` abgezogen werden, um die Zahl zu ermitteln, und der Dezimalpunkt wird übersprungen.
+
+.Listing {listing}: Effizientes Parsen der Temperaturen
+[source,java]
+----
+private int parseTemperature(long semicolonPos) {
+    long off = semicolonPos + 1;
+    // positives Vorzeichen
+    int sign = 1;
+    // bei Minuszeichen, Vorzeichen umkehren und weiteres Byte lesen
+    byte b = chunk.get(JAVA_BYTE, off++);
+    if (b == '-') {
+        sign = -1;
+        b = chunk.get(JAVA_BYTE, off++);
+    }
+    // erste Ziffer ermitteln
+    int temp = b - '0';
+    // zweites Byte lesen, wenn es kein Punkt ist, dann ist es die zweite Ziffer
+    b = chunk.get(JAVA_BYTE, off++);
+    if (b != '.') {
+        temp = 10 * temp + b - '0';
+        // wir haben zwei Ziffern, also den Punkt überspringen
+        off++;
+    }
+    // zweite/dritte Ziffer lesen
+    b = chunk.get(JAVA_BYTE, off);
+    temp = 10 * temp + b - '0';
+    // mit Vorzeichen versehen zurückgeben
+    return sign * temp;
+}
+----
+
+Der Quelltext ist jetzt für das angegebene Format optimiert, aber es ist nicht mehr so flexibel wie die Basisimplementierung von `parseDouble()`, die auch viele andere Formate verarbeiten kann. 
+Da es nur 3 Ziffern gibt, lohnt sich auch keine Schleife, die Zahlen können nacheinander gelesen werden, was für den Prozessor effizienter ist.
+
+Da diese Operation in jeder Zeile ausgeführt werden muss, gibt es auch hier einen signifikanten Laufzeitgewinn, der die Laufzeit auf 11 Sekunden reduziert.
+Dieser ergibt sich sowohl aus dem Wegfall der Erzeugung des String-Objektes, als auch aus dem effizienteren Einlesen der Zahlen, und dem Verzicht auf Sonderfälle und Begrenzungsüberprüfungen, dadurch werden nur noch 600 Instruktionen pro Zeile  (aus `perf`) benötigt.
+Der Anteil der Temperaturermittlung sinkt von 21% auf 6% der Laufzeit.
+
+==== Verzicht auf Strings und spezielle Hashtable
+
+Die verbleibende Stringerzeugung schlägt aber immer noch sehr stark zu Buche, die Stadtnamen werden immer noch als Schlüssel für die Java-Hashmap benötigt, da führt auch kein Weg vorbei.
+
+Ein Ansatz wäre, stattdessen ein Schlüssel-Objekt für die Städte zu verwenden, dass nur den Offset und Länge in das `MemorySegment` speichert und ggf. einen Hashcode vorberechnet, um die Stringerzeugung komplett zu vermeiden.
+Ggf. könnte man auch die 8 ersten Bytes der Stadtnamen als Long einlesen und als Schlüssel in einer primitiven Hashtable bzw. Array verwenden, falls sie eindeutig sind.
+
+Viele der Lösungen gehen aber gleich einen Schritt weiter und implementieren eine eigene Hashtable mit einem Array (siehe Listing {counter:listing}), die zum einen keine Größenänderung (Resizing) benötigt (weil man weiss wieviele Städte es ungefähr gibt) und die zum anderen die Position der Einträge sehr einfach berechnet (Modulo von Hashwert mit der Größe) und bei Konflikten einfach den nächsten freien Platz sucht.
+Der Vergleich für den Schlüssel passiert zuerst über die Position und Länge, dann über den Hashwert und schlussendlich über die Bytes zwischen Offset und Länge.
+
+Zur Speicherung der Statistiken wird weiterhin ein Objekt `StatsAcc` benutzt.
+Als weitere Optimierung könnte man stattdessen ein vier-mal so großes int-Array benutzen, dass 4 die Werte (min, max, sum, count) speichert, das spart die Objekterzeugung und die Speicherung der Objekte in der Map.
+
+Im Originalartikel wurde `min` und `max` nicht initialisiert, was aber für Städte in dauerfrost bzw. frostfreien Gebieten falsche Werte ergeben kann, das wurde hier korrigiert.
+
+.Listing {listing}: Verzicht auf Strings und spezielle Hashtable
+[source,java]
+----
+// 2048 - Einträge Zweierpotenz für schnelles Modulo 
+private static final int HASHTABLE_SIZE = 2048;
+private final StatsAcc[] hashtable = new StatsAcc[HASHTABLE_SIZE];
+
+static class StatsAcc {
+    // Offset und Länge des Stadtnamens
+    long nameOffset, nameLen;
+    // Hashwert wird nur einmal berechnet und gespeichert
+    int hash;
+    // Statistikinformationen
+    long sum, int count, int min = 100, int max = -100;
+    // Konstruktor weggelassen
+    public boolean nameEquals(MemorySegment chunk, long otherNameOffset, long otherNameLimit) {
+        return nameLen == (otherNameLimit - otherNameOffset) &&
+                chunk.asSlice(nameOffset, nameLen).mismatch(chunk.asSlice(otherNameOffset, nameLen)) == -1;
+    }
+}
+
+// Eintrag in Hashtable finden und existierende oder neue Instanz von StatsAcc zurückgeben
+private StatsAcc findAcc(long cursor, long semicolonPos) {
+    int hash = hash(cursor, semicolonPos);
+    int slotPos = hash & (HASHTABLE_SIZE - 1); // Modulo Berechnung
+    while (true) {
+        // freien Platz suchen
+        var acc = hashtable[slotPos];
+        if (acc == null) {
+            acc = new StatsAcc(hash, cursor, semicolonPos - cursor);
+            hashtable[slotPos] = acc;
+            return acc;
+        }
+        // falls schon belegt vergleich von Hash und Namen
+        if (acc.hash == hash && acc.nameEquals(chunk, cursor, semicolonPos)) {
+            return acc;
+        }
+        // bei Kollision nächsten freien Platz suchen (Achtung wieder Modulo bei Überlauf)
+        slotPos = (slotPos + 1) & (HASHTABLE_SIZE - 1);
+    }
+}
+
+private int hash(long startOffset, long limitOffset) {
+    int h = 17;
+    for (long off = startOffset; off < limitOffset; off++) {
+        h = 31 * h + ((int) chunk.get(JAVA_BYTE, off) & 0xFF);
+    }
+    return h;
+}
+----
+
+In {counter:listing} wird die die findAcc Methode genutzt um auf die Statistiken zur Aggregation pro Stadt zuzugreifen, das letzte `stringAt()` kann entfernt werden.
+
+`Math.min` und `Math.max` werden von der JVM as Intrinsic Methoden behandelt, die direkt in Maschinenbefehle umgesetzt werden, das spart die Methodenaufrufe und benötigt kein Inlining durch den JIT.
+
+.Listing {listing}: Verzicht auf Strings und Nutzung der eigenen Hashtable
+[source,java]
+----
+or (var cursor = 0L; cursor < chunk.byteSize(); ) {
+    var semicolonPos = findByte(cursor, ';');
+    var newlinePos = findByte(semicolonPos + 1, '\n');
+    var temp = parseTemperature(semicolonPos);
+    // Nutzung der neuen Hashtable
+    var acc = findAcc(cursor, semicolonPos);
+    acc.sum += temp;
+    acc.count++;
+    acc.min = Math.min(acc.min, temp);
+    acc.max = Math.max(acc.max, temp);
+    cursor = newlinePos + 1;
+}
+----
+
+Diese doch relativ massive Änderung, die den Verzicht auf Strings und die Nutzung einer speziellen Hashtable beinhaltet, führt zu einer weiteren Reduktion der Laufzeit auf 6,6 Sekunden.
+Jetzt werden die weiteren Informationen aus der `perf` Ausgabe interessant -  die Anzahl der CPU-Instruktionen pro Zeile sinkt auf 370.
+Ebenso wurden L1-Cache Misses massiv verbessert, dadurch dass die wenigen Objekte (Hashtable und StatsAcc) nur noch wenig Speicher benutzen.
+
+Da ausser dem `StatsAcc` pro Stadt, keine Objekte mehr erzeugt werden müssen, ist auch der GC nicht mehr aktiv, das spart auch Zeit und Ressourcen.
+
+Im GraalVM JIT werden Objekte wie `StatsAcc` auch ggf. durch den Compiler entfernt und durch die Repräsentation ihrer Werte direkt im Speicher ersetzt.
+Mit anderen JVMs beträgt die Laufzeit 9,6 statt 6,6 Sekunden, was die Qualität des Graal Compilers noch einmal unterstreicht. 
+
+[NOTE]
+====
+Die bisherigen Optimierungen haben die Laufzeit um eine Größenordnung verbessert, von 66 auf 6,6 Sekunden, wirklich beeindruckend, wenn man sich noch einmal die Datenmenge vor Augen führt, die verarbeitet werden muss.
+Für 1 Milliarde Zeilen oder 13 GB in 6,6 Sekunden heisst dass die JVM 152 Millionen Zeilen bzw. 2.1GB pro Sekunde verarbeitet. 
+Und da sage jemand noch einmal Java sei langsam.
+====
+
+Das sollte in den meisten Fällen ausreichen, und trifft definitiv an die Grenzen von Code-Komplexität die man in regulären Programmen erwartet und haben sollte.
+
+==== Weitere "esoterische" Optimierungen
+
+Aber den Wettbewerbern war das natürlich noch nicht genug, daher wurden weitere Optimierungen vorgenommen, der Code wurde immer C-ähnlicher mit vielen Bit-Operationen und SIMD (Single Instruction Multiple Data) Tricks.
+
+* Kleinere Speichersegmente (2MB) um die L1-Cache-Größe effizient zu nutzen, jeder der 8 Threads verarbeitet vieler solcher Segmente
+* Work-Stealing wie im Fork-Join-Pool, um fertige Threads mit Arbeit zu versehen, die von anderen Threads noch nicht angefangen wurde
+* Ersetzung von `MemorySegment` durch `sun.misc.Unsafe` um die Prüfungen von Grenzen zu vermeiden
+* Vermeidung von Bedingungen in if-Statements, und stattdessen Nutzung von Hilfsrechnungen, so dass keine Sprünge im Code (Branches) entstehen, die die CPU vorhersagen müsste (und dabei falsch liegen kann, was 10-15 Instruktionen kostet)
+// So, whenever it gets it wrong, it has to discard all that work and start to decode the other instructions. As a rule of thumb, a single branch misprediction costs as much as 10-15 instructions.
+* Wiederverwendung des gleichen geladenen Werts für das Hashing und die Semikolon-Suche
+* Gleichzeitiges Verarbeiten mehrerer Bytes mittels SWAR (SIMD Within A Register) um z.B. die Semikolon-Position zu finden
+* Nutzung von SWAR für das Einlesen von Temperaturen
+* Komplexe Bit-Operationen für das Parsen und Suche von Informationen in Long Werten
+* Nutzung von native Image Binaries um die Startup Zeit der JVM zu vermeiden
+* Spezielle Anpassungen für CPU, Speicherarchitektur, JVM, Betriebsystem und andere Hardware (z.B. Huge-Pages, CPU-Flags)
+
+
+Ich werde für die folgenden nur auf einige der interessanten Ansätze eingehen, die in den Einreichungen genutzt wurden, aber nicht auf alle Implementierungsdetails, da das den Rahmen dieses Artikels sprengen würde.
+
+Die Hautpschleife mit fortgeschrittenen Optimierungen ist in Listing {counter:listing} zu sehen.
+
+.Listing {listing}: - Hauptschleife mit fortgeschrittenen Optimierungen
+[source,java]
+----
+long cursor = 0;
+while (cursor < inputSize) {
+    long nameStartOffset = cursor;
+    long hash = 0;
+    int nameLen = 0;
+    while (true) {
+        long nameWord = UNSAFE.getLong(inputBase + nameStartOffset + nameLen);
+        long matchBits = semicolonMatchBits(nameWord);
+        if (matchBits != 0) {
+            nameLen += nameLen(matchBits);
+            nameWord = maskWord(nameWord, matchBits);
+            hash = hash(hash, nameWord);
+            cursor += nameLen;
+            long tempWord = UNSAFE.getLong(inputBase + cursor);
+            int dotPos = dotPos(tempWord);
+            int temperature = parseTemperature(tempWord, dotPos);
+            cursor += (dotPos >> 3) + 3;
+            findAcc(hash, nameStartOffset, nameLen, nameWord).observe(temperature);
+            break;
+        }
+        hash = hash(hash, nameWord);
+        nameLen += Long.BYTES;
+    }
+}
+----
+
+Ein Punkt den ich ja schon anfänglich angesprochen hatte war, die Nutzung von SIMD, d.h. das gleichzeitige Verarbeiten mehrerer Werte in in einer Operation.
+Hier kann es sogar weitergeführt werden, so dass keine CPU Instruktionen für mehrere Werte genutzt, sondern einfach gleich mehrere Bytes in einen größeren Datentyp gelesen werden.
+D.h. statt jedes Byte einzeln zu lesen, kann man 4 Bytes als Integer oder 8 Bytes als Long lesen und darauf die Operationen ausführen.
+Je nach Maschinenarchitektur muss dabei die Byte-Reihenfolge (Byte-Order - Endianness) beachtet werden, ob die relevantesten Bits eines Werts zuerst oder zuletzt gelesen werden.
+// TODO Hier ist dann auch die Reihenfolge (Byte-Order - Endianness) relevant, ob die relevantesten Bits eines Werts zuerst oder zuletzt gelesen werden.
+Durch Alignment und Vorhersage des Lesen von Speicherzugriffen kann die CPU auch mittels Vorladens (Prefetching) die Daten schon im Cache haben, wenn sie benötigt werden.
+
+==== SIMD und SWAR
+
+SIMD ist eine Technik, die in modernen Prozessoren genutzt wird, um mehrere Werte gleichzeitig mit derselben Operation zu verarbeiten, das können z.B. 16 Fließkomma-Werte oder 32 Integer-Werte sein, je nach Prozessor.
+
+Aber diesselbe Idee ist nutzbar indem mehrere Bytes auf einmal innerhalb eines größeren Datentypes (und damit innerhalb eines Registers) verarbeitet werden, dieser Ansatz heisst dann SWAR (SIMD Within A Register) und wird z.B. von Richard Startin in [StartinBytes] vorgestellt, um Bytes innerhalb eines Arrays, oder in C um NULL-Bytes in Strings zu finden.
+
+////
+TODO
+This post considers the benefits of branch-free algorithms through the lens of a trivial problem: finding the first position of a byte within an array. While this problem is simple, it has many applications in parsing: BSON keys are null terminated strings; HTTP 1.1 headers are delimited by CRLF sequences; CBOR arrays are terminated by the stop character 0xFF. I compare the most obvious, but branchy, implementation with a branch-free implementation, and use the Vector API in Project Panama to improve performance.
+////
+Der Ansatz der für die Suche des Semikolons genutzt wird, ist ziemlich clever, dieser projiziert die Operation die sonst pro Byte passiert, auf einen gesamten Long-Wert, der 8 Bytes enthält. 
+
+Dazu wird eine Maske genutzt bei der auf jedem Byte der Ascii-Wert (`0x3B, 59`, siehe Tabelle 1) gesetzt wird, so dass beim XOR-Operator `^` nur in den Bytes noch Bits gesetzt sind, die kein Semikolon enthalten.
+Mittels weiterer Bit-Operationen erhält man einen long-Wert bei dem alle Stellen des Bytes das das Semikolon enthält auf 1 gesetzt sind, und alle anderen auf 0.
+
+.Tabelle 1 ASCII Tabelle der Zahlen und relevanten Sonderzeichen (Semikolon, Minus, Punkt)
+[%autowidth,format=tsv,opts=header,cols="m,m,m,m"]
+|===
+bin     	hex	dec	ascii
+0010 1101	2D	45	-
+0010 1110	2E	46	.
+0010 1111	2F	47	/
+0011 0000	30	48	0
+0011 0001	31	49	1
+0011 0010	32	50	2
+0011 0011	33	51	3
+0011 0100	34	52	4
+0011 0101	35	53	5
+0011 0110	36	54	6
+0011 0111	37	55	7
+0011 1000	38	56	8
+0011 1001	39	57	9
+0011 1010	3A	58	:
+0011 1011	3B	59	;
+|===
+
+[source,java]
+----
+// Semikolon an jeder Stelle
+private static final long BROADCAST_SEMICOLON = 0x3B3B3B3B3B3B3B3BL;
+// Abziehen von null macht das Null Byte zu 0xFF
+private static final long BROADCAST_0x01 = 0x0101010101010101L;
+// 
+private static final long BROADCAST_0x80 = 0x8080808080808080L;
+
+private static long semicolonMatchBits(long word) {
+    long diff = word ^ BROADCAST_SEMICOLON;
+    return (diff - BROADCAST_0x01) & (~diff & BROADCAST_0x80);
+}
+----
+
+// TODO online bit operations calculator
+
+[source,txt]
+----
+          ;         0
+  0011 1011 0011 0000
+^ 0011 1011 0011 1011
+= 0000 0000 0000 1011
+  
+  0000 0000 0000 1011
+- 0000 0001 0000 0001
+= 1111 1111 0000 1010 
+// führende 1 nur wenn vorher gesamt 0 war
+
+~ 0000 0000 0000 1011
+= 1111 1111 1111 0100
+& 1000 0000 1000 0000
+= 1000 0000 1000 0000
+
+// führende 1 behalten
+  1111 1111 0000 1010
+& 1000 0000 1000 0000
+= 1000 0000 0000 0000
+15 trailing zeros / 8 + 1 = 2
+----
+
+Im Beispiel, ist das Semikolon im Long Wert an erster Stelle und wir haben 2 Stellen.
+Damit ist `0x3B30 ^ 0x3B3B = 0x000B`, davon `0x0101` abziehen ergibt `0xFF0A`, und das negiert und mit `0x8080` ver-undet ergibt `0x8000`, also das Semikolon an der ersten Stelle.
+
+Zum einen werden hier 8 Werte auf einmal verarbeitet, und zum anderen gibt es keine Bedingungen und Schleifen mehr, die die CPU vorhersagen müsste (und teilweise dabei falsch läge), sondern nur noch Bit-Operationen, die einfach durchgerechnet werden können.
+
+[source,java]
+----
+// Anzahl der Null-Bits durch 8 = Anzahl der Bytes wo nichts gefunden wurde
+private static int nameLen(long separator) {
+    return (Long.numberOfTrailingZeros(separator) >>> 3) + 1;
+}
+// alle Bytes hinter dem Semikolon auf 0 setzen, für schnellen String-Vergleich
+// credit: artsiomkorzun
+private static long maskWord(long word, long matchBits) {
+    long mask = matchBits ^ (matchBits - 1);
+    return word & mask;
+}
+----
+
+Das Optimierte Parsen der Temperatur ist in Listing {counter:listing} zu sehen, das die Temperatur als Integer-Wert (mal 10) zurückgibt, und dabei auf Bit-Operationen und Präfix-Operationen setzt und keine Bedingungen mehr benötigt, eine detailliert kommentierte Version ist im Originalartikel von Marko zu finden.
+Man bekommt aber beim Durchlesen des Codes schon Kopfschmerzen und möchte diesen definitiv nicht warten müssen.
+Der Algorithmus benutzt die Eigenheiten der Bitmuster der Zahlen, siehe Ascii-Tabelle, die zwischen `0x30` und `0x39` liegen.
+
+.Listing {listing}: - Optimiertes Parsen der Temperatur
+[source,java]
+----
+private static final long DOT_BITS = 0x10101000; // 0010 1110
+private static final long MAGIC_MULTIPLIER = (100 * 0x1000000 + 10 * 0x10000 + 1);
+
+// credit: merykitty
+private static int dotPos(long word) {
+    return Long.numberOfTrailingZeros(~word & DOT_BITS);
+}
+
+// credit: merykitty und royvanrijn
+private static int parseTemperature(long numberBytes, int dotPos) {
+    // numberBytes enthält die Zahl im Format: X.X, -X.X, XX.X or -XX.X
+    final long invNumberBytes = ~numberBytes;
+
+    // Vorzeichen ermitteln
+    final long signed = (invNumberBytes << 59) >> 63;
+    final int _28MinusDotPos = (dotPos ^ 0b11100);
+    final long minusFilter = ~(signed & 0xFF);
+    // Vorberechnete Position des Dezimalpunkts nutzen, um Werte anzupassen
+    final long digits = ((numberBytes & minusFilter) << _28MinusDotPos) & 0x0F000F0F00L;
+
+    // Magische Multiplikation (100 * 0x1000000 + 10 * 0x10000 + 1)
+    final long absValue = ((digits * MAGIC_MULTIPLIER) >>> 32) & 0x3FF;
+    // Vorzeichen anwenden
+    return (int) ((absValue + signed) ^ signed);
+}
+----
+
+Zusammen ergeben diese Änderungen noch einmal eine Beschleunigung von 6,6 auf 2,4 Sekunden, also 2,8 mal schneller und die Anzahl der CPU-Instruktionen pro Zeile sinkt um den Faktor 3 auf 120, siehe Listing {counter:listing}.
+Die Branch Misses sind aber immer noch relativ hoch, 0,66 pro Zeile, das ist ein Punkt der noch optimiert werden kann.
+
+.Listing {listing}: Perf Statistik für das optimierte Temperatur-Parsing
+----
+    13,612,256,700      branches
+       656,550,701      branch-misses
+     3,762,166,084      cache-references
+        92,058,104      cache-misses
+    63,244,307,290      cycles
+   119,581,792,681      instructions
+----
+
+////
+
+    /**
+     * Branchless parser, goes from String to int (10x):
+     * "-1.2" to -12
+     * "40.1" to 401
+     * etc.
+     *
+     * @param input
+     * @return int value x10
+     */
+    private static int branchlessParseInt(final byte[] input, int start, int length) {
+        // 0 if positive, 1 if negative
+        final int negative = ~(input[start] >> 4) & 1;
+        // 0 if nr length is 3, 1 if length is 4
+        final int has4 = ((length - negative) >> 2) & 1;
+
+        final int digit1 = input[start + negative] - '0';
+        final int digit2 = input[start + negative + has4];
+        final int digit3 = input[start + negative + has4 + 2];
+
+        return (-negative ^ (has4 * (digit1 * 100) + digit2 * 10 + digit3 - 528) - negative); // 528 == ('0' * 10 + '0')
+    }
+
+[source,java]
+----
+// credit: merykitty
+// word contains the number: X.X, -X.X, XX.X or -XX.X
+private static int parseTemperatureOG(long word, int dotPos) {
+
+    // signed is -1 if negative, 0 otherwise
+    final long signed = (~word << 59) >> 63;
+    final long removeSignMask = ~(signed & 0xFF);
+
+    // Zeroes out the sign character in the word
+    long wordWithoutSign = word & removeSignMask;
+
+    // Shifts so that the digits come to fixed positions:
+    // 0xUU00TTHH00 (UU: units digit, TT: tens digit, HH: hundreds digit)
+    long digitsAligned = wordWithoutSign << (28 - dotPos);
+
+    // Turns ASCII chars into corresponding number values. The ASCII code
+    // of a digit is 0x3N, where N is the digit. Therefore, the mask 0x0F
+    // passes through just the numeric value of the digit.
+    final long digits = digitsAligned & 0x0F000F0F00L;
+
+    // Multiplies each digit with the appropriate power of ten.
+    // Representing 0 as . for readability,
+    // 0x.......U...T.H.. * (100 * 0x1000000 + 10 * 0x10000 + 1) =
+    // 0x.U...T.H........ * 100 +
+    // 0x...U...T.H...... * 10 +
+    // 0x.......U...T.H..
+    //          ^--- H, T, and U are lined up here.
+    // This results in our temperature lying in bits 32 to 41 of this product.
+    final long absValue = ((digits * MAGIC_MULTIPLIER) >>> 32) & 0x3FF;
+
+    // Apply the sign. It's either all 1's or all 0's. If it's all 1's,
+    // absValue ^ signed flips all bits. In essence, this does the two's
+    // complement operation -a = ~a + 1. (All 1's represents the number -1).
+    return (int) ((absValue ^ signed) - signed);
+}
+----
+////
+
+////
+All these techniques put together result in a 2.8x speedup. From 6.6 seconds, we're now down to 2.4 seconds. Our overall improvement is now 28x.
+
+As perf stat reports:
+
+    13,612,256,700      branches
+       656,550,701      branch-misses
+     3,762,166,084      cache-references
+        92,058,104      cache-misses
+    63,244,307,290      cycles
+   119,581,792,681      instructions
+There is a huge drop in instruction count, by 3x. Since that's just 120 instructions per row now, we should look into making the same number of instructions execute faster. One thing stands out: there are 0.66 branch-misses per row.
+
+Can we do something about that?
+////
+
+==== Stadtnamen - Statistiken für Schleifenoptimierung
+
+Der Vergleich der Stadtnamen erfolgt in einer Schleife, die abhängig von der Zeichenanzahl ein, zwei, oder öfter durchlaufen werden muss.
+Nach Auswertung einer Statistik über die Länge der Stadtnamen (nur 2.5% der Städte haben mehr als 16 Zeichen) kann geschlussfolgert werden, dass also in 97.5% aller Fälle direkte Vergleiche der ersten beiden 8-Byte Werte durchgeführt werden.
+
+Das reduziert den Bedarf für die Schleife und und damit auch die Anzahl der Branch-Misses weiter (um Faktor 8 auf 0,08 Branch-Misses pro Zeile, bei 100 Instruktionen pro Zeile und weniger Cache-Misses (wahrscheinlich wegen des Loop-Unrollings)). 
+Ebenso steigt die Anzal der Instruktionen pro Takt, da durch die Vermeidung von nutzloser Arbeit der CPU mehr Kapazität für die eigentliche Arbeit zur Verfügung stehen.
+
+////
+Running Statistics.branchPrediction() with the condition nameLen > 8 results in 50% branch mispredictions. But if we change the condition in that line of code to nameLen > 16, mispredictions drop to just 2.5%.
+
+Informed by this finding, it's clear that we have to write some code to avoid any branch instructions on the condition nameLen > 8, and instead go directly for nameLen > 16.
+
+To do that, we have to unroll the semicolon-searching loop along these lines:
+
+Perform the first two steps in one go, without checking any conditions
+Use bit-twiddling logic to combine the results of finding the semicolon in each of the two long words
+Use the combined result in an if check, which now accounts for all the initial 16 bytes
+We also need specialized variants of findAcc() and nameEquals() for the cases where the name is up to 16 bytes or more.
+////
+
+==== Work Stealing 
+
+Ein Aufteilen der Daten in 8 Segmente für die 8 Threads erst einmal ein guter Anfang, wie beim parallelen Verarbeiten von Daten üblich, ist nicht aber jede Aufgabe gleich geschnitten, so dass parallele Threads unterschiedlich schnell fertig werden.
+
+Ebenso ist das Handhaben der größeren Segmente unflexibler.
+Daher haben die meisten Lösungen eine Aufteilung in mehr und kleinere Segmente vorgenommen, die dann von den Threads abgearbeitet werden, und die Threads sich dann neue Segmente holen, wenn sie fertig sind.
+
+Das wurde im einfachsten Fall mit einem AtomicInteger umgesetzt, der den Index des nächsten freien Segments enthält, siehe Listing {counter:listing}, so dass jedes Segment nur einmal verarbeitet wurde.
+
+Die Größe der Segmente war ein Diskussionsthema, empirisch wurde eine Größe von 2MB als optimal ermittelt, die dann über die Größe von Linux Huge-Page Speicherseiten und das Übereinstimmen der Gesamtgröße der parallel verarbeiteten Segemente (`8*2MB=16MB`) mit dem L1 Cache des Prozessors erklärt wurde.
+
+////
+The way we divide the work into a single chunk per thread, we can end up with some threads getting "luckier" than others and completing sooner. When that happens, the CPU is underutilized for the remaining computation.
+
+To address this, we can introduce a small update that changes this to a larger number of small, fixed-size chunks. Up-front we'll only calculate the number of chunks, and then let the threads grab them and calculate their bounds when they're ready.
+
+The key element is in ensuring that every chunk gets processed exactly once.
+////
+
+.Listing {listing}: Work Stealing
+[source,java]
+----
+// Gesamtanzahl der Segmente
+static int chunkCount = (int) ((file.length() / CHUNK_SIZE - 1) + 1);
+static final AtomicInteger chunkSelector = new AtomicInteger();
+
+// Am Anfang jedes Threads, einfach den nächsten freien Index holen
+var selectedChunk = chunkSelector.getAndIncrement();
+if (selectedChunk >= chunkCount) {
+    return;
+}
+----
+
+==== Kurze Startzeiten mit GraalVM Native Image
+
+Wie schon am eher erwähnt, spielt bei diesen extrem kurzen Laufzeiten, die Startup-Zeit (200 Millisekunden) der JVM ein großer Anteil, hier spielen native Images von GraalVM mit Ahead-of-Time Compilation ihre Stärken aus, da das native Binärprogramm, in wenigen Millisekunden gestartet werden kann.
+Der Aufwand wird hier zum Zeitpunkt der Kompilierung getrieben, wie in [Hun012019] im Detail beschrieben.
+Durch den hochoptimierten Code und den einmaligen Lauf des Tests ist es auch zu verschmerzen, dass es keinen Just-In-Time Compiler gibt, der den Code zur Laufzeit weiter optimieren könnte.
+Ausserdem ist dieser ja schon handoptimiert.
+
+Auch das Freigeben des MemorySegments kostet Zeit, ca 100 Millisekunden, den Thomas Wuerthinger mit einem Subprozess umgeht, der den Speicher im Hintergrund freigibt nachdem der Berechnungsprozess schon fertig und beendet wurde.
+Hier würde die JVM Startup Zeit sogar zweimal anfallen, da der Subprozess auch eine eigene JVM benötigt.
+
+== Fazit und Topliste
+
+Bis zum Ende des Wettbewerbs gab es 164 Einreichungen - die schnellste Lösung war eine Kombination von Thomas Wuerthinger, Quan Anh Mai und Alfonso Peterssen die mittles GraalVM native Binary, Unsafe, Memory-Mapping und Bitmasken Tricks die Laufzeit auf beeindruckende 1,5 Sekunden reduzierte, fast 200 mal schneller als die Baseline.
+
+Um das noch einmal ins Verhältnis zu setzen:
+Für 1 Milliarde Zeilen oder 13 GB in 1,5 Sekunden heisst dass die JVM *666 Millionen Zeilen bzw. 9,3GB pro Sekunde* verarbeitet. 
+Wirklich beeindruckend, sowohl für GraalVM als auch für die Teilnehmer.
+
+Alle Lösungen der Top-20 bleiben unter 3 Sekunden Laufzeit, wie Gunnar in seinem Blog [Ergebnisse] detailliert.
+
+In einem Livestream mit Nicolai Parlog [Livestream] haben Gunnar Morling, Thomas Wuerthinger, Roy van Rijn, Elliot Barlas und Quin Anh Mai über die Lösungen und die Performance-Optimierungen diskutiert. 
+Ein spannender Einblick in die Entwicklung des Wettbebwerbs und die Ideen und Zusammenarbeit dahinter.
+
+Die Top-Lösungen nutzen alle Unsafe für schnelleren aber unsicheren Speicherzugriff. 
+Es wird interessant wie nach der Entfernung von Unsafe performance-sensitiven Anwendungen wie 1BRC umgesetzt werden. 
+Mit der Vector-API, Foreign-Memory-API und Value-Typen gibt es in zukünftigen JDK-Versionen interessante Optimierungsmöglichkeiten, die wir in der Kolumne schon diskutiert haben.
+
+Fast alle Top-Lösungen nutzen GraalVM um native Binaries zu erzeugen, die viel schneller starten als eine herkömmliche JVM und sofort ihre volle Leistung erreichen (keine JIT-Kompilierung).
+Es ist daher beeindrucken zu sehen, dass Serkan Özal mit einer reinen JVM-basierten Lösung auf dem vierten Platz gelandet ist.
+
+.Top-5 Liste der 1BRC
+[%autowidth, opts=header]
+|====
+| Platz | Zeit | JVM | Name(n)
+| 1 |  00:01.535 | 21.0.2-graal | Thomas Wuerthinger, Quan Anh Mai, Alfonso² Peterssen
+| 2 |  00:01.587 | 21.0.2-graal | Artsiom Korzun
+| 3 | 00:01.608 | 21.0.2-graal | Jaromir Hamala
+| 4 | 00:01.880 | 21.0.1-open | Serkan Özal
+| 5 | 00:01.921 | 21.0.2-graal | Van Phu DO
+|====
+
+Gunnar hat die 50 schnellsten Lösungen auch noch einmal mit größeren Datensets (10.000 statt 413 Städte) und mehr Threads (64) getestet, wodurch sich die Reihenfolge der Bestleistungen noch einmal änderte.
+Besonders mit mehr Städten, haben sich die Optimierungen (ausser von Artsiom Korzun) nicht gleich gut geschlagen.
+
+== Kurzinterview mit Gunnar Morling
+
+Gunnar hat sich bereit erklärt, ein paar Fragen zum Wettbewerb zu beantworten.
+Zuerst einmal vielen Dank an Gunnar für die tolle Idee, Organisation und die viele persönliche Zeit, die er in den Wettbewerb investiert hat.
+
+Was hat Dich beim 1BRC am meisten überrascht?
+
+Mit welcher minimalen Laufzeit hattest Du für Java gerechnet?
+
+Hättest Du Lust das nächstes Jahr zu wiederholen, diesmal mit Hilfe von der Community, könnte eine gute Ergänzug zu Advent of Code sein?
+
+Hast Du Feedback vom JVM Team bekommen, neben den exzellenten Beiträgen von Thomas Wuerthinger?
+
+== Andere Sprachen und Tools
+
+Neben Java haben auch Teilnehme mit anderen Programmiersprachen und Tools versucht, die Aufgabe effizient zu lösen. 
+Von Rust, C (mit AVX) bis zu AWK und COBOL sowie Datenbanken wie Snowflake, ClickHouse, DuckDB und mehr.
+In einem GitHub-Diskussions-Thread [ShowAndTell] wurden die Lösungen und die Performance-Optimierungen der Teilnehmer diskutiert.
+
+Hier ist ein Beispiel für DuckDB [SQL] (Robin Moffat & Michael Simons), wobei die Ausgabe im Format "Map.toString" erfolgt, was in der Praxis natürlich nicht so sinnvoll ist.
+
+[source,sql]
+----
+WITH src AS (
+SELECT station_name,
+        MIN(measurement) AS min_measurement,
+        CAST(AVG(measurement) AS DECIMAL(8,1)) AS mean_measurement,
+        MAX(measurement) AS max_measurement
+FROM read_csv('measurements.txt', header=false, 
+columns= {'station_name':'VARCHAR','measurement':'double'}, delim=';')
+GROUP BY station_name
+)
+-- Ausgabe als "Java toString"
+SELECT '{' ||
+        ARRAY_TO_STRING(LIST(station_name || '=' || 
+        CONCAT_WS('/', min_measurement, mean_measurement, max_measurement) 
+            ORDER BY station_name), ', ') ||
+        '}' AS "1BRC"
+FROM src;
+----
+
+Es gab im Nachgang auch eine 1-Trillion-Row-Challenge [TRCDask] für Cloud-Data-Architekturen von Dask und ClickHouse [TRCClickHouse].
+Diese haben die Berechnung für 1000-mal mehr Zeilen auf einem Cluster von Maschinen in ca. 3 Minuten durchgeführt.
+
+Die Beispiele in andren Sprachen wie Rust und C sind relativ umfangreich, so dass sie hier nicht gezeigt werden können, aber sie sind in den GitHub-Repositories zu finden und definitiv lesenswert.
+
+////
+Und hier ein Beispiel in Rust:
+
+[source,rust]
+----
+541 Zeilen Rust code :) 
+----
+////
+
+== Referenzen
+
+* [1BRC] https://www.morling.dev/blog/one-billion-row-challenge/
+* [Ergebnisse] https://www.morling.dev/blog/1brc-results-are-in/
+* [GitHub] https://github.com/gunnarmorling/1brc
+* [Topliste] https://github.com/gunnarmorling/1brc?tab=readme-ov-file#results
+* [Baseline] https://github.com/gunnarmorling/1brc/blob/main/src/main/java/dev/morling/onebrc/CalculateAverage_baseline.java
+* [StepByStep] https://questdb.io/blog/billion-row-challenge-step-by-step/
+* [Timeline] https://tivrfoa.github.io/java/benchmark/performance/2024/02/05/1BRC-Timeline.html
+* [InfoQ] https://www.infoq.com/news/2024/01/1brc-fast-java-processing/
+* [Livestream] Diskussion der Gewinner mit Gunnar und Nicolai Parlog https://www.twitch.tv/videos/2050175537
+// Nicolai Parlog Twitch Stream (Gunnar, Nicolai, Thomas Wuerthinger, Roy van Rijn, Elliot Barlas, Quin Anh) https://www.twitch.tv/videos/2050175537
+* [Chashnikov] https://www.chashnikov.dev/post/one-billion-row-challenge-view-from-sidelines
+* [HackerNews] https://news.ycombinator.com/item?id=39175500
+* [ShowAndTell]  https://github.com/gunnarmorling/1brc/discussions/categories/show-and-tell
+* [SQL] https://rmoff.net/2024/01/03/1%EF%B8%8F%E2%83%A3%EF%B8%8F-1brc-in-sql-with-duckdb/
+* [StartinBytes] https://richardstartin.github.io/posts/finding-bytes
+* [BranchPrediction] https://danluu.com/branch-prediction/
+* [TRCClickHouse] https://clickhouse.com/blog/clickhouse-1-trillion-row-challenge
+* [TRCDask] https://medium.com/coiled-hq/one-trillion-row-challenge-5bfd4c3b8aef
+* [Rust] https://github.com/RagnarGrootKoerkamp/1brc/
+* [Snowflake] https://medium.com/snowflake/the-one-billion-row-challenge-with-snowflake-f612ae76dbd5
+* [SWAR] https://en.wikipedia.org/wiki/SWAR
+
+////
+References
+https://github.com/gunnarmorling/1brc
+
+https://en.wikipedia.org/wiki/SWAR
+
+https://dl.acm.org/doi/pdf/10.1145/360933.360994 Multiple byte processing with full-word instructions - 1975
+
+http://aggregate.org/SWAR/Dis/dissertation.pdf GENERAL-PURPOSE SIMD WITHIN A REGISTER:PARALLEL PROCESSING ON CONSUMER MICROPROCESSORS - 2003
+
+https://richardstartin.github.io/posts/finding-bytes Finding Bytes in Arrays - 2019
+
+////
+
+
+
+////
+At the end of our 1BRC speedrun, we managed a 42x improvement over the Parallel Streams implementation on OpenJDK, from 71 seconds down to 1.7. You may notice that my official 1BRC result was quite a bit worse, at 2.3 seconds. The code in this post is different from what I submitted; some of it I wrote just for the post. It turned out that I had to choose between one last round of optimization at 1BRC, or giving full attention to the challenge I got while getting hired for QuestDB. I'm very glad I chose the latter!
+
+Performance optimizations we went through are certainly impressive, but do keep in mind that a lot of the gains come from dispensing with all the best practices that apply to production code: validations, bounds checks, hashtable resizing, and so on.
+
+The sole purpose of this code was to be fast at one very particularly specified, error-free input file. It has absolutely no tolerance for any kind of deviation, for example a single temperature reading that exceeds the three-digit maximum would cause it to completely lose track, and probably crash.
+
+But, coding challenges are meant to be fun — and everybody knows input validation is the opposite of fun!
+////
+
+
+
+////
+// credit: merykitty
+// word contains the number: X.X, -X.X, XX.X or -XX.X
+private static int parseTemperatureOG(long word, int dotPos) {
+
+    // signed is -1 if negative, 0 otherwise
+    final long signed = (~word << 59) >> 63;
+    final long removeSignMask = ~(signed & 0xFF);
+
+    // Zeroes out the sign character in the word
+    long wordWithoutSign = word & removeSignMask;
+
+    // Shifts so that the digits come to fixed positions:
+    // 0xUU00TTHH00 (UU: units digit, TT: tens digit, HH: hundreds digit)
+    long digitsAligned = wordWithoutSign << (28 - dotPos);
+
+    // Turns ASCII chars into corresponding number values. The ASCII code
+    // of a digit is 0x3N, where N is the digit. Therefore, the mask 0x0F
+    // passes through just the numeric value of the digit.
+    final long digits = digitsAligned & 0x0F000F0F00L;
+
+    // Multiplies each digit with the appropriate power of ten.
+    // Representing 0 as . for readability,
+    // 0x.......U...T.H.. * (100 * 0x1000000 + 10 * 0x10000 + 1) =
+    // 0x.U...T.H........ * 100 +
+    // 0x...U...T.H...... * 10 +
+    // 0x.......U...T.H..
+    //          ^--- H, T, and U are lined up here.
+    // This results in our temperature lying in bits 32 to 41 of this product.
+    final long absValue = ((digits * MAGIC_MULTIPLIER) >>> 32) & 0x3FF;
+
+    // Apply the sign. It's either all 1's or all 0's. If it's all 1's,
+    // absValue ^ signed flips all bits. In essence, this does the two's
+    // complement operation -a = ~a + 1. (All 1's represents the number -1).
+    return (int) ((absValue ^ signed) - signed);
+}
+
+The algorithm in parseTemperature() and dotPos() is a genius creation by @merykitty (Quan Anh Mai), who made it specifically for this challenge. It leverages the properties of the bit patterns of ASCII - and ., as well as several other tricks, and produces the integer value of the two or three temperature digits, accounting for all four possible patterns (X.X, -X.X, XX.X and -XX.X) in one go.
+
+If you want to study it in more detail, keep in mind that the number string is stored in the long in little-endian order. For example, this line: long signed = (invNumberBytes << 59) >> 63; isolates bit number 4 of the first byte – the one where the minus sign may appear – and sign-extends it across the long.
+
+This bit is 0 in the - sign, and 1 in all the digits. The operation is done after flipping all the bits (~numberBytes), so this becomes either all 1's if the byte is -, or all 0's otherwise.
+
+This parsing code deserves a blog post of its own, and it would distract us too much to explain it in detail here. Instead I've thrown in @merykitty's original code, and expanded his comments a bit more:
+
+The method maskWord() takes a long containing 8 bytes of input data and zeroes out all the bytes beyond the semicolon. We need this to perform a fast name equality check.
+
+In our case, semicolonMatchBits() locates the ASCII semicolon byte and returns a long with bits set to one where it was found. Then the method nameLen() turns that bit pattern into the number telling us where it is. This comes from a standard technique, used for example in C to efficiently determine the length of a zero-terminated string.
+
+hot loop in each of them — the part of the code where the program spends almost all of its time.
+
+If you ever had the experience of writing a small program in C++ or Rust, and then looking at the optimized machine code the compiler produced, you'll get similar vibes here. Abstractions are spilled open, concerns are criss-crossing and interleaving each other. A ton of utterly alien-looking, bit-twiddling logic.
+
+How could a human programmer possibly get to this point? Like in so many other cases, it was people working together and improving step by step. Dozens of Java experts iterated through many tricks and hacks, and as January rolled on, the processing time kept dropping lower and lower.
+
+* manual hash table implementation based on hashes with collision handling
+
+I am planning to dive into some of the implementation details in another blog post, there is so much to talk about: segmentation and parallelization, SIMD and SWAR, avoiding branch mispredictions and spilling, making sure the processor’s pipelines are always fully utilized, the "process forking" trick, and so much more.
+
+Roy van Rijn, parallel, no split, simpler measurement aggregation
+
+    private record Measurement(double min, double max, double sum, long count) {
+
+        Measurement(double initialMeasurement) {
+            this(initialMeasurement, initialMeasurement, initialMeasurement, 1);
+        }
+
+        public static Measurement combineWith(Measurement m1, Measurement m2) {
+            return new Measurement(
+                    m1.min < m2.min ? m1.min : m2.min,
+                    m1.max > m2.max ? m1.max : m2.max,
+                    m1.sum + m2.sum,
+                    m1.count + m2.count
+            );
+        }
+
+        public String toString() {
+            return round(min) + "/" + round(sum / count) + "/" + round(max);
+        }
+
+        private double round(double value) {
+            return Math.round(value * 10.0) / 10.0;
+        }
+    }
+
+    public static void main(String[] args) throws IOException {
+
+//        long before = System.currentTimeMillis();
+
+        Map<String, Measurement> resultMap = Files.lines(Path.of(FILE)).parallel()
+                .map(record -> {
+                    // Map to <String,double>
+                    int pivot = record.indexOf(";");
+                    String key = record.substring(0, pivot);
+                    double measured = Double.parseDouble(record.substring(pivot + 1));
+                    return new AbstractMap.SimpleEntry<>(key, measured);
+                })
+                .collect(Collectors.toConcurrentMap(
+                        // Combine/reduce:
+                        AbstractMap.SimpleEntry::getKey,
+                        entry -> new Measurement(entry.getValue()),
+                        Measurement::combineWith));
+
+        System.out.print("{");
+        System.out.print(
+                resultMap.entrySet().stream().sorted(Map.Entry.comparingByKey()).map(Object::toString).collect(Collectors.joining(", ")));
+        System.out.println("}");
+
+//        System.out.println("Took: " + (System.currentTimeMillis() - before));
+
+    }
+
+* Hampus Ram - Memory Mapped file - Memory mapped file using FileChannel and MappedByteBuffer
+// Jan 2, 2024 10:04:29 - bjhara - Memory Mapped File - 00:38.510
+
+
+    private static Stream<ByteBuffer> splitFileChannel(final FileChannel fileChannel) throws IOException {
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(new Iterator<ByteBuffer>() {
+            private static final long CHUNK_SIZE = 1024 * 1024 * 10L;
+
+            private final long size = fileChannel.size();
+            private long start = 0;
+
+            @Override
+            public boolean hasNext() {
+                return start < size;
+            }
+
+            @Override
+            public ByteBuffer next() {
+                try {
+                    MappedByteBuffer mappedByteBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, start,
+                            Math.min(CHUNK_SIZE, size - start));
+
+                    // don't split the data in the middle of lines
+                    // find the closest previous newline
+                    int realEnd = mappedByteBuffer.limit() - 1;
+                    while (mappedByteBuffer.get(realEnd) != '\n')
+                        realEnd--;
+
+                    realEnd++;
+
+                    mappedByteBuffer.limit(realEnd);
+                    start += realEnd;
+
+                    return mappedByteBuffer;
+                }
+                catch (IOException ex) {
+                    throw new UncheckedIOException(ex);
+                }
+            }
+        }, Spliterator.IMMUTABLE), false);
+    }
+
+
+* Vector API Jan 2, 2024 16:14:32 - padreati - Vector API - 00:50.547
+
+JAVA_OPTS="--enable-preview --add-modules jdk.incubator.vector"
+time java $JAVA_OPTS --class-path target/average-1.0.0-SNAPSHOT.jar dev.morling.onebrc.CalculateAverage_padreati
++            <compilerArgs>
++              <compilerArg>--enable-preview</compilerArg>
++              <compilerArg>--add-modules</compilerArg>
++              <compilerArg>java.base,jdk.incubator.vector</compilerArg>
++            </compilerArgs>
+import jdk.incubator.vector.ByteVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
+
+* Jan 3, 2024 - royvanrijn - SWAR - 00:23.366
+Key ideas:
+
+* SIMD Within A Register (SWAR) for finding ‘;’.
+* Iterates over a long, instead of a byte.
+* Use int instead of double
+* Branchless parse int
+
+// https://github.com/gunnarmorling/1brc/blob/5570f1b60a557baf9ec6af412f8d5bd75fc44891/src/main/java/dev/morling/onebrc/CalculateAverage_royvanrijn.java
+
+/**
+ * Changelog:
+ *
+ * Initial submission:          62000 ms
+ * Chunked reader:              16000 ms
+ * Optimized parser:            13000 ms
+ * Branchless methods:          11000 ms
+ * Adding memory mapped files:  6500 ms (based on bjhara's submission)
+ * Skipping string creation:    4700 ms
+ * Custom hashmap...            4200 ms
+ * Added SWAR token checks:     3900 ms
+ * Skipped String creation:     3500 ms (idea from kgonia)
+ * Improved String skip:        3250 ms
+ * Segmenting files:            3150 ms (based on spullara's code)
+ * Not using SWAR for EOL:      2850 ms
+ *
+ * Best performing JVM on MacBook M2 Pro: 21.0.1-graal
+ * `sdk use java 21.0.1-graal`
+ *
+ */
+
+
+    /**
+     * -------- This section contains SWAR code (SIMD Within A Register) which processes a bytebuffer as longs to find values:
+     */
+    private static final long SEPARATOR_PATTERN = compilePattern((byte) ';');
+
+    private int findNextSWAR(ByteBuffer bb, long pattern, int start, int limit) {
+        int i;
+        for (i = start; i <= limit - 8; i += 8) {
+            long word = bb.getLong(i);
+            int index = firstAnyPattern(word, pattern);
+            if (index < Long.BYTES) {
+                return i + index;
+            }
+        }
+        // Handle remaining bytes
+        for (; i < limit; i++) {
+            if (bb.get(i) == (byte) pattern) {
+                return i;
+            }
+        }
+        return limit; // delimiter not found
+    }
+
+    private static int firstAnyPattern(long word, long pattern) {
+        final long match = word ^ pattern;
+        long mask = match - 0x0101010101010101L;
+        mask &= ~match;
+        mask &= 0x8080808080808080L;
+        return Long.numberOfTrailingZeros(mask) >>> 3;
+    }
+
+compilePattern
+It replicates the byte value in a long.
+
+    private static long compilePattern(byte value) {
+        return ((long) value << 56) | ((long) value << 48) | ((long) value << 40) | ((long) value << 32) |
+                ((long) value << 24) | ((long) value << 16) | ((long) value << 8) | (long) value;
+    }
+jshell> var p = compilePattern((byte) ';')
+p ==> 4268070197446523707
+
+jshell> Long.toHexString(p)
+$4 ==> "3b3b3b3b3b3b3b3b"
+
+jshell> Integer.toHexString((byte) ';')
+$5 ==> "3b"
+
+
+This post considers the benefits of branch-free algorithms through the lens of a trivial problem: finding the first position of a byte within an array. While this problem is simple, it has many applications in parsing: BSON keys are null terminated strings; HTTP 1.1 headers are delimited by CRLF sequences; CBOR arrays are terminated by the stop character 0xFF. I compare the most obvious, but branchy, implementation with a branch-free implementation, and use the Vector API in Project Panama to improve performance.
+
+StartinBytes
+
+Variable length reading of key names terminated by `\0`
+Finding line-feeds
+
+
+
+* branchlessParseInt
+
+    /**
+     * Branchless parser, goes from String to int (10x):
+     * "-1.2" to -12
+     * "40.1" to 401
+     * etc.
+     *
+     * @param input
+     * @return int value x10
+     */
+    private static int branchlessParseInt(final byte[] input, int start, int length) {
+        // 0 if positive, 1 if negative
+        final int negative = ~(input[start] >> 4) & 1;
+        // 0 if nr length is 3, 1 if length is 4
+        final int has4 = ((length - negative) >> 2) & 1;
+
+        final int digit1 = input[start + negative] - '0';
+        final int digit2 = input[start + negative + has4];
+        final int digit3 = input[start + negative + has4 + 2];
+
+        return (-negative ^ (has4 * (digit1 * 100) + digit2 * 10 + digit3 - 528) - negative); // 528 == ('0' * 10 + '0')
+    }
+
+// comment on big-endian
+By default ByteBuffers uses Big Endian, which is native for M1/M2…but not on x86, which is the one used for the benchmark. It translates in:
+
+wrong position, while found a useless reverse bytes
+
+It would be better to store in a static final, the native byte order and based on it, correctly reverse the bytes yourself (look at what I have done in the Netty code). Conversely you can always assume little endian, setting the mapped byte buffer order, and leave M1 to have the performance hit
+
+franz1981 - get long idea
+
+Hash code here has a data dependency: you either manually unroll this or just relax the hash code by using a var handle and use getLong amortizing the data dependency in batches, handing only the last 7 (or less) bytes separately, using the array. In this way the most of computation would like resolve in much less loop iterations too, similar to https://github.com/apache/activemq-artemis/blob/25fc0342275b29cd73123523a46e6e94582597cd/artemis-commons/src/main/java/org/apache/activemq/artemis/utils/ByteUtil.java#L299
+
+* Garbage Collection
+(did anyone test Epsilon GC?)
+
+Jan 3, 2024 - Interesting comment about ZGC by fisk:
+https://github.com/gunnarmorling/1brc/pull/15#issuecomment-1875495420
+
+https://github.com/fisk/jdk/commit/8ce820de84b7031ced52fb63d190d9c8546f6730
+
+@lobaorn do you really think you can nerd snipe me like that with benchmarking games?
+
+Having said that... I implemented some experimental leyden support for generational ZGC, with some object streaming shenanigans allowing loading of archived objects, and support for archived code from the JIT cache so we can run with compiled code immediately and dodge most of the warmup costs.
+
+On my machine with 256 cores...
+
+real 0m2.318s
+user 1m24.229s
+sys 0m2.009s
+
+...beat that!
+
+Oh and here are the JVM flags: -XX:+UseLargePages -XX:+UseZGC -XX:+ZGenerational -Xms8G -Xmx8G -XX:+AlwaysPreTouch -XX:ConcGCThreads=4 -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive -XX:ZTenuringThreshold=1 -Xlog:gc*:file=fatroom_gc.log -XX:SharedArchiveFile=Fatroom-dynamic.jsa -XX:+ReplayTraining -XX:+ArchiveInvokeDynamic -XX:+LoadCachedCode -XX:CachedCodeFile=Fatroom-dynamic.jsa-sc
+
+Here is my experimental Generational ZGC leyden branch: https://github.com/fisk/jdk/tree/1brc_genz_leyden
+
+Takes about 1/3 of the time compared to normal ZGC on my machine.
+
+* Jan 3, 2024 11:35:51 - Nice 35 lines solution by Sam Pullara
+
+package dev.morling.onebrc;
+
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.stream.Collectors;
+
+public class CalculateAverage_naive {
+
+    record Result(double min, double max, double sum, long count) {
+    }
+
+    public static void main(String[] args) throws FileNotFoundException {
+        long start = System.currentTimeMillis();
+        var results = new BufferedReader(new FileReader("./measurements.txt"))
+                .lines()
+                //.parallel() // I don't know why Sam removed this. But it makes it much faster.
+                .map(l -> l.split(";"))
+                .collect(Collectors.toMap(
+                        parts -> parts[0],
+                        parts -> {
+                            double temperature = Double.parseDouble(parts[1]);
+                            return new Result(temperature, temperature, temperature, 1);
+                        },
+                        (oldResult, newResult) -> {
+                            double min = Math.min(oldResult.min, newResult.min);
+                            double max = Math.max(oldResult.max, newResult.max);
+                            double sum = oldResult.sum + newResult.sum;
+                            long count = oldResult.count + newResult.count;
+                            return new Result(min, max, sum, count);
+                        }, ConcurrentSkipListMap::new));
+        System.out.println(System.currentTimeMillis() - start);
+        System.out.println(results);
+    }
+}
+
+- paralllel needs Concurrent Map - for concurrent merge on same key
+TODO ConcurrentSkipListMap::new ?
+
+* Jan 3, 2024 11:35:51 - spullara - lazy String creation and better hash table (?) - 00:14.848
+
+https://github.com/spullara/1brc/blob/dd10a02e075fcdc11eb7ca9dbcb245ba9db739d2/src/main/java/dev/morling/onebrc/CalculateAverage_spullara.java
+
+https://github.com/gunnarmorling/1brc/pull/21
+
+It was not clear at first what made such big difference, because his solution:
+
+does not use SWAR
+work with doubles
+…, but creating String name only when aggregating certainly speeds things up.
+
+class ByteArrayToResultMap {
+  public static final int MAPSIZE = 1024*128;
+  Result[] slots = new Result[MAPSIZE];
+  byte[][] keys = new byte[MAPSIZE][];
+
+  private int hashCode(byte[] a, int fromIndex, int length) {
+    int result = 0;
+    int end = fromIndex + length;
+    for (int i = fromIndex; i < end; i++) {
+      result = 31 * result + a[i];
+    }
+    return result;
+  }
+  // ...
+}
+
+Jan 3, 2024 - ebarlas - Changed JVM to GraalVM CE 21.0.1
+https://github.com/gunnarmorling/1brc/pull/45
+
+
+Jan 3, 2024 - ddimtirov - use Epsilon GC, MemorySegment and Arena
+Nice example of how to replace MappedByteBuffer with MemorySegment:
+
+https://github.com/gunnarmorling/1brc/pull/32
+
+switched to the foreign memory access preview API for another 10% speedup
+
+-JAVA_OPTS="-XX:+UseParallelGC"
++# --enable-preview to use the new memory mapped segments
++# We don't allocate much, so just give it 1G heap and turn off GC; the AlwaysPreTouch was suggested by the ergonomics
++JAVA_OPTS="--enable-preview -Xms1g -Xmx1g -XX:+UnlockExperimentalVMOptions -XX:+UseEpsilonGC  -XX:+AlwaysPreTouch"
+ time java $JAVA_OPTS --class-path target/average-1.0.0-SNAPSHOT.jar dev.morling.onebrc.CalculateAverage_ddimtirov
+
+* Jan 5, 2024 - yemreinci - Calculate the hashcode while reading the data
+
+https://github.com/gunnarmorling/1brc/pull/86
+
+Improvements
+
+Calculate the hashcode while reading the data, instead of later in the hashmap implementation. This is expected to increase instruction level parallelism as CPU can work on the math while waiting for data from memory/cache.
+Convert the number parsing while loop into a few if statements. While loop with a switch-case inside is likely not so great for the branch predictor.
+int hash = 0;
+while ((b = bb.get(currentPosition++)) != ';') {
+    buffer[offset++] = b;
+    hash = (hash << 5) - hash + b;
+}
+
+* Jan 5, 2024 3:02 GMT-3 - artsiomkorzun - AtomicInteger, AtomicReference
+
+        AtomicInteger counter = new AtomicInteger();
+        AtomicReference<Aggregates> result = new AtomicReference<>();
+        Aggregator[] aggregators = new Aggregator[PARALLELISM];
+
+* Jan 6, 2024 6:55 AM GMT-3 - thomaswuer - Unsafe, GraalVM Native Image - 9.625
+
+TODO PGO discussion
+
+- story only index and length of string not the actual string
+- compute hashcode while reading the data
+- use sun.misc.Unsafe to directly access the mapped memory
+- memory mapping and chunking for each thread
+- sequentially aggregate results
+
+
+https://github.com/gunnarmorling/1brc/pull/70
+
+https://github.com/thomaswue/1brc/blob/c67abfcd469cbc00f89f5850cbf64a5407e21549/src/main/java/dev/morling/onebrc/CalculateAverage_thomaswue.java
+
+Update: Thanks to tuning from @mukel using sun.misc.Unsafe to directly access the mapped memory, it is now down to 1.28s (total CPU user time 32.2s) on my machine. Also, instead of PGO (Profile Guided Optimization), this is now just using a single native image build run with tuning flags “-O3” and “-march=native”.
+
+mmap the entire file, use Unsafe directly instead of ByteBuffer, avoid byte[] copies. These tricks give a ~30% speedup, over an already fast implementation.
+
+source "$HOME/.sdkman/bin/sdkman-init.sh"
+sdk use java 21.0.1-graal 1>&2
+NATIVE_IMAGE_OPTS="--gc=epsilon -O3 -march=native --enable-preview"
+native-image $NATIVE_IMAGE_OPTS -cp target/average-1.0.0-SNAPSHOT.jar -o image_calculateaverage_thomaswue dev.morling.onebrc.CalculateAverage_thomaswue
+    private static final Unsafe UNSAFE = initUnsafe();
+
+    private static Unsafe initUnsafe() {
+        try {
+            Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
+            theUnsafe.setAccessible(true);
+            return (Unsafe) theUnsafe.get(Unsafe.class);
+        }
+        catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    // processing each chunk in parallel no internal concurrency
+    // then sequentially aggregate over the individual results
+
+        // Holding the current result for a single city.
+    private static class Result {
+        int min;
+        int max;
+        long sum;
+        int count;
+        final long nameAddress;
+        final int nameLength;
+
+        private Result(long nameAddress, int nameLength, int value) {
+            this.nameAddress = nameAddress;
+            this.nameLength = nameLength;
+            this.min = value;
+            this.max = value;
+            this.sum = value;
+            this.count = 1;
+        }
+
+        public String toString() {
+            return round(((double) min) / 10.0) + "/" + round((((double) sum) / 10.0) / count) + "/" + round(((double) max) / 10.0);
+        }
+
+        private static double round(double value) {
+            return Math.round(value * 10.0) / 10.0;
+        }
+
+        // Accumulate another result into this one.
+        private void add(Result other) {
+            min = Math.min(min, other.min);
+            max = Math.max(max, other.max);
+            sum += other.sum;
+            count += other.count;
+        }
+    }
+
+    public static void main(String[] args) throws IOException {
+        // Calculate input segments.
+        int numberOfChunks = Runtime.getRuntime().availableProcessors();
+        long[] chunks = getSegments(numberOfChunks);
+
+        // Parallel processing of segments.
+        List<HashMap<String, Result>> allResults = IntStream.range(0, chunks.length - 1).mapToObj(chunkIndex -> {
+            HashMap<String, Result> cities = HashMap.newHashMap(1 << 10);
+            Result[] results = new Result[1 << 14];
+            parseLoop(chunks[chunkIndex], chunks[chunkIndex + 1], results, cities);
+            return cities;
+        }).parallel().toList();
+
+        // Accumulate results sequentially.
+        HashMap<String, Result> result = allResults.getFirst();
+        for (int i = 1; i < allResults.size(); ++i) {
+            for (Map.Entry<String, Result> entry : allResults.get(i).entrySet()) {
+                Result current = result.get(entry.getKey());
+                if (current != null) {
+                    current.add(entry.getValue());
+                }
+                else {
+                    result.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+
+        // Final output.
+        System.out.println(new TreeMap<>(result));
+    }
+
+    private static final Unsafe UNSAFE = initUnsafe();
+
+    private static Unsafe initUnsafe() {
+        try {
+            Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
+            theUnsafe.setAccessible(true);
+            return (Unsafe) theUnsafe.get(Unsafe.class);
+        }
+        catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    static boolean unsafeEquals(long aStart, long aLength, long bStart, long bLength) {
+        if (aLength != bLength) {
+            return false;
+        }
+        for (int i = 0; i < aLength; ++i) {
+            if (UNSAFE.getByte(aStart + i) != UNSAFE.getByte(bStart + i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void parseLoop(long chunkStart, long chunkEnd, Result[] results, HashMap<String, Result> cities) {
+        long scanPtr = chunkStart;
+        byte b;
+        while (scanPtr < chunkEnd) {
+            long nameAddress = scanPtr;
+
+            int hash = UNSAFE.getByte(scanPtr++);
+            while ((b = UNSAFE.getByte(scanPtr++)) != ';') {
+                hash += b;
+                hash += hash << 10;
+                hash ^= hash >> 6;
+            }
+
+            int nameLength = (int) (scanPtr - 1 - nameAddress);
+            hash = hash & (results.length - 1);
+
+            int number;
+            byte sign = UNSAFE.getByte(scanPtr++);
+            if (sign == '-') {
+                number = UNSAFE.getByte(scanPtr++) - '0';
+                if ((b = UNSAFE.getByte(scanPtr++)) != '.') {
+                    number = number * 10 + (b - '0');
+                    scanPtr++;
+                }
+                number = number * 10 + (UNSAFE.getByte(scanPtr++) - '0');
+                number = -number;
+            }
+            else {
+                number = sign - '0';
+                if ((b = UNSAFE.getByte(scanPtr++)) != '.') {
+                    number = number * 10 + (b - '0');
+                    scanPtr++;
+                }
+                number = number * 10 + (UNSAFE.getByte(scanPtr++) - '0');
+            }
+
+            while (true) {
+                Result existingResult = results[hash];
+                if (existingResult == null) {
+                    Result r = new Result(nameAddress, nameLength, number);
+                    results[hash] = r;
+                    byte[] bytes = new byte[nameLength];
+                    UNSAFE.copyMemory(null, nameAddress, bytes, Unsafe.ARRAY_BYTE_BASE_OFFSET, nameLength);
+                    cities.put(new String(bytes, StandardCharsets.UTF_8), r);
+                    break;
+                }
+                else if (unsafeEquals(existingResult.nameAddress, existingResult.nameLength, nameAddress, nameLength)) {
+                    existingResult.min = Math.min(existingResult.min, number);
+                    existingResult.max = Math.max(existingResult.max, number);
+                    existingResult.sum += number;
+                    existingResult.count++;
+                    break;
+                }
+                else {
+                    // Collision error, try next.
+                    hash = (hash + 1) & (results.length - 1);
+                }
+            }
+
+            // Skip new line.
+            scanPtr++;
+        }
+    }
+
+    // memory mapping + chunking
+    private static long[] getSegments(int numberOfChunks) throws IOException {
+        try (var fileChannel = FileChannel.open(Path.of(FILE), StandardOpenOption.READ)) {
+            long fileSize = fileChannel.size();
+            long segmentSize = (fileSize + numberOfChunks - 1) / numberOfChunks;
+            long[] chunks = new long[numberOfChunks + 1];
+            long mappedAddress = fileChannel.map(MapMode.READ_ONLY, 0, fileSize, Arena.global()).address();
+            chunks[0] = mappedAddress;
+            long endAddress = mappedAddress + fileSize;
+            for (int i = 1; i < numberOfChunks; ++i) {
+                long chunkAddress = mappedAddress + i * segmentSize;
+                // Align to first row start.
+                while (chunkAddress < endAddress && UNSAFE.getByte(chunkAddress++) != '\n') {
+                    // nop
+                }
+                chunks[i] = Math.min(chunkAddress, endAddress);
+            }
+            chunks[numberOfChunks] = endAddress;
+            return chunks;
+        }
+    }
+
+* Jan 6, 2024 1:01 PM GMT-3 - merykitty - Vector API, magic branchless number parsing - 00:07.620
+* good comments
+* pull ascii-table for the branchless number parsing
+
+
+TODO VectorOperators / line.compare(VectorOperators.EQ, ';')
+// This method fetches a segment of the file starting from offset and returns after
+// finishing processing that segment
+ByteVector line = ByteVector.fromMemorySegment(BYTE_SPECIES, data, offset, ByteOrder.nativeOrder());
+// Find the delimiter ';'
+long semicolons = ((VectorMask<Byte>)line.compare(VectorOperators.EQ, ';')).toLong();
+https://docs.oracle.com/en/java/javase/20/docs/api/jdk.incubator.vector/jdk/incubator/vector/ByteVector.html#compare(jdk.incubator.vector.VectorOperators.Comparison,byte)
+
+// The technique here is to align the key in both vectors so that we can do an
+// element-wise comparison and check if all characters match
+var nodeKey = ByteVector.fromArray(BYTE_SPECIES, node.data, BYTE_SPECIES.length() - localOffset);
+var eqMask = line.compare(VectorOperators.EQ, nodeKey).toLong();
+long validMask = (-1L >>> -semicolonPos) << localOffset;
+if ((eqMask & validMask) == validMask) {
+    aggr = node.aggr;
+    break;
+}
+
+    // Parse a number that may/may not contain a minus sign followed by a decimal with
+    // 1 - 2 digits to the left and 1 digits to the right of the separator to a
+    // fix-precision format. It returns the offset of the next line (presumably followed
+    // the final digit and a '\n')
+    private static long parseDataPoint(Aggregator aggr, MemorySegment data, long offset) {
+        long word = data.get(JAVA_LONG_LT, offset);
+        // The 4th binary digit of the ascii of a digit is 1 while
+        // that of the '.' is 0. This finds the decimal separator
+        // The value can be 12, 20, 28
+        int decimalSepPos = Long.numberOfTrailingZeros(~word & 0x10101000);
+        int shift = 28 - decimalSepPos;
+        // signed is -1 if negative, 0 otherwise
+        long signed = (~word << 59) >> 63;
+        long designMask = ~(signed & 0xFF);
+        // Align the number to a specific position and transform the ascii code
+        // to actual digit value in each byte
+        long digits = ((word & designMask) << shift) & 0x0F000F0F00L;
+
+        // Now digits is in the form 0xUU00TTHH00 (UU: units digit, TT: tens digit, HH: hundreds digit)
+        // 0xUU00TTHH00 * (100 * 0x1000000 + 10 * 0x10000 + 1) =
+        // 0x000000UU00TTHH00 +
+        // 0x00UU00TTHH000000 * 10 +
+        // 0xUU00TTHH00000000 * 100
+        // Now TT * 100 has 2 trailing zeroes and HH * 100 + TT * 10 + UU < 0x400
+        // This results in our value lies in the bit 32 to 41 of this product
+        // That was close :)
+        long absValue = ((digits * 0x640a0001) >>> 32) & 0x3FF;
+        long value = (absValue ^ signed) - signed;
+        aggr.min = Math.min(value, aggr.min);
+        aggr.max = Math.max(value, aggr.max);
+        aggr.sum += value;
+        aggr.count++;
+        return offset + (decimalSepPos >>> 3) + 3;
+    }
+
+Interesting way to create a HashMap, using a static function instead of the constructor HashMap(int initialCapacity)
+
+https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/HashMap.html#newHashMap(int)
+
+var res = HashMap.<String, Aggregator> newHashMap(processorCnt);
+API note in the JDK:
+
+https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/HashMap.java#L462
+
+    /**
+     * Constructs an empty {@code HashMap} with the specified initial
+     * capacity and the default load factor (0.75).
+     *
+     * @apiNote
+     * To create a {@code HashMap} with an initial capacity that accommodates
+     * an expected number of mappings, use {@link #newHashMap(int) newHashMap}.
+     *
+     * @param  initialCapacity the initial capacity.
+     * @throws IllegalArgumentException if the initial capacity is negative.
+     */
+    public HashMap(int initialCapacity) {
+        this(initialCapacity, DEFAULT_LOAD_FACTOR);
+    }
+
+
+    /**
+     * Creates a new, empty HashMap suitable for the expected number of mappings.
+     * The returned map uses the default load factor of 0.75, and its initial capacity is
+     * generally large enough so that the expected number of mappings can be added
+     * without resizing the map.
+     *
+     * @param numMappings the expected number of mappings
+     * @param <K>         the type of keys maintained by the new map
+     * @param <V>         the type of mapped values
+     * @return the newly created map
+     * @throws IllegalArgumentException if numMappings is negative
+     * @since 19
+     */
+    public static <K, V> HashMap<K, V> newHashMap(int numMappings) {
+
+* Jan 7, 2024 - royvanrijn - Adding Unsafe and merykitty’s branchless parser - 00:06.159
+https://github.com/gunnarmorling/1brc/pull/194
+
+* Jan 7, 2024 - thomaswue - search and compare > 1 byte - 00:06.532
+https://github.com/gunnarmorling/1brc/pull/213
+
+This is some tuning over the initial submission now searching for the delimiter and comparing names more than 1 byte at a time. Should be ~30% faster than initial version.
+
+* Jan 9, 2024 - mukel - Optimizing findDelimiter
+
+https://github.com/gunnarmorling/1brc/pull/263#discussion_r1446699670
+
+private static int findDelimiter(long word) {
+    long input = word ^ 0x3B3B3B3B3B3B3B3BL;
+    long tmp = (input - 0x0101010101010101L) & ~input & 0x8080808080808080L;
+    return Long.numberOfTrailingZeros(tmp) >>> 3;
+}
+TODO Understand how this code works.
+
+* Jan 11, 2024 - mtopolnik - focus on 10k (what was really asked for!)
+
+https://github.com/gunnarmorling/1brc/pull/246
+
+My primary focus was performance on the “new” dataset with 10,000 keys and names in the full range of 1-100 bytes. I find that the timing on that dataset degrades to 10.1 seconds.
+
+You can generate the dataset with create_measurements3.sh, and I encourage contestants to try it out and use as the optimization target. It’s unquestionably a kick to see oneself at the top of the leaderboard, but it’s more fun (and useful!) to design a solution that works well beyond the 416 station names of max length 26 chars.
+
+* Jan 14, 2024 - Cliff Click submission =D - 4.741
+
+https://github.com/cliffclick/1brc/blob/262270c12b904e110bc468e132e578a2e1842ac3/src/main/java/dev/morling/onebrc/CalculateAverage_cliffclick.java
+
+Adding Unsafe:
+
+https://github.com/gunnarmorling/1brc/pull/185/commits/5f8fb7ce09d3f74ab5beb68522008ac2687e8c32
+
+
+* Jan 15, 2024 - jerrinot - Instruction-Level Parallelism (ILP) - 3.409
+
+https://github.com/gunnarmorling/1brc/pull/424
+
+This initial submission is aiming to exploit instruction-level parallelism: Each thread pulls from multiple chunks in each iteration. This breaks nice sequential access, but a CPU gets independent streams so it can go bananas with out-of-order processing.
+
+There are optimization opportunities left on the table, this is to give me some feeling of how it may perform on the testing box.
+
+Credits:
+
+    @mtopolnik - for many conversations we have had in the last 2 weeks!
+    @merykitty - for the amazing branch-less parser
+    @royvanrijn - for the hashing-as-you-go idea
+            chunkStartOffsets[0] = inputBase;
+            chunkStartOffsets[chunkCount] = inputBase + length;
+
+            Processor[] processors = new Processor[THREAD_COUNT];
+            Thread[] threads = new Thread[THREAD_COUNT];
+
+            for (int i = 0; i < THREAD_COUNT; i++) {
+                long startA = chunkStartOffsets[i * chunkPerThread];
+                long endA = chunkStartOffsets[i * chunkPerThread + 1];
+                long startB = chunkStartOffsets[i * chunkPerThread + 1];
+                long endB = chunkStartOffsets[i * chunkPerThread + 2];
+                long startC = chunkStartOffsets[i * chunkPerThread + 2];
+                long endC = chunkStartOffsets[i * chunkPerThread + 3];
+                long startD = chunkStartOffsets[i * chunkPerThread + 3];
+                long endD = chunkStartOffsets[i * chunkPerThread + 4];
+
+                Processor processor = new Processor(startA, endA, startB, endB, startC, endC, startD, endD);
+                processors[i] = processor;
+                Thread thread = new Thread(processor);
+                threads[i] = thread;
+                thread.start();
+            }
+
+Jan 16, 2024 - plevart: Look Mom No Unsafe! - 5.336
+ffb09bf4bf0b41835b3340415be4f3c34565c126
+
+Final version - 4.676
+
+https://github.com/plevart/1brc/blob/7777e9ee4e2302fdab3671d2aae401f05e0394d5/src/main/java/dev/morling/onebrc/CalculateAverage_plevart.java
+
+Jan 31, 2024 - Shiplëv submission =D - No Unsafe! - 4.884
+Beautiful solution with great comments!!!
+
+https://github.com/shipilev/1brc/blob/c2bb7d2621a070c5e4f0c592aece0f55fa50bee7/src/main/java/dev/morling/onebrc/CalculateAverage_shipilev.java
+
+
+
+Jan 31, 2024 - Serkan ÖZAL - Fastest Solution running on the JVM!!! - 21.0.1-open - 1.880
+Amazing code using the Vector API.
+
+https://github.com/gunnarmorling/1brc/pull/679
+
+https://github.com/serkan-ozal/1brc/blob/c74cddbe8d6139af9833bb9c2546da44b8f7a065/src/main/java/dev/morling/onebrc/CalculateAverage_serkan_ozal.java
+
+First Use of Important Concepts
+MappedByteBuffer
+$ git log -S"MappedBy" --reverse
+commit 6b13d52b676d4ccfe7d766ac46f81abee8225816
+Author: Hampus Ram
+Date:   Tue Jan 2 14:04:29 2024 +0100
+
+    Implementation using memory mapped file
+Vector API
+$ git log -S"jdk.incubator.vector" --reverse
+commit 17218485709af71ebd7cb7c2c47f3abc262f5a2d
+Author: Aurelian Tutuianu
+Date:   Tue Jan 2 21:14:32 2024 +0200
+
+     - implementation by padreati
+AtomicReference
+git log -S"AtomicReference" --reverse
+commit 0ba5cf33d4a4ce290dbe4fa5e4e4c37b424c8675
+Author: Richard Startin <richardstartin@apache.org>
+Date:   Wed Jan 3 18:15:06 2024 +0000
+
+    richardstartin submission
+
++import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
++import java.util.concurrent.atomic.AtomicReferenceArray;
++import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+$ git log -S"AtomicReference;" --reverse
+commit cec579b506d448afd2365e0197ed5b98bd0d6a5e
+Author: Artsiom Korzun <akorzun@deltixlab.com>
+Date:   Fri Jan 5 12:15:54 2024 +0100
+
+    improved artsiomkorzun solution
+He uses it to merge the results!
+
+        AtomicInteger counter = new AtomicInteger();
+        AtomicReference<Aggregates> result = new AtomicReference<>();
+        int parallelism = Runtime.getRuntime().availableProcessors();
+        Aggregator[] aggregators = new Aggregator[parallelism];
+
+        for (int i = 0; i < aggregators.length; i++) {
+            aggregators[i] = new Aggregator(counter, result, fileAddress, fileSize, segmentCount);
+            aggregators[i].start();
+        }
+
+        // ...
+
+            while (!result.compareAndSet(null, aggregates)) {
+                Aggregates rights = result.getAndSet(null);
+
+                if (rights != null) {
+                    aggregates.merge(rights);
+                }
+            }
+That’s a great idea, because when joining on threads sequentially, the first thread you’re waiting might be the last one to finish …
+
+TODO: can’t that code get in an infinite loop?
+
+You can use AtomicReference when applying optimistic locks. You have a shared object and you want to change it from more than 1 thread.
+
+You can create a copy of the shared object Modify the shared object You need to check that the shared object is still the same as before - if yes, then update with the reference of the modified copy.
+
+As other thread might have modified it and/can modify between these 2 steps. You need to do it in an atomic operation. this is where AtomicReference can help
+
+HamoriZ answered Jun 12, 2015 at 12:30 https://stackoverflow.com/a/30803137/339561
+
+MemorySegment
+$ git log -S"MemorySegm" --reverse
+commit d73457872f0b9990ab6258d0a96d3edad3b24b1a
+Author: Dimitar Dimitrov
+Date:   Thu Jan 4 04:22:39 2024 +0900
+
+    ddimtirov - switched to the foreign memory access preview API for another 10% speedup
+Epsilon GC
+$ git log -S"Epsilon" --reverse
+commit d73457872f0b9990ab6258d0a96d3edad3b24b1a
+Author: Dimitar Dimitrov
+Date:   Thu Jan 4 04:22:39 2024 +0900
+Unsafe
+$ git log -S"Unsafe" --reverse
+commit a53aa2e6fdbcc74e0c6a9a308f0a8c3507b0e06a
+Author: Thomas Wuerthinger
+Date:   Sat Jan 6 10:55:07 2024 +0100
+Instruction-Level Parallelism (ILP)
+I didn’t look at all other solutions, so if there was a previous one, let me know =)
+
+commit dbdd89a84779761ca092e5aaeb6f6e92394a422d
+Author: Jaromir Hamala
+Date:   Mon Jan 15 18:55:22 2024 +0100
+
+    jerrinot's initial submission (#424)
+    
+    * initial version
+    
+    let's exploit that superscalar beauty!
+Conclusion
+There were a few changes that really changed the game.
+The others were minor improvements and mostly people combining code from other solutions.
+
+Here are the important changes:
+
+* Process lines in parallel (one line change =));
+* Memory map the file, split in chunks and process them in parallel;
+* Great hash table;
+* Create UTF-8 String for each city after the main loop;
+* SWAR;
+* Vector API;
+* Unsafe;
+* ILP.
+
+That’s it for the timeline. If I missed something, let me know here: https://twitter.com/tivrfoa/status/1754607677362106552
+
+In the next post I’ll explore the performance impact of using Unsafe.
+
+References
+https://github.com/gunnarmorling/1brc
+
+https://en.wikipedia.org/wiki/SWAR
+
+https://dl.acm.org/doi/pdf/10.1145/360933.360994 Multiple byte processing with full-word instructions - 1975
+
+http://aggregate.org/SWAR/Dis/dissertation.pdf GENERAL-PURPOSE SIMD WITHIN A REGISTER:PARALLEL PROCESSING ON CONSUMER MICROPROCESSORS - 2003
+
+https://richardstartin.github.io/posts/finding-bytes Finding Bytes in Arrays - 2019
+
+== Lösungen
+
+Sidelines - [Chashnikov] hat in einem Blog-Post einige der Lösungen und die Performance-Optimierungen der Teilnehmer zusammengefasst und diskutiert.
+
+Zuerst kann die Basis-Implementierung von Gunnar mittels Parallel-Streams auf die doppelte Geschwindigkeit beschleunigt werden.
+
+// todo parallel vor dem map?
+
+----
+Map<String, ResultRow> measurements = new TreeMap<>(Files.lines(Paths.get(FILE))
+	.map(l -> new Measurement(l.split(";")))
+	.parallel()
+	.collect(groupingByConcurrent(m -> m.station(), collector)));
+----
+
+Im nächsten Schritt wird vom Ansatz die Datei zeilenweise zu lesen Abstand genommen und stattdessen die Datei in einer Anzahl von Segmente geteilt und diese parallel verarbeitet.
+Die Stationen werden dort in einm Feld abgespeichert, in dem die Hashes der Stadtnamen auf einen Array-Index abgebildet werden, um die Messwerte zu gruppieren.
+Bei Kollissionen wir ein nächster freier Platz gesucht, dessen 
+////
