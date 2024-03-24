@@ -10,7 +10,7 @@ Dabei sollte für jede Stadt die minimale, maximale und durchschnittliche Temper
 Der Wettbewerb lief während des Monats Januar und es gab keine Einschränkungen, wie die Aufgabe gelöst werden sollte, nur das die Implementierung in Java (ohne externe Bibliotheken) erfolgen sollte und Ergebnis in einem bestimmten Format vorliegen musste.
 Für die JDK Versionen wurde keine Vorgabe gemacht, es konnte jede Version genutzt werden die mittels SDKMan zur Verfügung steht, also auch Early-Access-Versionen z.b. mit Valhalla/Value-Types.
 
-image::https://github.com/gunnarmorling/1brc/blob/main/1brc.png[]
+image::https://raw.githubusercontent.com/gunnarmorling/1brc/main/1brc.png[]
 
 Die Datei mit den Temperaturmessungen war 13 GB groß und enthielt 1 Milliarden Zeilen in folgendem Format, siehe auch Listing {counter:listing}:
 
@@ -280,7 +280,7 @@ idle-cycles-backend,idle-cycles-frontend,task-clock \
 -- java --enable-preview -cp src CalculateAverage
 ----
 
-Die Analyse erzeugt dann eine Ausgabe wie in Listing {counter:listing} zu sehen (hier für die Implementierung von Listing {listing-2}).
+Die Analyse erzeugt dann eine Ausgabe wie in Listing {counter:listing} zu sehen (hier für die Implementierung von Listing 3).
 Diese Ausgaben werden am besten pro Zeile betrachtet, also durch 1 Milliarde geteilt, um zu sehen, wie viele Instruktionen, Speicherzugriffe, Cache-Misses und Branch-Misses pro Zeile erfolgen, hier sind es zum Beispiel 2000 Instruktionen pro Zeile.
 
 .Listing {listing}: Ausgabe von `perf`
@@ -324,6 +324,8 @@ Der Split des Puffers and den korrekten Grenzen erfordert nach einer groben Divi
 
 Auch die Statistiken werden nicht mehr mittels der Collector API aggregiert, sondern manuell in Statistik-Objekten in einer Map (pro Thread) zusammengeführt, siehe Listing {counter:listing}.
 
+NOTE: Im `computeIfAbsent` wurde ursprünglich `new StationStats(name)` genutzt, was dazu geführt hätte dass eine neue Lambda-Instanz für jeden Schleifendurchlauf für die "enclosing variable". 
+
 .Listing {listing}: Aggregation der Statistiken eines Segments
 [source,java]
 ----
@@ -332,7 +334,7 @@ for (var cursor = 0L; cursor < chunk.byteSize();) {
     var newlinePos = findByte(semicolonPos + 1, '\n');
     var name = stringAt(cursor, semicolonPos);
     var temp = Double.parseDouble(stringAt(semicolonPos + 1, newlinePos));
-    var stats = statsMap.computeIfAbsent(name, k -> new StationStats(name));
+    var stats = statsMap.computeIfAbsent(name, k -> new StationStats(k));
     var intTemp = (int) Math.round(10 * temp);
     stats.sum += intTemp;
     stats.count++;
@@ -915,20 +917,35 @@ Es ist daher beeindrucken zu sehen, dass Serkan Özal mit einer reinen JVM-basie
 Gunnar hat die 50 schnellsten Lösungen auch noch einmal mit größeren Datensets (10.000 statt 413 Städte) und mehr Threads (64) getestet, wodurch sich die Reihenfolge der Bestleistungen noch einmal änderte.
 Besonders mit mehr Städten, haben sich die Optimierungen (ausser von Artsiom Korzun) nicht gleich gut geschlagen.
 
-== Kurzinterview mit Gunnar Morling
+=== Kurzinterview mit Gunnar Morling
 
 Gunnar hat sich bereit erklärt, ein paar Fragen zum Wettbewerb zu beantworten.
 Zuerst einmal vielen Dank an Gunnar für die tolle Idee, Organisation und die viele persönliche Zeit, die er in den Wettbewerb investiert hat.
 
-Was hat Dich beim 1BRC am meisten überrascht?
+Was hat Dich bei bei 1BRC am meisten überrascht?
+
+Zum einen, wie sehr die führenden Lösungen für das konkrete Key Set (413 Wetterstationen) optimiert wurden, z.B. durch die Wahl von Hash-Funktionen, die für diese Namen kollisionsfrei sind. 
+Zum anderen der phänomenale Support der Community bei der Durchführung der Challenge, z.B. durch die Bereitstellung der Evaluierungsumgebung und der Implementierung einer Testsuite zur Validierung der eingereichten Lösungen.
 
 Mit welcher minimalen Laufzeit hattest Du für Java gerechnet?
 
-Hättest Du Lust das nächstes Jahr zu wiederholen, diesmal mit Hilfe von der Community, könnte eine gute Ergänzug zu Advent of Code sein?
+Ich hatte nicht wirklich eine Vorstellung davon, wie viel Aufwand die Community in die Challenge stecken würde. 
+Eine Laufzeit von unter fünf Sekunden hätte ich zu Beginn  sicherlich nicht erwartet.
 
-Hast Du Feedback vom JVM Team bekommen, neben den exzellenten Beiträgen von Thomas Wuerthinger?
 
-== Andere Sprachen und Tools
+Hättest Du Lust das nächstes Jahr zu wiederholen, diesmal mit Hilfe der Community? Es könnte ja eine gute Ergänzung zu Advent of Code sein.
+
+Ja, das könnte ich mir schon vorstellen. Eine spannende Herausforderung wird es sein, eine neue Aufgabe zu finden, die ähnlich leicht zu beschreiben ist wie 1BRC, aber zugleich genug Potential für Optimierungen bietet, um die Teilnehmer über mehrere Wochen hinweg zu fordern. 
+Wenn sich ein Team zur Organisation zusammenfinden würde, wäre das fantastisch. 
+Der Evaluierungsprozess sollte so weit wie möglich automatisiert sein, z.B. indem die Einträge per GitHub Actions auf einer dedizierten Maschine getestet werden.
+
+Hast Du Feedback vom JVM Team bekommen, neben den exzellenten Beiträgen von Thomas Würthinger?
+
+Soweit ich weiss, haben viele Mitglieder des OpenJDK-Teams die Challenge mit großem Interesse verfolgt. 
+Ein spannender Punkt ist, dass die schnellsten Implementierungen der Challenge die Klasse `sun.misc.Unsafe` nutzen, welche ja in einer zukünftigen Java-Version entfernt werden soll. 
+Performance-sensitive Tasks wie 1BRC könnten genutzt werden, um sicherzustellen, dass es auch künftig entsprechende APIs geben wird, die equivalente Laufzeiten ermöglichen.
+
+=== Andere Sprachen und Tools
 
 Neben Java haben auch Teilnehme mit anderen Programmiersprachen und Tools versucht, die Aufgabe effizient zu lösen. 
 Von Rust, C (mit AVX) bis zu AWK und COBOL sowie Datenbanken wie Snowflake, ClickHouse, DuckDB und mehr.
