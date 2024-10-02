@@ -3,13 +3,13 @@
 Ich fühle mich schon wie bei der unendlichen Geschichte, seit nunmehr 10 Jahren arbeitet das JVM Team an "Value Types" (Valhalla) und genauso lange berichte ich schon darüber (HunXX, auch Hun0317). 
 
 Beim letzten JVM Language Summit (JVMLS) im August 2024, hat Brian Goetz ein vielversprechendes Update [Goetz24] gegeben, mit viel Humor aber noch mehr beeindruckendem Inhalt.
-Ich habe auch sein Video von 2014 [Goetz14] noch einmal angeschaut, nicht nur Valhalla, auch er ist deutlich reifer geworden.
+Sowohl Valhalla als auch Brian sind im Vergleich zu 2014 [Goetz14] deutlich reifer geworden.
 
-Dass die 10 Jahre in JavaLand wie im Flug vergangen sind, liegt nicht nur am beschleunigten Release-Zyklus mit vielen neuen Features und Verbesserungen, wie im Rückblick in der letzten Kolumne ausgeführt, sondern auch an der Beschleunigung im Ökosystem der Softwareentwicklung von cloudbasierten Architekturen, konsequenten CI/CD Ansätzen und schlussendlich dem Einzug von beeindruckenden Tools (wie CoPilot), die unsere Arbeitsweise deutlich verändern werden.
+Dass die 10 Jahre in der Java Welt wie im Flug vergangen sind, liegt nicht nur am beschleunigten Release-Zyklus mit vielen neuen Features und Verbesserungen, sondern auch an der Beschleunigung im Ökosystem der Softwareentwicklung von cloudbasierten Architekturen, konsequenten CI/CD Ansätzen und Entwicklungsumgebungen, die es Entwicklerinnen und Entwicklern auf vielfältige Art und Weise leichter machen, neue Sprachfeatures auch zu entdecken und umzusetzen..
 
 Valhalla hat in dieser Zeit unter verschiedenen Namen und sehr vielen Experimenten (6 Prototypen) für die verschiedenen Aspekte von Konzeption, Typsystem, Migration, Sprachdesign und Implementierung in der Sprache und JVM langsam Fortschritte gemacht.
 
-In den letzten 2 Jahren hat, sich aus zwei eigentlich tangentiellen Ideen ein Denkansatz ergeben, der viele der bisherigen Komplexitäten und Probleme in sich selbst auflösen lässt. Das ist zum einen die Sichtbarkeit von teilweise initialisierten Objekten und zum anderen die Vermeidung von Null-Werten.
+In den letzten 2 Jahren hat sich aus zwei eigentlich tangentiellen Ideen ein Denkansatz ergeben, der viele der bisherigen Komplexitäten und Probleme in sich selbst auflösen lässt. Da sind zum einen die Sichtbarkeit von teilweise initialisierten Objekten und zum anderen die Vermeidung von Null-Werten.
 
 Brian vergleicht die Phasen der Entwicklung mit dem Gartner Hype Zyklus, wo man sich am Ende fragt: "Das ist doch alles ganz einfach und sinnvoll, warum hat das jetzt so lange gedauert?"
 
@@ -33,9 +33,9 @@ Die Herausforderung, in Java speichereffizient zu Arbeiten gibt es seit den Anf�
 
 Leider ist das in Java bisher nicht der Fall, so dass selbst reine Daten wie Zahlen oder Wahrheitswerte als Objekte mit sehr viel "Wasserkopf" (16 Byte Objekt-Header plus Verschnitt für Speicherausrichtung, 32 oder 64-bit Zeiger) repräsentiert werden müssten.
 Das ist auch der Grund warum in der sonst so objektorientierten Sprache primitive Typen wie `byte, int, float, boolean` usw. als damals einzige Möglichkeit eingeführt werden mussten, um (numerische) Informationen kompakt abzulegen und effizient zu verarbeiten.
-Das hatte eine ganze Menge Sonderlocken zur Folge, von primitiven Arrays, Boxing, keine Generics für primitive Typen bis zu der unsäglichen Explosion von Interfaces für primitive Lambda-Functional Interfaces `DoubleToIntFunction` und primitive Streams wie `IntStream`.
+Das hatte eine ganze Menge Sonderfälle zur Folge, von primitiven Arrays, Boxing, keine Generics für primitive Typen bis zu der unsäglichen Explosion von Interfaces für primitive Lambda-Functional Interfaces `DoubleToIntFunction` und primitive Streams wie `IntStream`.
 
-Somit wurde mit zweierlei Maß gemessen, auf der einen Seite hübsch objektorientiert, und wartungsfreundlich mit Vererbung, Delegation, Interfaces, Konstruktoren usw. und auf der anderen Seite brutal effizient, mit primitiven `int`, `byte` oder `float` Arrays, `ByteBuffer` anderen low-level APIs, die die Rohdaten in einer effizienten Form für die Massendatenverarbeitung repräsentierten [Hun0520, Hun0324].
+Somit wurde mit zweierlei Maß gemessen, auf der einen Seite hübsch objektorientiert und wartungsfreundlich mit Vererbung, Delegation, Interfaces, Konstruktoren usw., auf der anderen Seite effizient, mit primitiven `int`, `byte` oder `float` Arrays, `ByteBuffer` anderen low-level APIs, die die Rohdaten in einer effizienten Form für die Massendatenverarbeitung repräsentierten [Hun0520, Hun0324].
 Zwischen den zwei Welten muss aufwendig konvertiert werden und stets die Abwägung getroffen werden, wofür jeder Teil der Anwendung optimiert werden soll.
 
 Mit einer effizienteren Repräsentation wird nicht nur Speicher für den Overhead gespart, durch den Verzicht auf Heap-Pointer die auf mehr oder weniger zufällige Speicherbereiche zeigen, können die Daten in einem fortlaufenden Bereich abgelegt werden, was für Lade-, Aktualsierungs- und Cacheverhalten sehr vorteilhaft ist.
@@ -102,12 +102,12 @@ Daher ist auch die Instanz/Wert- (`equals`) und Referenzgleichheit (`==`) nicht 
 Aber benötigen Werttypen all dies? Was wäre möglich wenn es diese Garantien nicht mehr gäbe.
 
 Dann hätte die JVM viel mehr Möglichkeiten die Objekte als identitätsfreie Container von Werten zu betrachten, zu kopieren, und auseinanderzunehmen.
-Damit sind Objektreferenzen nur noch virtuell, soweit es möglich ist, werden die Werte direkt gespeichert, bei Erzeugung, Methodenaufrufen oder Rückgaben direkt in Registern oder im Stack abgelegt ohne den Objektrahmen zu benötigen.
+Objektreferenzen wären nur noch virtuell und soweit es möglich ist, würden Werte direkt gespeichert, bei Erzeugung, Methodenaufrufen oder Rückgaben direkt in Registern oder im Stack abgelegt ohne den Objektrahmen zu benötigen.
 
 Bei Instanzen von Werttypen sind Instanz- und Referenzgleichheit dasselbe, da sie keine Identiät mehr haben und nur ihre Werte für den Vergleich relevant sind.
 // Instanzen von Werttypen sollen von von der JVM zur Laufzeit frei kopiert und repliziert werden, da nur ihre Werte relevant sind, es gibt keine Garantie für eine "Referenzgleichheit" mehr. Daher sind hier Instanz und Referenzgleichheit dasselbe.
 
-Das heisst aber nicht dass Werttypen nur dumme Container darstellen müssen, man kann sie trotzdem mit Methoden, Konstruktoren, Vererbung, Interfaces und mehr versehen, das sind ja Sprachkonstrukte die zur Laufzeit dann nur über die Werte gestülpt werden können.
+Das heisst aber nicht, dass Werttypen nur dumme Container darstellen müssen, man kann sie trotzdem mit Methoden, Konstruktoren, Vererbung, Interfaces und mehr versehen, das sind ja Sprachkonstrukte die zur Laufzeit dann nur über die Werte gestülpt werden können.
 
 Damit können auch existierende Typen im JDK ihre API behalten (z.b. Zahlen, Strings, Zeitwerte, Cursors, Netzwerkinformationen), und trotzdem effizient zu Werttypen migriert werden.
 
@@ -153,7 +153,7 @@ Im Vortrag beim JVMLS hat Brian Goetz von einem Durchbruch berichtet, der aus ei
 
 Ein Thema dass die Software Community seit längerem beschäftigt, sind Null-Pointer, von ihrem Erfinder Tony Hoare auch als "Billion Dollar Mistake" [Hoare] bezeichnet.
 
-Da Werttypen ja keine Identität und Referenzen haben, kann man auch kein Null-Pointer für sie speichern, sie sind ja durch den Inhalt ihrer Werte bestimmt, und nichts anderes.
+Da Werttypen ja keine Identität und Referenzen haben, kann man auch kein Null-Pointer für sie speichern, sie sind ja durch den Inhalt ihrer Werte bestimmt und der ist eben nicht `Null`.
 Wie verhält es sich nun aber wenn die Instanz noch nicht exisitiert? 
 Gibt es das überhaupt, und was müsste man dann anstatt von `Null` benutzen?
 
@@ -196,8 +196,8 @@ Damit haben die JVM (Verifier) und die Runtime dann die Möglichkeit die notwend
 
 === Initialisierung & Sichtbarkeit
 
-Die Initialisierung von Objekten ist in Java ja etwas schwierig.
-Während ein Objekt intialisiert wird, entspricht es nur teilweise den geforderten Invariaten. 
+Die Initialisierung von Objekten ist in Java kann je nach geforderten Invarianten schwierig sein.
+Während ein Objekt intialisiert wird, entspricht es nur teilweise den geforderten Invarianten. 
 Die Sichtbarkeit dieser partiell initiasierten Objekte wird von der Sprache und Runtime beschränkt, ist aber nicht wasserdicht.
 Um die Initialwerte für nicht-nullfähige Werttypen zuweisen, muss das erfolgen bevor der Superklassen-Konstruktur aufgerufen wird.
 
@@ -330,12 +330,12 @@ EAP JDK from
 Laut Brian Goetz ist die erreichte Performance-Verbesserung schon beeindruckend:
 
 * Matrix Multiplikation ist 6x schneller bei einer Reduktion der Speicherallokation um einen Faktor 100.
-* Iteration über ein Array ist im for-loop 3-mal schneller, mit Streams so gar 12-mal.
+* Iteration über ein Array ist im for-loop 3-mal schneller, mit Streams sogar 12-mal.
 * Besonders hat er die 8-mal schnellere Berechnung von Aggregaten mit einem unveränderlichen Akkumulator (also Neuerzeugung und Zuweisung) hervorgehoben.
 
 Da der Valhalla-Build von Java 23 [Build] jetzt verfügbar ist, können wir auch zumindest einen kleinen Performancetest machen.
 
-In Erinnerung an den Beginn meiner Programmierkarriere vor fast 40 Jahren (autsch) in Basic und Maschinencode, nehme ich eine Liste von geometrischen Figuren und lasse deren Flächeninhalte berechnen, wir lassen ihre Größe waschen bis wir 100 Millionen neuer Objekte abgeleitet haben, siehe Listing {counter:listing} 
+In Erinnerung an den Beginn meiner Programmierkarriere vor fast 40 Jahren (autsch) in Basic und Maschinencode, nehme ich eine Liste von geometrischen Figuren und lasse deren Flächeninhalte berechnen, wir lassen ihre Größe wachsen bis wir 100 Millionen neuer Objekte abgeleitet haben, siehe Listing {counter:listing} 
 
 Das ganze wird einmal mit Wert-Records und einmal mit regulären Objekt-Records implementiert, so dass wir den Geschwindigkeitsunterschied beim Erzeugen und Berechnen sehen können. 
 
