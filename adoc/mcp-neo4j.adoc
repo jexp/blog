@@ -385,13 +385,38 @@ How does this work under the hood?
 
 There is a comprehensive documentation of the Model Context Protocol (MCP) on the modelcontextprotocol.io site, but here is a brief overview.
 
-MCP follows a client-server architecture where:
+MCP follows a https://modelcontextprotocol.io/docs/concepts/architecture[client-server architecture^] where:
 
-- Hosts are LLM applications (like Claude Desktop or IDEs) that initiate connections
-- Clients maintain 1:1 connections with servers, inside the host application
-- Servers provide context, tools, and prompts to clients
+- *Hosts* are LLM applications (like Claude Desktop or IDEs) that initiate connections and use the client
+- *Clients* maintain 1:1 connections using the *transport protocol* with servers, from inside the host application
+- *Servers* provide *context*, *tools*, and *prompts* to clients
 
-The protocol layer handles message framing, request/response linking, and high-level communication patterns.
+The protocol layer handles message framing, request/response linking, notificaitons and high-level communication patterns.
+
+The MCP allows for different transport protocols, currently supported are HTTPS (with Server-Sent-Events (SSE) for server->client messages and HTTP POST for client->server) and STDIO for local servers where the server is started by the client and can communicate via stdin/stdout.
+
+All transport messages exchanges are based on a https://spec.modelcontextprotocol.io/specification/[specification^] using JSON-RPC 2.0. 
+So it encourages to implement the protocol in other languages or transport layers.
+
+The based message types are:
+
+* *Resources*: Context and data, for the user or the AI model to use
+* *Prompts*: Templated messages and workflows for users
+* *Tools*: Functions for the AI model to execute
+* *Sampling*: Server-initiated agentic behaviors and recursive LLM interactions
+
+With additional relevant aspects being configuration, progress tracking, cancellation, error reporting, logging.
+
+The protocol spec is also considering *security and trust*, which is an important aspect when allowing LLMs to access external data sources, because especially with write access to databases and filesystems and servers running locally and the potential for malicious code execution, security is a top priority.
+The foundation models are known to be vulnerable to adversarial attacks and hallucinations.
+Often LLM users are non-technical and might not be aware of the risks involved in allowing an AI model to access their data.
+
+That's why the protocol employs the following key principles:
+
+* *User Consent and Control*: Users need to approve server and data access and show always be able to discern which data was sent and received. Client implementations need to have clear UIs for these authorizations.
+* *Data Privacy* access control for user data, no data exfiltration to other services by hosts and servers.
+* *Tool Safety* to prevent malicious code execution, and to ensure that tools are safe to run and don't have side effects. Also tools need to be structured in a way that a user clearly understands what each tool is doing.
+* *LLM Sampling Controls* protocol limits server access to user prompts. Users can control sampling and what data and prompts are sent to the server.
 
 TODO finish + add architecture pictures
 
