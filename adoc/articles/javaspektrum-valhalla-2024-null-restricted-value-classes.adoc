@@ -123,7 +123,7 @@ Das heisst Feld-Werte können einmal geschrieben werden und sind dann in allen R
 Unveränderliche Werte wären viel besser, diese könnten beliebig kopiert werden, dann ergibt sich die Notwendigkeit nicht mehr allen "Instanzen" einen aktualisierten Wert bereitzustellen.
 
 Ein Problem für das Flachklopfen im Heap, Stack und Registern stellen auch veränderliche Instanzen die auf unveränderliche Instanzen zeigen und vice versa.
-Daher wäre es notwendig an diesen stellen durchgängig Unveränderlichkeit zu garantieren.
+Daher ist es notwendig an diesen stellen durchgängig Unveränderlichkeit zu garantieren.
 
 Desweiteren haben unveränderliche Werte den Vorteil, dass sie nicht von Race-Conditions beim Laden von Werten betroffen sind, die größer als die atomaren Garantien des Prozessors sind (Tearing) (heute meist 64-bit, früher nur 32-bit was zu Problemen bei `long` und `double` Werten führte).
 
@@ -201,8 +201,8 @@ Während ein Objekt intialisiert wird, entspricht es nur teilweise den gefordert
 Die Sichtbarkeit dieser partiell initiasierten Objekte wird von der Sprache und Runtime beschränkt, ist aber nicht wasserdicht.
 Um die Initialwerte für nicht-nullfähige Werttypen zuweisen, muss das erfolgen bevor der Superklassen-Konstruktur aufgerufen wird.
 
-Das Thema wird auch in [JEP482] relevant, der sich mit mehr Möglichkeiten von Konstruktoren (Code vor den Superklassen-Konstruktor-Aufrufen).
-Die Idee ist zum einen die Sichbarkeit dieser unvollständigen Objekte zu verhindern (mittels DA - "Definite Assignment" Analyse), bzw. vorzeitig zu befüllen.
+Das wird durch [JEP482] ermöglicht, der sich mit mehr Möglichkeiten von Konstruktoren (Code vor den Superklassen-Konstruktor-Aufrufen).
+Die Idee ist zum einen die Sichbarkeit dieser unvollständigen Objekte zu verhindern (mittels DA - "Definite Assignment" Analyse), bzw. vorzeitig zu befüllen, bevor der Konstruktor der Superklasse aufgerufen wird.
 Felder für die Null kein erlaubter Wert darstellt, dürfen nie mit Null sichtbar sein, selbst wenn die JVM sie temporär so initialisiert.
 
 Auch bei der Deserialisierung stellt das ein Problem da, da hier zuerst Objekte ohne initialisierte Felder erzeugt und diese dann nachträglich befüllt werden, so dass "illegale" Zustände möglich sind.

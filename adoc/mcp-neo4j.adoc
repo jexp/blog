@@ -1,0 +1,505 @@
+= Give LLMs The Power Of Knowlege Graphs With Anthropic's Model Context Protocol (MCP)
+
+Last week Anthropic published a new protocol for LLMs like Claud to communicate with external data sources.
+
+This protocol allows for instance local applications like Claude.ai, Zed, Replit and others to access file systems, APIs, and databases as part of the conversation with the user
+
+And not just the protocol, they open-sourced a number of connectors with an invitation to the community to add more.
+
+== An interactive example
+
+Here is a simple example of how you can use the Model Context Protocol (MCP) to query a Neo4j database from a LLM.
+
+Imagine you have a Neo4j database with an IMDB like  set of movies, actors, directors, genres and movie ratings.
+
+I configure the publicly accessible database in my Claude.ai desktop configuration and restart the client.
+
+[source,json]
+----
+{ "mcpServers": {
+    "movies-neo4j": {
+    "command": "uv",
+    "args": ["--directory","/Users/mh/d/llm/modelcontextprotocol-servers/src/neo4j","run", 
+    "mcp-server-neo4j", "--db-url", "neo4j+s://demo.neo4jlabs.com", "--user", "recommendations", 
+    "--password", "recommendations"]
+    } } }
+----
+
+Now I want to find out which movies were directed by Quentin Tarantino, so I'll just ask Claude about it.
+
+> Check my movie database for movies directed by Quentin Tarantino.
+
+====
+Claude will pop up a permission dialog that asks me if I want to allow the query to the Neo4j database (once or for the whole chat), and if I accept, it will run the query and return the results, in a nice format.
+====
+
+I'll help you query the database for movies directed by Quentin Tarantino.
+
+.View Result from read-neo4j-cypher from movies-neo4j (local)
+[%collapsible]
+----
+{
+  `query`: `
+MATCH (d:Person {name: 'Quentin Tarantino'})-[:DIRECTED]->(m:Movie)
+RETURN m.title, m.year
+ORDER BY m.year
+`
+}
+
+[{'m.title': 'Reservoir Dogs', 'm.year': 1992}, {'m.title': 'Pulp Fiction', 'm.year': 1994}, {'m.title': 'Four Rooms', 'm.year': 1995}, {'m.title': 'Jackie Brown', 'm.year': 1997}, {'m.title': 'Kill Bill: Vol. 1', 'm.year': 2003}, {'m.title': 'Kill Bill: Vol. 2', 'm.year': 2004}, {'m.title': 'Sin City', 'm.year': 2005}, {'m.title': 'Grindhouse', 'm.year': 2007}, {'m.title': 'Death Proof', 'm.year': 2007}, {'m.title': 'Inglourious Basterds', 'm.year': 2009}, {'m.title': 'Django Unchained', 'm.year': 2012}, {'m.title': 'The Hateful Eight', 'm.year': 2015}]
+----
+
+I found 12 movies directed by Quentin Tarantino in chronological order:
+
+1. Reservoir Dogs (1992)
+2. Pulp Fiction (1994)
+3. Four Rooms (1995)
+4. Jackie Brown (1997)
+5. Kill Bill: Vol. 1 (2003)
+6. Kill Bill: Vol. 2 (2004)
+7. Sin City (2005)
+...
+
+Would you like to know more details about any of these movies? I can query for additional information like cast members, ratings, or plot summaries if you're interested.
+
+> What are other popular movies that the actors of Kill Bill acted in?
+
+I'll query for other notable movies featuring actors from Kill Bill: Vol. 1 and Kill Bill: Vol. 2.
+
+.View Result from read-neo4j-cypher from movies-neo4j (local)
+[%collapsible]
+----
+{
+  `query`: `
+MATCH (kb:Movie)
+WHERE kb.title IN ['Kill Bill: Vol. 1', 'Kill Bill: Vol. 2']
+MATCH (actor:Person)-[:ACTED_IN]->(kb)
+MATCH (actor)-[:ACTED_IN]->(other:Movie)
+WHERE other.title <> 'Kill Bill: Vol. 1' 
+AND other.title <> 'Kill Bill: Vol. 2'
+RETURN DISTINCT actor.name, collect(DISTINCT other.title) as other_movies
+ORDER BY actor.name
+`
+}
+[{'actor.name': 'Daryl Hannah', 'other_movies': ['Clan of the Cave Bear, The', 'Tie That Binds, The', 'Addams Family Reunion', 'Summer Lovers', 'Legal Eagles', 'Reckless', 'Pope of Greenwich Village, The', 'Splash', 'Roxanne', 'Gingerbread Man, The', 'My Favorite Martian', 'Steel Magnolias', 'Walk to Remember, A']}, {'actor.name': 'Lucy Liu', 'other_movies': ['Afro Samurai: Resurrection', 'Lucky Number Slevin', 'Mulan II', 'Cypher', "Charlie's Angels: Full Throttle", 'Ballistic: Ecks vs. Sever', "Charlie's Angels", 'Shanghai Noon']}, {'actor.name': 'Michael Parks', 'other_movies': ['Tusk', 'Death Wish 5: The Face of Death']}, {'actor.name': 'Uma Thurman', 'other_movies': ['Misérables, Les', 'My Super Ex-Girlfriend', 'Even Cowgirls Get the Blues', 'Truth About Cats & Dogs, The', 'Batman & Robin', 'Gattaca', 'Avengers, The', 'Month by the Lake, A', 'Jennifer 8', 'Mad Dog and Glory', 'Johnny Be Good', 'Henry & June', 'Be Cool', 'Producers, The', 'Tape', 'Paycheck']}, {'actor.name': 'Vivica A. Fox', 'other_movies': ['Set It Off', 'Soul Food', 'Boat Trip', 'Juwanna Mann', 'Why Do Fools Fall In Love?']}]
+----
+
+Let me break down some notable movies for each main actor from Kill Bill:
+
+Uma Thurman's other major films include:
+- The Avengers
+- Gattaca
+- Batman & Robin
+- Les Misérables
+- The Producers
+- Be Cool
+
+Lucy Liu appeared in:
+- Charlie's Angels and Charlie's Angels: Full Throttle
+- Shanghai Noon
+- Lucky Number Slevin
+- Mulan II
+
+Daryl Hannah starred in:
+- Splash
+- Steel Magnolias
+- Roxanne
+- Legal Eagles
+- A Walk to Remember
+
+Vivica A. Fox's notable works include:
+- Set It Off
+- Soul Food
+- Why Do Fools Fall In Love?
+
+Michael Parks appeared in:
+- Tusk
+- Death Wish 5: The Face of Death
+
+Would you like to know more details about any of these actors or specific movies? I can query for additional information like release years, directors, or other cast members.
+
+> Tell me more about Tusk, is it worth watching? Use the database schema to figure out the ratings.
+
+Let me first check the database schema to see what kind of rating information is available.
+
+.View Result from get-neo4j-schema from movies-neo4j (local)
+[%collapsible]
+----
+{}
+[{'label': 'Movie', 'attributes': {'budget': 'INTEGER', 'movieId': 'STRING unique indexed', 'tmdbId': 'STRING unique indexed', 'plotEmbedding': 'LIST', 'imdbVotes': 'INTEGER', 'runtime': 'INTEGER', 'posterEmbedding': 'LIST', 'countries': 'LIST', 'imdbId': 'STRING indexed', 'url': 'STRING', 'plot': 'STRING indexed', 'released': 'STRING indexed', 'languages': 'LIST', 'imdbRating': 'FLOAT indexed', 'title': 'STRING indexed', 'poster': 'STRING', 'year': 'INTEGER indexed', 'revenue': 'INTEGER'}, 'relationships': {'IN_GENRE': 'Genre'}}, {'label': 'Genre', 'attributes': {'name': 'STRING unique indexed'}, 'relationships': {}}, {'label': 'User', 'attributes': {'name': 'STRING indexed', 'userId': 'STRING unique indexed'}, 'relationships': {'RATED': 'Movie'}}, {'label': 'Actor', 'attributes': {'born': 'DATE', 'bornIn': 'STRING', 'tmdbId': 'STRING', 'bio': 'STRING', 'died': 'DATE', 'name': 'STRING', 'poster': 'STRING', 'imdbId': 'STRING', 'url': 'STRING'}, 'relationships': {'ACTED_IN': 'Movie', 'DIRECTED': 'Movie'}}, {'label': 'Director', 'attributes': {'born': 'DATE', 'bornIn': 'STRING', 'tmdbId': 'STRING', 'bio': 'STRING', 'died': 'DATE', 'name': 'STRING', 'poster': 'STRING', 'imdbId': 'STRING', 'url': 'STRING'}, 'relationships': {'ACTED_IN': 'Movie', 'DIRECTED': 'Movie'}}, {'label': 'Person', 'attributes': {'born': 'DATE', 'bornIn': 'STRING', 'tmdbId': 'STRING unique indexed', 'bio': 'STRING indexed', 'died': 'DATE', 'name': 'STRING indexed', 'poster': 'STRING', 'imdbId': 'STRING', 'url': 'STRING'}, 'relationships': {'ACTED_IN': 'Movie', 'DIRECTED': 'Movie'}}]
+----
+
+I see we can get the IMDb rating, plot, genres, and other details. Let me query for comprehensive information about Tusk.
+
+.View Result from read-neo4j-cypher from movies-neo4j (local)
+----
+{
+  `query`: `
+MATCH (m:Movie {title: 'Tusk'})
+MATCH (m)-[:IN_GENRE]->(g:Genre)
+MATCH (d:Person)-[:DIRECTED]->(m)
+MATCH (a:Person)-[:ACTED_IN]->(m)
+RETURN m.title, m.year, m.imdbRating, m.plot, collect(DISTINCT g.name) as genres, 
+       collect(DISTINCT d.name) as directors, collect(DISTINCT a.name) as actors
+`
+}
+[{'m.title': 'Tusk', 'm.year': 2014, 'm.imdbRating': 5.4, 'm.plot': 'When podcaster Wallace Bryton goes missing in the backwoods of Manitoba while interviewing a mysterious seafarer named Howard Howe, his best friend Teddy and girlfriend Allison team with an ex-cop to look for him.', 'genres': ['Comedy', 'Drama', 'Horror'], 'directors': ['Kevin Smith'], 'actors': ['Michael Parks', 'Haley Joel Osment', 'Genesis Rodriguez', 'Justin Long']}]
+----
+
+Based on the database information, here's what you should know about Tusk:
+
+The movie was released in 2014 and was directed by Kevin Smith (known for Clerks, Mallrats, and Chasing Amy). It stars Justin Long, Michael Parks, Haley Joel Osment, and Genesis Rodriguez. It's a unique blend of comedy, drama, and horror genres.
+
+The plot follows a podcaster named Wallace Bryton who goes missing in Manitoba while interviewing a mysterious seafarer named Howard Howe, leading his friend and girlfriend to search for him with the help of an ex-cop.
+
+As for whether it's worth watching, that's subjective, but here are the facts to help you decide:
+- It has an IMDb rating of 5.4/10, which is relatively modest
+- It's an unusual genre combination (horror-comedy-drama)
+- It features strong actors, particularly Michael Parks, who was also in Kill Bill
+- It's directed by Kevin Smith, who is known for his distinctive storytelling style
+
+If you enjoy unusual, offbeat films that blend genres, particularly horror-comedy, you might find it interesting. However, the rating suggests it's a polarizing film that might not appeal to everyone. It's worth noting that cult films sometimes have lower IMDb ratings while still being interesting to specific audiences.
+
+Would you like me to look up more information about any specific aspect of the movie, such as more details about Kevin Smith's other films for comparison, or the other actors' performances?
+
+> Hmm, ok, give me the best movie of the list that we got from the Kill Bill actors with some detail.
+
+Let me query the movies we found earlier and sort them by IMDb rating to find the highest rated one.
+
+[%collapsible]
+----
+{
+  `query`: `
+MATCH (a:Person)-[:ACTED_IN]->(kb:Movie)
+WHERE kb.title IN ['Kill Bill: Vol. 1', 'Kill Bill: Vol. 2']
+MATCH (a)-[:ACTED_IN]->(m:Movie)
+WHERE m.title <> 'Kill Bill: Vol. 1' AND m.title <> 'Kill Bill: Vol. 2'
+MATCH (m)-[:IN_GENRE]->(g:Genre)
+MATCH (d:Person)-[:DIRECTED]->(m)
+RETURN DISTINCT m.title, m.year, m.imdbRating, m.plot, 
+       collect(DISTINCT g.name) as genres,
+       collect(DISTINCT d.name) as directors,
+       collect(DISTINCT a.name) as actors
+ORDER BY m.imdbRating DESC
+LIMIT 1
+`
+}
+[{'m.title': 'Gattaca', 'm.year': 1997, 'm.imdbRating': 7.8, 'm.plot': 'A genetically inferior man assumes the identity of a superior one in order to pursue his lifelong dream of space travel.', 'genres': ['Thriller', 'Sci-Fi', 'Drama'], 'directors': ['Andrew Niccol'], 'actors': ['Uma Thurman']}]
+----
+
+From the list of movies we got earlier, Gattaca (1997) stands out as the highest-rated film with an IMDb rating of 7.8/10. This sci-fi thriller stars Uma Thurman and was directed by Andrew Niccol.
+
+Let me get some additional details about the movie to provide more context:
+
+Gattaca is a thought-provoking science fiction film that runs for 106 minutes and features a strong cast including Ethan Hawke, Uma Thurman, and Xander Berkeley. The story takes place in a future society where genetic engineering has created a new class system. It follows a man (played by Ethan Hawke) who, despite being born with genetic disadvantages, assumes another person's identity to pursue his dream of becoming an astronaut.
+
+The film is particularly notable for:
+- Its unique take on genetic discrimination and determination vs free will
+- Strong performances from the lead cast
+- Beautiful retro-futuristic visual style
+- Thoughtful exploration of ethical issues surrounding genetic engineering
+- Being a smart sci-fi film that focuses on human drama rather than special effects
+
+The movie combines elements of thriller, science fiction, and drama, and is often praised for its intelligent screenplay and atmospheric direction. It's considered one of the more sophisticated science fiction films of the 1990s and has gained something of a cult following since its release.
+
+Would you like me to look up any specific aspect of Gattaca in more detail, such as more about director Andrew Niccol's other works or reviews from when it was released?
+____
+
+> What is the other average, min, max user rating for Gattaca?
+
+____
+Let me query the user ratings for Gattaca:
+
+[%collapsible]
+----
+{
+  `query`: `
+MATCH (m:Movie {title: 'Gattaca'})
+MATCH (u:User)-[r:RATED]->(m)
+RETURN 
+  m.title,
+  count(r) as number_of_ratings,
+  round(avg(r.rating)*10)/10 as avg_rating,
+  min(r.rating) as min_rating,
+  max(r.rating) as max_rating
+`
+}
+[{'m.title': 'Gattaca', 'number_of_ratings': 84, 'avg_rating': 3.7, 'min_rating': 1.0, 'max_rating': 5.0}]
+----
+
+For Gattaca, based on 84 user ratings in the database:
+- Average rating: 3.7 out of 5
+- Minimum rating: 1.0 out of 5
+- Maximum rating: 5.0 out of 5
+
+Let me also check how this compares to its IMDb rating for context:
+
+On IMDb, Gattaca has:
+- Rating: 7.8 out of 10 (equivalent to 3.9 out of 5)
+- Number of votes: 212,497
+
+The average user rating in our database (3.7/5) is quite close to the IMDb rating when normalized (3.9/5), suggesting a consistent appreciation of the film across different rating systems.
+
+
+> Ok I watched Gattaca and loved it, what other movies are similar to it? Can you create a user for me with an ID mesirii and store my rating of 8 out of 10 (normalize it to fit the other ratings for the movie)?
+
+====
+No we're up for write statements, and we get another permission check.
+Here is the first time that Claude makes a small syntax mistake it it's Cypher statement, and immediately fixes it. Sadly my database is read only, so it cannot actually write to it. But it offers me other movies that I can watch next.
+====
+
+I'll help you add your rating and then find similar movies to Gattaca. First, let's create a user record and add your rating.
+
+.View Result from write-neo4j-cypher from movies-neo4j (local)
+[%collapsible]
+----
+{
+  `query`: `
+MERGE (u:User {userId: 'user123'})
+MATCH (m:Movie {title: 'Gattaca'})
+MERGE (u)-[:RATED {rating: 8.0}]->(m)
+RETURN u.userId, m.title
+`
+}
+Error: {code: Neo.ClientError.Statement.SyntaxError} {message: WITH is required between MERGE and MATCH (line 3, column 1 (offset: 36))
+"MATCH (m:Movie {title: 'Gattaca'})"
+ ^}
+----
+
+I apologize for the syntax error. Let me correct that:
+
+[%collapsible]
+----
+{
+  `query`: `
+MERGE (u:User {userId: 'user123'})
+WITH u
+MATCH (m:Movie {title: 'Gattaca'})
+MERGE (u)-[:RATED {rating: 8.0}]->(m)
+RETURN u.userId, m.title
+`
+}
+Error: {code: Neo.ClientError.Security.Forbidden} {message: Create node with labels 'User' on database 'recommendations' is not allowed for user 'recommendations' with roles [PUBLIC, recommendations].}
+----
+
+I apologize for the error - it seems I don't have permission to create new user records. Let me focus instead on finding similar movies to Gattaca. I'll search for movies that share similar genres, themes, and ratings:
+
+.View Result from read-neo4j-cypher from movies-neo4j (local)
+[%collapsible]
+----
+{
+  `query`: `
+MATCH (m:Movie {title: 'Gattaca'})
+MATCH (m)-[:IN_GENRE]->(g:Genre)
+WITH collect(g.name) as gattacaGenres
+MATCH (other:Movie)-[:IN_GENRE]->(g:Genre)
+WHERE other.title <> 'Gattaca'
+AND other.imdbRating >= 7.0
+WITH other, gattacaGenres, collect(g.name) as otherGenres,
+     size([x in gattacaGenres WHERE x in collect(g.name)]) as commonGenres
+WHERE commonGenres >= 2
+RETURN other.title, other.year, other.imdbRating, other.plot, otherGenres
+ORDER BY commonGenres DESC, other.imdbRating DESC
+LIMIT 5
+`
+}
+Error: {code: Neo.ClientError.Statement.SyntaxError} {message: Invalid use of aggregating function collect(...) in this context (line 9, column 42 (offset: 309))
+"     size([x in gattacaGenres WHERE x in collect(g.name)]) as commonGenres"
+                                          ^}
+----
+
+[%collapsible]
+----
+{
+  `query`: `
+MATCH (m:Movie {title: 'Gattaca'})-[:IN_GENRE]->(g:Genre)
+MATCH (other:Movie)-[:IN_GENRE]->(g)
+WHERE other.title <> 'Gattaca'
+AND other.imdbRating >= 7.0
+WITH other, count(DISTINCT g) as commonGenres
+WHERE commonGenres >= 2
+MATCH (other)-[:IN_GENRE]->(og:Genre)
+RETURN other.title, other.year, other.imdbRating, other.plot, 
+       collect(DISTINCT og.name) as genres
+ORDER BY commonGenres DESC, other.imdbRating DESC
+LIMIT 5
+`
+}
+Error: {code: Neo.ClientError.Statement.SyntaxError} {message: In a WITH/RETURN with DISTINCT or an aggregation, it is not possible to access variables declared before the WITH/RETURN: commonGenres (line 11, column 10 (offset: 378))
+"ORDER BY commonGenres DESC, other.imdbRating DESC"
+          ^}
+----
+
+I apologize for the continued query issues. Let me simplify the query further to get similar sci-fi dramas with good ratings:
+
+.View Result from read-neo4j-cypher from movies-neo4j (local)
+[%collapsible]
+----
+{
+  `query`: `
+MATCH (m:Movie)-[:IN_GENRE]->(g:Genre)
+WHERE g.name IN ['Sci-Fi', 'Drama']
+AND m.title <> 'Gattaca'
+AND m.imdbRating >= 7.0
+WITH m, collect(DISTINCT g.name) as genres
+WHERE size(genres) >= 2
+RETURN m.title, m.year, m.imdbRating, m.plot, genres
+ORDER BY m.imdbRating DESC
+LIMIT 5
+`
+}
+[{'m.title': 'Inception', 'm.year': 2010, 'm.imdbRating': 8.8, 'm.plot': 'A thief, who steals corporate secrets through use of dream-sharing technology, is given the inverse task of planting an idea into the mind of a CEO.', 'genres': ['Drama', 'Sci-Fi']}, {'m.title': 'Black Mirror', 'm.year': None, 'm.imdbRating': 8.8, 'm.plot': 'A television anthology series that shows the dark side of life and technology.', 'genres': ['Drama', 'Sci-Fi']}, {'m.title': "Dr. Horrible's Sing-Along Blog", 'm.year': 2008, 'm.imdbRating': 8.7, 'm.plot': 'An aspiring supervillain must balance his career and his pursuit of a beautiful do-gooder.', 'genres': ['Drama', 'Sci-Fi']}, {'m.title': 'Battlestar Galactica', 'm.year': 2003, 'm.imdbRating': 8.7, 'm.plot': 'A re-imagining of the original series in which a rag-tag fugitive fleet of the last remnants of mankind flees pursuing robots while simultaneously searching for their true home, Earth.', 'genres': ['Drama', 'Sci-Fi']}, {'m.title': 'Prestige, The', 'm.year': 2006, 'm.imdbRating': 8.5, 'm.plot': 'Two stage magicians engage in competitive one-upmanship in an attempt to create the ultimate stage illusion.', 'genres': ['Sci-Fi', 'Drama']}]
+----
+
+Based on your enjoyment of Gattaca, here are some highly-rated movies that combine sci-fi and drama elements:
+
+1. Inception (2010) - IMDb Rating: 8.8
+   - A mind-bending sci-fi thriller about dream infiltration
+   - Like Gattaca, it explores themes of human potential and reality vs. appearance
+   - Combines thoughtful drama with high-concept science fiction
+
+2. The Prestige (2006) - IMDb Rating: 8.5
+   - While primarily known as a period drama about rival magicians, it has significant sci-fi elements
+   - Similar to Gattaca in its exploration of human ambition and the costs of pursuing perfection
+   - Directed by Christopher Nolan, who also directed Inception
+
+Note: The results also included TV shows (Black Mirror, Battlestar Galactica, Dr. Horrible's Sing-Along Blog) which, while excellent, are different formats from what you're looking for.
+
+Let me get some additional details about Inception since it's the highest-rated film:
+
+
+Inception would be my top recommendation. It's directed by Christopher Nolan and stars Leonardo DiCaprio, Joseph Gordon-Levitt, Tom Hardy, and Ellen Page. At 148 minutes, it's a substantial film that, like Gattaca, takes its sci-fi premise seriously and uses it to explore deeper themes about human nature and society.
+
+Would you like me to:
+1. Look up more details about any of these movies?
+2. Search for other similar movies using different criteria?
+3. Look specifically for more cerebral sci-fi films like Gattaca?
+
+
+That's my first experience with the Model Context Protocol (MCP) and the Neo4j connector. Pretty cool, huh?
+It was a great experience and I can see how this can be used to enhance the conversational experience with LLMs like Claude.
+
+== Model Context Protocol (MCP)
+
+How does this work under the hood?
+
+There is a comprehensive documentation of the Model Context Protocol (MCP) on the modelcontextprotocol.io site, but here is a brief overview.
+
+MCP follows a client-server architecture where:
+
+- Hosts are LLM applications (like Claude Desktop or IDEs) that initiate connections
+- Clients maintain 1:1 connections with servers, inside the host application
+- Servers provide context, tools, and prompts to clients
+
+The protocol layer handles message framing, request/response linking, and high-level communication patterns.
+
+TODO finish + add architecture pictures
+
+== Neo4j MCP Server Implementation
+
+When we implemented the Neo4j MCP server, we had to implement three components.
+
+1. Connection to the Neo4j database and executing Cypher queries
+2. Registering and listing the available tools
+3. Handling the tool execution requests
+
+=== Register available tools for interacting with the database, those were
+
+- get-neo4j-schema
+- read-neo4j-cypher
+- write-neo4j-cypher
+
+Each of them has a description and possible parameters (in our case just a mandatory "query" parameter for the cypher tools).
+We can imagine a number of additional generic tools for a graph database like getting the aggregated neighborhood of a node, finding shortest paths, or running graph algorithms.
+
+Here is the example of the "write-neo4j-cypher" tool:
+
+[source,python]
+----
+    @server.list_tools()
+    async def handle_list_tools() -> list[types.Tool]:
+        """List available tools"""
+        return [
+            types.Tool(
+                name="write-neo4j-cypher",
+                description="Execute a write Cypher query on the neo4j database",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Cypher write query to execute"},
+                    },
+                    "required": ["query"],
+                },
+            ),
+#            ...
+        ]
+----
+
+=== Execute the registered tool
+
+When a user asks Claude to query the database, Claude asks the user for permssion, starts the server if it's not already running as a local tool, sends a request to the MCP server with the tool name and parameters via the transport protocol.
+
+In our case we wrote a small `neo4jDatabase` class that holds the Neo4j Python driver to connect to the database, execute the statements and render the results as JSON text block.
+
+[source,python]
+----
+def _execute_query(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Execute a Cypher query and return results as a list of dictionaries"""
+    logger.debug(f"Executing query: {query}")
+    try:
+        result = self.driver.execute_query(query, params)
+        if is_write_query(query):
+            counters = vars(result.summary.counters)
+            logger.debug(f"Write query affected {counters}")
+            return [counters]
+        else:
+            results = [dict(r) for r in result.records]
+            logger.debug(f"Read query returned {len(results)} rows")
+            return results
+    except Exception as e:
+        logger.error(f"Database error executing query: {e}\n{query}")
+        raise
+----
+
+In the tool implementations, we just use this class to execute the statements.
+There is a small check that we only allow read statements in the read tool and vice versa (the write tool only returns update statistics).
+
+[source,python]
+----
+    @server.call_tool()
+    async def handle_call_tool(
+        name: str, arguments: dict[str, Any] | None
+    ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+        """Handle tool execution requests"""
+        try:
+            if name == "get-neo4j-schema":
+                results = db._execute_query(
+                    """
+CALL apoc.meta.data() yield label, property, type, other, unique, index, elementType
+WHERE elementType = 'node'
+RETURN label, 
+    collect(case when type <> 'RELATIONSHIP' then [property, type] end) as attributes,
+    collect(case when type = 'RELATIONSHIP' then [property, head(other)] end) as relationships
+                    """
+                )
+                return [types.TextContent(type="text", text=str(results))]
+----
+
+== Conversational Memory as a Graph 
+
+When lookign through the integrations provided by Anthropic, I was curious to see a "memory" one.
+In the past we've already discussed a number of times how graphs are a great fit to store conversational memory and the interrelated facts that arise during a discussion.
+Here the Anthropic devs used an simple knowledge graph of nodes and relationships to allow users and Claude to store information about the conversation for later use.
+Think about it like a Personal Knowledge Management (PKM) tool, integrated with your AI assistant interactions.
+
+Of course this was a great fit for Neo4j too, so we took the existing implementation and allowed it to store its data in a Neo4j database, which was then also able to not just retrieve individual facts but also larger contexts, find paths between datapoints and run queries.
+
+If you're interested, here is the code: 
+
+And here is how you can make use of the graph based memory for your LLM.
+
+Imagine we're having a conversation about a book we're reading, and during that we want to keep track of the story.
+So we can use our new `memory-neo4j` service to add information about the characters (or rather let Claude extract and add it) and also add their relationships.
+
+TODO conversation:
+
