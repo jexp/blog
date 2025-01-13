@@ -165,6 +165,67 @@ Ein Anwendungsfall wäre, für Java Programme und besonders Bibliotheken Test-Se
 
 Sein initiales Ziel war die Python BPF Compiler Collection (BCC) APIs in Java abzubilden, interessanterweise mittels Panama für das Foreign Function Interface (Java 21).
 
+In der aktuellen Entwicklung ist BCC durch libbpf ersetzt worden.
+
+Das Projekt kann mittels git gecloned werden und dann auf einer Maschine mit Linux 6.12, mit aktiviertem eBPF und BTF gebaut werden, nachdem man die notwendigen Bibliotheken und Tools mittels `install.sh` installiert hat (siehe Listing {counter:Listing}).
+
+.Listing {listing}
+[source,shell]
+----
+git clone https://github.com/parttimenerd/hello-ebpf.git
+cd hello-ebpf
+./bin/install.sh
+./mvnw verify
+./run.sh HelloWorld
+# In separatem terminal
+touch test.txt
+----
+
+Beispiele sind im bpf-samples Verzeichnis zu finden.
+In Listing {counter:listing} ist das HelloWorld.java zu sehen, dass sich an den `openat2` Systemaufruf für das Öffnen von Dateien hängt und bei jedem Trigger ein "Hello World!" ausgibt.
+
+.Listing {listing}
+[source,java]
+----
+@BPF(license = "GPL")
+public abstract class HelloWorld 
+    extends BPFProgram 
+    implements SystemCallHooks {
+
+    // Callback für den System Call OpenAt2 zum Öffnen von Dateien
+    @Override
+    public void enterOpenat2(int dfd, String filename, 
+                             Ptr<open_how> how) {
+        bpf_trace_printk("Hello, World %s!", filename);
+    }
+
+    public static void main(String[] args) {
+        try (HelloWorld program = BPFProgram.load(HelloWorld.class)) {
+            // Programm Installieren and Hooks
+            program.autoAttachPrograms();
+            // Ausgabe 
+            program.tracePrintLoop(f -> String.format("%d: %s: %s", (int)f.ts(), f.task(), f.msg()));
+        }
+    }
+}
+----
+
+Ich habe das Beispiel modifiziert lasse es zusätzlich noch den Dateinamen ausgeben, wie in Listing {counter:listing} zu sehen.
+
+.Listing {listing} Ausgaben von HelloWorld.java
+----
+16789: vitals sampler: Hello, World /proc/self/stat!
+16792: <...>: Hello, World /etc/ld.so.cache!
+16792: <...>: Hello, World /lib/x86_64-linux-gnu/libc.so.6!
+16792: touch: Hello, World !
+16792: touch: Hello, World /usr/share/locale/locale.alias!
+16792: touch: Hello, World /usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache!
+16792: touch: Hello, World /usr/lib/locale/C.UTF-8/LC_MEASUREMENT!
+16792: touch: Hello, World test.txt!
+----
+
+TODO continue here.
+
 Bild aus Vortrag / Blog Serie
 
 * Teile des Java Code laufen im User-Space 
@@ -290,6 +351,8 @@ I decided to write bindings using the new Foreign Function API (Project Panama, 
 The main goal is to provide a library (and documentation) for Java developers to explore eBPF and write their own eBPF programs without leaving their favorite language and runtime.
 
 The initial goal is to be as close to the BCC Python API as possible to port the book’s examples to Java easily. You can find the Java versions of the examples in the src/main/me/bechberger/samples and the API in the src/main/me/bechberger/bcc directory in the GitHub repository.
+
+he API is purposefully close to the Python API and only deviates where absolutely necessary, adding a few helper methods to improve it slightly.
 ////
 
 // https://github.com/parttimenerd/hello-ebpf
