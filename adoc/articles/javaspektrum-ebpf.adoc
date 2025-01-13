@@ -1,0 +1,336 @@
+== Unterwegs im Kernel mit eBPF
+
+In dieser Kolumne steigen wir etwas tiefer ab in den Linux Kernel.
+Normalerweise ist dieser ja Gerätetreibern, Speicher-, Prozess- und Thread-Management vorbehalten und Nutzercode hat dort aus Sicherheitsgründen nichts zu suchen.
+
+image::https://upload.wikimedia.org/wikipedia/commons/b/b0/EBPF_logo.png[]
+
+Auf der anderen Seite ist der Kernel die richtige Stelle um systemnahes Monitoring und Performance-Messungen vorzunehmen.
+Dazu gibt es seit langem (1992) ein System namens BPF (Berkeley Package Filter) das zur deklarativen Filterung und Analyse von Netzwerkpaketen (in der OSI Schicht 2) genutzt werden konnte, zum Beispiel von tcpdump und wireshark.
+
+Sogenannte BPF "Probes" (Sonden) wurden als Filterregeln geladen und mit ihnen Netzwerkpakete in einer simplen BPF-VM im Kernel ausgewertet.
+
+Aber es war in seinen Fähigkeiten ziemlich beschränkt, so dass 2014 (Kernel 3.18) damit begonnen wurde, eine erweiterte Variante zu entwickeln "extended" BPF [eBPF], die nicht nur weitere APIs und Funktionen für Messungen sondern auch eine Programmiersprache enthielt, die im Kernel ausgeführt werden kann.
+
+Auch die Arten von Ereignissen wurde deutlich erweitert von Netzwerkpaketen zu Speicherallokationen, Pagefaults, Dateizugriffe, Systemaufrufen, Stromversorgung und vieles mehr.
+Die eBPF Programme laufen an der Schnittstelle zwischen Kernel und der Hardware, so dass Entscheidungen sehr früh in der Verarbeitung getroffen werden können, oder sogar auf den Geräteprozessoren (wie Netzwerkkarten mit XDF).
+Ein Artikel beschrieb es als: "eBPF ist für Linux was CRISPR für Genetik darstellt".
+
+Die Programme im User-Space können dann mittels Tracepoints, Interruptes und geteilten Datenstrukturen mit den eBPF Programmen kommunizieren.
+
+// hook points
+// links back to programs in user-space
+// xdf on interface card
+
+image::https://www.syseleven.de/wp-content/uploads/2023/05/syseleven-website-blog-ebpf-verification-ebpf.io_.png[Quelle: https://ebpf.io/what-is-ebpf/]
+
+Das ist ein Punkt, der normalerweise unter Sicherheitsaspekten undenkbar ist - Nutzercode im Betriebssystemkern auszuführen. 
+Das würde zu viele Türen öffnen, sowohl für Missbrauch als auch Fehlverhalten das zur Instabilität für das ganze System führen würde.
+
+Deshalb gibt es doch extra die Trennung zwischen Kernel- und User-Space, damit das nicht möglich ist, und Änderungen am Kernel nur durch geladene Kernel-Erweiterungen oder Code-Änderungen möglich sind, und natürlich der dafür notwendigen Neu-Übersetzung und Neustarts.
+
+// at runtime
+// better management lifecycle
+eBPF nutzt hier Ansätze wie Java, wir sehen viele Gemeinsamkeiten, auch aus ähnlichen Anforderungen heraus.
+Modernes eBPF nutzt sogar eine Technology mit demselben Slogan "CO-RE: Compile Once Run Everywhere".
+
+Programme werden als ein interpretierbarer bzw. compilierbarer Bytecode bereitgestellt.
+Für diesen wird zuerst durch einen Verifikationsprozess (Verifier) sicher gestellt, dass der Code valide und sicher ist (daher ist die Sprache auch nicht Turing-complete).
+
+In der eBPF Welt wir das zwar eher mit JavaScript verglichen: "What Javascript is to the Web, eBPF is to the OS", aber die Konzepte sind diesselben.
+
+Er prüft unter anderen:
+
+* dass der Code nicht zu viele Instruktuionen enthält, 
+* terminiert, 
+* nicht rekursiv ist
+* keine unerlaubten Systemaufrufe oder Speicherzugriffe vornimmt 
+* nicht zu lange läuft (effiziente Verarbeitung nötig)
+
+Nach erfolgreicher Überprüfung wird der Bytecode an einen der vielen  Schnittstellen ((1700+ hooks) im Kernel gebunden.
+Dort wird er entweder interpretiert oder mit einem Just-In-Time Compiler in optimierten Maschinencode übersetzt und sehr effizient in einer virtuellen Maschine in einer Sandbox ausgeführt.
+
+// celium (go) k8s
+// kprobes, uprobes (user space)
+// helpers functions, maps store and share, 
+// kfuncs - CO-RE (supercede helpers) 
+// kernel tracepoints
+// libbpf
+// future: dynamic  - memory allcoation, greater access to kernel internals, supply chain
+
+== Anwendungsfälle
+
+Es gibt für eBPF viele Anwendungsfälle, hier ist eine kurze Übersicht.
+Die meisten großen Infrastruktur-Unternehmen (Netflix, Google, Cloudflare, Meta) setzen es aufgrund der Effizienz, Sicherheit und Flexibilität in Produktion ein.
+
+* Netzwerkfilter - früh in Verarbeitung (ggf. auf NIC) Filter und Analyse von Netzwerkpaketen, Traffic-Shaping, Inhalte filtern, für ein- und ausgehenden Verkehr
+* Observability - Traffic von jedem Device und das Verhalten von Prozessen darstellen auch besonders für Microservices, Anomalien, besser als Sidecars da im Kernel
+* Security Policies - Prozesse überwachen, beenden, Verhalten beschränken, Netzwerkpakete filtern
+* Power Monitoring - z.B. Batterieüberwachung in Android + Prozessverbrauch
+* Eigene Erweiterungen und Logic für Eingabegeräte wie Tastaturen oder Touchscreens
+* Scheduler Optimierungen Integration von Lastüberwachung in Thread-Scheduler-Entscheidungen
+* Hotfixes, Workarounds, Hot Deployments für Kernel Funktionen
+* Schnellere und einfachere Experimente mit neuen Ansätzen für Kernel-Funktionalität
+
+////
+Today, eBPF is used extensively to drive a wide variety of use cases: Providing high-performance networking and load-balancing in modern data centers and cloud native environments, extracting fine-grained security observability data at low overhead, helping application developers trace applications, providing insights for performance troubleshooting, preventive application and container runtime security enforcement, and much more.
+////
+
+== Programmieren mit eBPF
+
+Niemand schreibt wirklich eBPF Bytecode von Hand, dafür wurden für alle Sprachen Bibliotheken entwickelt, die Programme in C, Rust (aya), Java, Go, Python mit beschränkter API aber auf höherer Abstraktion in den Bytecode übersetzen.
+
+== Modernes eBPF
+
+5.x Kernel
+
+Much better developer tooling.
+
+* BPF C Eine Version von Ansi C für "kernel safe" Modus, weniger beschränkt als zuvor.
+* BTF BPF Type Format (type information des laufenden Kernels)
+* Efficient symbol metadata
+* CO-RE innerhalb von CLang, lipbpf für Kompatibilität von Typen für verschiedene Kernels, erziehlt portable BPF Programme.
+* libpbf userpace C Bibliothek für Manipulation von und Zugriff auf von BPF Programme, part of Kernel source tree für sync mit Kernel
+
+
+challenge:
+* verifier + error messages
+* fluidity of frequently changing kernel API 
+* BTF und CO-RE helfen hier
+* kfuncs part of the unstable API (e.g. tcp connection tracking)
+* also tracepoints, types, kernel functions
+
+libbpf -> BPF skeleteon - skeleton c-programm w/ libbpf to load program into kernel (and relocate datastructures), access kernel datastructures
+cli tool bpf-tool
+hashmaps, bloom filters, lru maps
+
+// rewrite packets, eg. headers
+event driven programs, trigger events for other parts of the bpf program
+state in shared bpf maps
+
+don't depend on the full linux headers
+only define the fields of the structs that you need and CO-RE will align and relocate accordingly
+"portable kernel type definitions"
+need to do feature probing and kernel version probing 
+elevated priviledges
+multiple bpf programs - conflicts - cilium / datadog - compete hook points
+visibility / debugging
+
+new bpf tools like bpfd - system level daemon - authenticated grpc endpoint to install programs and interact with them (package them as images)
+declare what to install (k8s)
+stable interfaces with CO-RE and macros
+user space for data structures - need to use the user space types
+still lots of tribal knowledge
+
+== Beispiel
+
+Ein einfaches Beispiel für eBPF ist die Überwachung von Dateizugriffen.
+Dazu wird für jeden Dateizugriff ein Zähler in einer Hashmap erhöht, welche jederzeit ausgegeben werden kann.
+
+eBPF Programme sind sehr low-level, also eine C-API die schon nah an Assembler ist.
+
+TODO, fix
+
+[source,c]
+----
+#include "vmlinux.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
+
+SEC ("kprobe/do_sys_openat2") int kprobe__do_sys_openat2 (struct pt_regs *ctx){
+    bpf_printk("Hello, World from Java BPF!");
+    return 0;
+}
+
+char _license[] SEC ("license") = "GPL";
+----
+
+// Eine weitere Reihe von Beispielen ist im [BCC] "BPF Compiler Collection" Repository verfügbar.
+// bcc is outdated
+// BTF BPF Type Format
+// CO-RE Compile Once Run Everywhere
+
+Auch der Linux Kernel [eBPF-Kernel] enthält eine Menge Beispiele für eBPF Programme.
+
+== eBPF in Java
+
+Normalerweise werden, wie im Beispiel gezeigt, eBPF Programme in C geschrieben und dann mittels des clang Compilers in Bytecode übersetzt.
+Aber es gibt jetzt auch die Möglichkeit prototypisch eBPF Programme in Java zu schreiben. 
+
+In einer Artikelserie [eBPF-Java] hat Johannes Bechberger JVM-Entwickler bei SAP (SAPMachine) mit seinem Projekt "hello-eBPF" gezeigt, wie das aussehen kann. Bei KubeCon hat er dazu auch einen kurzen Vortrag gehalten [eBPF-Java-Agent].
+
+Während das in der Realität wahrscheinlich eher selten passieren wird, ist es doch eine interessante Exploration, die Details besser verständlich macht.
+
+Ein Anwendungsfall wäre, für Java Programme und besonders Bibliotheken Test-Setups für komplexe Nebenläufigkeits- (Deadlocks, Starvation, Race-Conditions), Netzwerk- (slow packets), oder Speicher- (Caches, CVEs) Probleme zu erzeugen, die die notwendigen Szenarien direkt erzeugen könnten.
+
+Sein initiales Ziel war die Python BPF Compiler Collection (BCC) APIs in Java abzubilden, interessanterweise mittels Panama für das Foreign Function Interface (Java 21).
+
+Bild aus Vortrag / Blog Serie
+
+* Teile des Java Code laufen im User-Space 
+* Scheduler Java Code wird nach BPF-C übersetzt und dann weiter nach Bytecode mittels libbpf.
+* Und dann im Kernel nach Verifikation in die jeweiligen Erweiterungspunkte installiert.
+
+So sieht das Hello-World von "hello-eBPF" aus, siehe Listing {counter:listing}
+
+.Listing {listing} Hello World eBPF Programm
+[source,java]
+----
+@BPF(license = "GPL")
+public abstract class HelloWorld extends BPFProgram implements SystemCallHooks {
+
+    @Override // Aus SystemCallHooks, Ausgabe beim Zugriff auf eine Datei
+    public void enterOpenat2(int dfd, String filename, Ptr<open_how> how) {
+        bpf_trace_printk("Hello, World!");
+    }
+
+    public static void main(String[] args) {
+        try (HelloWorld program = BPFProgram.load(HelloWorld.class)) {
+            program.autoAttachPrograms();
+            program.tracePrintLoop(f -> String.format("%d: %s: %s", (int)f.ts(), f.task(), f.msg()));
+        }
+    }
+}
+----
+
+
+An den Scheduler Erweiterungspunkt (sched_ext - im neuen [Realtime-Linux] Kernel 6.12) angehängt, der alle Prozesse des Systems verwaltet.
+
+Hier ist ein Beispiel für einen Scheduler in Java, diese ist auch in Gänze im Repository zu finden.
+
+Es ist von BPFProgram abgeleitet, eine umfangreiche Superklasse, die die Infrastruktur für die Definition und Management von eBPF Probes enthält inklusive BTF-Typen für den Datenaustausch mit dem Kernel und BPF-Maps für den Datenspeicherung und Austausch mit dem Userspace code.
+
+Die Superklasse BPFProgram  ...
+
+[source,java]
+----
+@BPF (license = "GPL")
+public abstract class SampleScheduler
+    extends BPFProgram implements Scheduler, Runnable {
+    // scheduling queue id
+    static final long SHARED_DSQ_ID = 0;
+
+    @Type // Struct für BTF für Queue Stats
+    static class Stats { long global; long local; }
+
+    @Override // von Scheduler
+    public int init() {
+        return scx_bpf_create_dsq (SHARED_DSQ_ID, -1) ;
+    }
+
+    // statistiken für Scheduler Queues
+    @BPFMapDefinition(maxEntries = 100)
+    BPFHashMap<Integer, Stats> statsPerCPU;
+    @BPFMapDefinition(maxEntries = 100000)
+    BPFLRUHashMap<@Unsigned Integer, @Unsigned Long> enqueuesPerProcess;
+
+    // eigentliche Scheduler Methode, simpler Ansatz, 
+    // Prozess wird auf verfügbare (idle) CPU gescheduled
+    @Override
+    public int selectCPU(Ptr<task_struct> p, int prev_cpu, long wake_flags) {
+        boolean is_cpu_idle = false;
+        int cpu = scx_bpf_select_cpu_dfl(p, prev_cpu, wake_flags, Ptr.of(is_cpu_idle));
+        if (is_cpu_idle) {
+            incrementStats(true);
+            scx_bpf_dispatch(p, SCX_DSQ_LOCAL.value(), SCX_SLICE_DFL.value(),0);
+        }
+        return cpu;
+    }
+    // Process will starten, wir sammeln ein paar Statistiken
+    // und dispatchen den Prozess
+    @Override
+    public void enqueue(Ptr<task_struct> p, long enq_flags) {
+        incrementStats(false);
+        recordEnqueue(p);
+        scx_bpf_dispatch(p, SHARED_DSQ_ID, SCX_SLICE_DFL.value(), enq_flags);
+    }
+
+    // dispatch für die idle CPU den nächsten Task aus unserer Queue
+    @Override
+    public void dispatch(int cpu, Ptr<task_struct> prev) {
+        scx_bpf_consume(SHARED_DSQ_ID);
+    }
+}
+----
+
+Superklasse BPFProgram
+
+Es können auch klassische C-Programme innerhalb eines Java BPFPrograms spezifiziert und genutzt werden, diese werden dann als String übergeben.
+
+TODO
+
+////
+----
+@BPF
+public static abstract class HelloWorldProgram extends BPFProgram {
+
+    static final String EBPF_PROGRAM = """
+            #include "vmlinux.h"
+            #include <bpf/bpf_helpers.h>
+            #include <bpf/bpf_tracing.h>
+
+            SEC ("kprobe/do_sys_openat2") int kprobe__do_sys_openat2 (struct pt_regs *ctx){
+                bpf_printk("Hello, World from Java BPF!");
+                return 0;
+            }
+
+            char _license[] SEC ("license") = "GPL";
+            """;
+}
+
+public static void main(String[] args) {
+    try (HelloWorldProgram program = new HelloWorldProgramImpl()) {
+        program.autoAttachProgram(program.getProgramByName("kprobe__do_sys_openat2"));
+        program.tracePrintLoop();
+    }
+}
+----
+I decided to write bindings using the new Foreign Function API (Project Panama, preview in 21) and bcc, the first and widely used library for eBPF, which is typically used with its Python API and allows you to write eBPF programs in C, compiling eBPF programs dynamically at runtime.
+
+The main goal is to provide a library (and documentation) for Java developers to explore eBPF and write their own eBPF programs without leaving their favorite language and runtime.
+
+The initial goal is to be as close to the BCC Python API as possible to port the book’s examples to Java easily. You can find the Java versions of the examples in the src/main/me/bechberger/samples and the API in the src/main/me/bechberger/bcc directory in the GitHub repository.
+////
+
+// https://github.com/parttimenerd/hello-ebpf
+
+Mehr Details über hello-ebpf.
+
+== Zukunft
+
+eBPF wird zunehmend integraler Bestandteil moderner Betriebssysteme. 
+Zukünftige Entwicklungen konzentrieren sich auf verbesserte Flexibilität, Modularität und Benutzerfreundlichkeit sowie Innovationen in Speicherverwaltung, Nebenläufigkeit und Integration mit User-Space-Anwendungen. Fortschritte wie dynamische Stacks, optimierte Observability-Tools und sicherere Programmterminierungen sollen eBPF zuverlässiger und vielseitiger machen, während neue Tools und Bibliotheken die Entwicklung erleichtern.
+Mit dem aktuellen 6.12 Kernel ist auch das Scheduling jetzt erweiterbar (sched-ext), was viele neue Möglichkeiten eröffnet.
+Wie Andy Pavlo diskutiert, auch bei der Weiterentwicklung von Datenbanken [eBPF-Databases] z.B. um Teile davon im Kernel laufen zu lassen.
+
+== Fazit
+
+eBPF ist ein mächtiges Werkzeug das im Linux-Observability Stack heutzutage einen festen Platz hat und gerade auch für Cloud-Deployments immer weiter ausgebaut wird.
+Ohne einen Kernel neu zu compilieren oder Kernelmodule zu schreiben, können relevante Kernelfunktionalitäten effizient mit eigenem Code vorgenommen werden.
+Viele Tools im Monitoring und Performance Bereich machen schon breite Nutzung von eBPF, durch die aktive Entwicklung ist da noch viel mehr zu erwarten.
+
+== Ressourcen
+
+- [eBPF] ebpf.io - Dokumentation, Beispiele, Talks
+- [Wikipedia]  
+- [Syseleven] https://www.syseleven.de/blog/ebpf-der-neue-stern-am-cloud-native-himmel/
+- [eBPF-LinuxMag] https://www.linux-magazin.de/ausgaben/2020/08/ebpf-tools/
+- [eBPF-HackerNoon] https://hackernoon.com/lang/de/Wie-ebpf-die-Beobachtbarkeit,-wie-wir-sie-kennen,-ver%C3%A4ndert 
+
+- [eBPF-Java] https://mostlynerdless.de/blog/2023/12/31/hello-ebpf-developing-ebpf-apps-in-java-1/
+- [eBPF-Java] https://mostlynerdless.de/blog/2024/07/30/hello-ebpf-write-your-ebpf-application-in-pure-java-12/ 
+- [eBPF-Java-Video] https://www.youtube.com/watch?v=JWwX3uCEPO8
+- [eBPF-Java-Agent] https://www.groundcover.com/blog/java-agent-ebpf
+- [eBPF-CNO] Past, Present, and Future of eBPF in Cloud Native Observability https://kccnceu2023.sched.com/event/1Hyak/past-present-and-future-of-ebpf-in-cloud-native-observability-frederic-branczyk-polar-signals-natalie-serrino-new-relic
+- [eBPF201]  Supercharging Your eBPF Dev Process for Cloud Native Apps https://kccnceu2023.sched.com/event/1Hycp/ebpf-201-supercharging-your-ebpf-dev-process-for-cloud-native-apps-sanjeev-rampal-donald-hunter-red-hat
+- [eBPFDokumentarfilm] https://www.brendangregg.com/blog/2024-03-10/ebpf-documentary.html
+- [KernellessKernelPrograms] https://www.youtube.com/watch?v=J_EehoXLbIU
+- [Brightboard] https://www.youtube.com/watch?v=eVsMkXDE_5I
+- [eBPF-Tutorial-eunomia] https://eunomia.dev/en/tutorials/
+- [eBPF-Kernel] https://github.com/torvalds/linux/tree/master/samples/bpf
+- [AYA-RS] https://aya-rs.dev/
+- [Realtime-Linux] https://www.heise.de/news/Echtzeitfaehiges-Linux-6-12-erschienen-10059625.html
+- [Sched-Ext] https://www.heise.de/news/Linux-6-12-Scheduler-jetzt-erweiterbar-und-EEVDF-Umbau-komplett-9949860.html
+- [eBPF-Buch] https://cilium.isovalent.com/hubfs/Learning-eBPF%20-%20Full%20book.pdf
+- [eBPF-Databases] https://thenewstack.io/p99conf-how-ebpf-could-make-faster-database-systems/
+- [Hello-World-BCC-BTF] https://bowers.github.io/eBPF-Hello-World/
