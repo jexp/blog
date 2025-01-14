@@ -168,6 +168,7 @@ Sein initiales Ziel war die Python BPF Compiler Collection (BCC) APIs in Java ab
 In der aktuellen Entwicklung ist BCC durch libbpf ersetzt worden.
 
 Das Projekt kann mittels git gecloned werden und dann auf einer Maschine mit Linux 6.12, mit aktiviertem eBPF und BTF gebaut werden, nachdem man die notwendigen Bibliotheken und Tools mittels `install.sh` installiert hat (siehe Listing {counter:Listing}).
+Alternativ kann das Setup auch auf anderen Betriebssystemen mit einer VM erfolgen, z.B. "Lima" wie in der Readme beschrieben.
 
 .Listing {listing}
 [source,shell]
@@ -210,6 +211,14 @@ public abstract class HelloWorld
 }
 ----
 
+Was passiert hier?
+
+* Erweiterungspunkte werden aus Interfaces, wie `SystemCallHooks` oder `Scheduler` übernommen, es reicht die Callback-Methoden zu implementieren
+* Der Java Code des BPFProgram's wird nach BPF-C übersetzt und dann weiter nach Bytecode mittels `libbpf`
+* Und dann im Kernel nach Verifikation in die jeweiligen Erweiterungspunkte installiert.
+* Die Implementierung dafür wird von der Superklasse BPFProgram gehandhabt.
+* Teile des Java Code laufen im User-Space (`main`-Methode), dazu gehört das Laden der Klasse, Installation und Ausgabe im Terminal
+
 Ich habe das Beispiel modifiziert lasse es zusätzlich noch den Dateinamen ausgeben, wie in Listing {counter:listing} zu sehen.
 
 .Listing {listing} Ausgaben von HelloWorld.java
@@ -224,35 +233,149 @@ Ich habe das Beispiel modifiziert lasse es zusätzlich noch den Dateinamen ausge
 16792: touch: Hello, World test.txt!
 ----
 
-TODO continue here.
+Weitere enthaltene Bespiele sind:
 
-Bild aus Vortrag / Blog Serie
+* Firewall
+* Paket Logger
+* verschiedene Prozess Scheduler
+* Nutzung von BPF Hashmaps
+* TODO 
 
-* Teile des Java Code laufen im User-Space 
-* Scheduler Java Code wird nach BPF-C übersetzt und dann weiter nach Bytecode mittels libbpf.
-* Und dann im Kernel nach Verifikation in die jeweiligen Erweiterungspunkte installiert.
+Von diese wollen wir uns kurz die HashMaps (siehe Listing {counter:listing}) ansehen, da diese Datenstrukturen zur Aufzeichnung von Statistiken und zum Austausch mit User Space Prozessen genutzt werden.
+Sie werden mit Schlüsseln mit einer fixen Länge (oder numerischen Werten) konfiguriert, haben eine Maximalzahl von Einträgen (todo was passiert beim Überschreiten?) und reguläre Methoden zum Lesen (`bpf-get`) und Aktualisieren (`put`) von Werten.
 
-So sieht das Hello-World von "hello-eBPF" aus, siehe Listing {counter:listing}
+TODO concurrency/atomicity?
 
-.Listing {listing} Hello World eBPF Programm
+////
+BPF ‘maps’ provide generic storage of different types for sharing data between kernel and user space. There are several storage types available, including hash, array, bloom filter and radix-tree. Several of the map types exist to support specific BPF helpers that perform actions based on the map contents.
+
+BPF maps are accessed from user space via the bpf syscall, which provides commands to create maps, lookup elements, update elements and delete elements.
+https://www.kernel.org/doc/html/latest/bpf/maps.html
+
+u64 bpf_get_current_uid_gid(void)
+Description Get the current uid and gid.
+Return A 64-bit integer containing the current GID and UID, and created as such: current_gid << 32 | current_uid.
+https://docs.ebpf.io/linux/helper-function/bpf_get_current_uid_gid/
+
+https://docs.ebpf.io/linux/helper-function/bpf_get_current_comm/
+
+Copy the comm attribute of the current task into buf of size_of_buf. The comm attribute contains the name of the executable (excluding the path) for the current task. The size_of_buf must be strictly positive. On success, the helper makes sure that the buf is NUL-terminated. On failure, it is filled with zeroes.
+////
+
+.Listing {listing} - Beispiel für Hashmap für Statistiken und Datenaustausch
 [source,java]
 ----
-@BPF(license = "GPL")
-public abstract class HelloWorld extends BPFProgram implements SystemCallHooks {
+/**
+ * Anzahl von openat System Aufrufen pro Prozess mittels einem HashMap Counter
+ */
+@BPF
+public abstract class HashMapSample extends BPFProgram implements SystemCallHooks {
 
-    @Override // Aus SystemCallHooks, Ausgabe beim Zugriff auf eine Datei
+    // fixe Schlüssellänge
+    private static final int TASK_COMM_LEN = 16;
+
+    // Map definiert mit fixer Schlüsselänge und Integer ohne Vorzeichen
+    // todo Wo wird sie initialisiert?
+    @BPFMapDefinition(maxEntries = 256)
+    BPFHashMap<@Size(TASK_COMM_LEN) String, @Unsigned Integer> map;
+
+    @Override
     public void enterOpenat2(int dfd, String filename, Ptr<open_how> how) {
-        bpf_trace_printk("Hello, World!");
+        @Size(TASK_COMM_LEN) String comm = "";
+
+        // Aktuellen Prozess Name lesen 16 bytes in den String
+        bpf_get_current_comm(Ptr.of(comm), TASK_COMM_LEN);
+
+        // incrementiere Counter bei map[comm]
+        // todo atomic? could be a good helper function?
+        Ptr<@Unsigned Integer> counter = map.bpf_get(comm);
+        if (counter == null) {
+            map.put(comm, 1);
+        } else {
+            counter.set(counter.val() + 1);
+        }
     }
 
-    public static void main(String[] args) {
-        try (HelloWorld program = BPFProgram.load(HelloWorld.class)) {
+    public static void main(String[] args) throws InterruptedException {
+        try (HashMapSample program = BPFProgram.load(HashMapSample.class)) {
             program.autoAttachPrograms();
-            program.tracePrintLoop(f -> String.format("%d: %s: %s", (int)f.ts(), f.task(), f.msg()));
+            while (true) {
+                System.out.println("OpenAt's per process:");
+                for (var entry : program.map) {
+                    System.out.printf("%16s: %4d\n", entry.getKey(), entry.getValue());
+                }
+                Thread.sleep(1000);
+            }
         }
     }
 }
 ----
+
+Map's können als Datenaustauschmechanismus dienen, in unserem User Space Code können wir auf eine Kopie der Map des BPF Programms zugreifen und auslesen.
+
+Diese Maps können auch mittels bpftool aufgelistet und ausgelesen werden:
+
+TODO kann bpftool die Strings darstellen?
+
+----
+bpftool map list
+...
+52: hash  name map  flags 0x0
+        key 16B  value 4B  max_entries 256  memlock 23648B
+
+bpftool map dump name map # -j für json
+key: 62 70 66 74 6f 6f 6c 00  00 00 00 00 00 00 00 00  value: 22 00 00 00
+key: 73 79 73 74 65 6d 64 2d  74 69 6d 65 73 79 6e 00  value: 02 00 00 00
+key: 76 69 74 61 6c 73 20 73  61 6d 70 6c 65 72 20 00  value: 57 04 00 00
+key: 73 79 73 74 65 6d 64 00  00 00 00 00 00 00 00 00  value: 1b 00 00 00
+----
+
+Ein weiteres, interessantes und ganz neues Beispiel ist ein Prozess-Scheduler, siehe Listing {counter:listing}
+Dieser benötigt die nagelneue eBPF Scheduler Extension ([Sched-Ext]) im Linux Kernel 6.12.
+
+TODO anderer Scheduler? ggf. Lottery?
+
+.Listing {listing} - Minimaler Scheduler
+[source,java]
+----
+@BPF(license = "GPL")
+@Property(name = "sched_name", value = "minimal_scheduler")
+public abstract class MinimalScheduler extends BPFProgram implements Scheduler {
+    // Queue ID
+    private static final int SHARED_DSQ_ID = 0;
+
+    // Neue Warteschlange in init erzeugen
+    @Override
+    public int init() {
+        return scx_bpf_create_dsq(SHARED_DSQ_ID, -1);
+    }
+
+    // Prozess wird in Warteschlange gestellt zum späteren Ausführen 
+    @Override
+    public void enqueue(Ptr<task_struct> p, long enq_flags) {
+        // TODO Länge Ausführungszeit?
+        var sliceLength = ((@Unsigned int) 5_000_000) / scx_bpf_dsq_nr_queued(SHARED_DSQ_ID);
+        scx_bpf_dispatch(p, SHARED_DSQ_ID, sliceLength, enq_flags);    }
+
+    // Prozess von Warteschlange ausführen
+    @Override
+    public void dispatch(int cpu, Ptr<task_struct> prev) {
+        scx_bpf_consume(SHARED_DSQ_ID);
+    }
+
+    public static void main(String[] args) throws Exception {
+        try (var program = BPFProgram.load(MinimalScheduler.class)) {
+            // In sched-ext installieren
+            program.attachScheduler();
+            // warten
+            System.in.read();
+        }
+    }
+}
+----
+
+Bild aus Vortrag / Blog Serie
+
 
 
 An den Scheduler Erweiterungspunkt (sched_ext - im neuen [Realtime-Linux] Kernel 6.12) angehängt, der alle Prozesse des Systems verwaltet.
@@ -397,3 +520,4 @@ Viele Tools im Monitoring und Performance Bereich machen schon breite Nutzung vo
 - [eBPF-Buch] https://cilium.isovalent.com/hubfs/Learning-eBPF%20-%20Full%20book.pdf
 - [eBPF-Databases] https://thenewstack.io/p99conf-how-ebpf-could-make-faster-database-systems/
 - [Hello-World-BCC-BTF] https://bowers.github.io/eBPF-Hello-World/
+- [Sched-Ext-Docs] https://www.kernel.org/doc/html/v6.12/scheduler/sched-ext.html
