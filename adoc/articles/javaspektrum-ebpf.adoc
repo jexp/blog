@@ -124,25 +124,68 @@ still lots of tribal knowledge
 
 == Beispiel
 
-Ein einfaches Beispiel für eBPF ist die Überwachung von Dateizugriffen.
-Dazu wird für jeden Dateizugriff ein Zähler in einer Hashmap erhöht, welche jederzeit ausgegeben werden kann.
+Ein einfaches Beispiel für eBPF ist die Überwachung von Dateizugriffen, mit dem Erweiterungspunkt für den Systemaufruf "openat2"
+// Dazu wird für jeden Dateizugriff ein Zähler in einer Hashmap erhöht, welche jederzeit ausgegeben werden kann.
 
-eBPF Programme sind sehr low-level, also eine C-API die schon nah an Assembler ist.
+eBPF Programme sind sehr low-level, also eine sehr minimale C-API, und reich an Bit-Operationen und primitiven Typen ist.
 
-TODO, fix
-
+.Listing {listing} openat.bpf.c für das Tracing von "open" Systemaufrufen
 [source,c]
 ----
-#include "vmlinux.h"
+#include <vmlinux.h>
 #include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
 
-SEC ("kprobe/do_sys_openat2") int kprobe__do_sys_openat2 (struct pt_regs *ctx){
-    bpf_printk("Hello, World from Java BPF!");
+/// @description "Process ID to trace"
+const volatile int pid_target = 0;
+
+SEC("tracepoint/syscalls/sys_enter_openat")
+int tracepoint__syscalls__sys_enter_openat(struct trace_event_raw_sys_enter* ctx)
+{
+    u64 id = bpf_get_current_pid_tgid();
+    u32 pid = id >> 32;
+
+    if (pid_target && pid_target != pid)
+        return false;
+
+    // Use bpf_printk to print the process information
+    bpf_printk("Process ID: %d enter sys openat\n", pid);
     return 0;
 }
 
-char _license[] SEC ("license") = "GPL";
+/// "Trace open family syscalls."
+char LICENSE[] SEC("license") = "GPL";
+----
+
+Man kann das Programm mittels der tools `ecc` bauen und `ecli` ausführen, siehe Listing {counter:listing}
+Die Traces, die mittels `bpf_printk` erzeugt wurden können mit bpftools oder direkt aus der `trace_pipe` ausgelesen werden.
+
+.Listing {listing} openat/openat.bpf.c bauen und ausführen
+----
+./ecc openat/openat.bpf.c 
+INFO [ecc_rs::bpf_compiler] Compiling bpf object...
+INFO [ecc_rs::bpf_compiler] Generating package json..
+INFO [ecc_rs::bpf_compiler] Packing ebpf object and config into openat/package.json...
+
+./ecli openat/package.json 
+INFO [faerie::elf] strtab: 0x462 symtab 0x4a0 relocs 0x4e8 sh_offset 0x4e8
+INFO [bpf_loader_lib::skeleton::preload::section_loader] User didn't specify custom value for variable pid_target, use the default one in ELF
+INFO [bpf_loader_lib::skeleton::preload::section_loader] User didn't specify custom value for variable tracepoint__syscalls__sys_enter_openat.____fmt, use the default one in ELF
+INFO [bpf_loader_lib::skeleton::poller] Running ebpf program...
+
+# in separatem Terminal
+cat /sys/kernel/debug/tracing/trace_pipe
+
+vitals sampler -20548 [001] ...21 49360.073275: bpf_trace_printk: Process ID: 20532 enter sys openat
+
+systemd-1 [001] ...21 49361.401089: bpf_trace_printk: Process ID: 1 enter sys openat
+
+systemd-1 [001] ...21 49361.401161: bpf_trace_printk: Process ID: 1 enter sys openat
+
+systemd-1 [001] ...21 49361.401193: bpf_trace_printk: Process ID: 1 enter sys openat
+
+systemd-udevd-345 [000] ...21 49363.400958: bpf_trace_printk: Process ID: 345 enter sys openat
+
+systemd-udevd-345 [000] ...21 49363.401040: bpf_trace_printk: Process ID: 345 enter sys openat
 ----
 
 // Eine weitere Reihe von Beispielen ist im [BCC] "BPF Compiler Collection" Repository verfügbar.
