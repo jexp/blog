@@ -20,7 +20,7 @@ convinced Torvalds - "a better BPF" -> new features through backdoor
 ////
 
 Auch die Arten von Ereignissen wurde deutlich erweitert von Netzwerkpaketen zu Speicherallokationen, Pagefaults, Dateizugriffe, Systemaufrufen, Stromversorgung und vieles mehr.
-Die eBPF Programme laufen an der Schnittstelle zwischen Kernel und der Hardware, so dass Entscheidungen sehr früh in der Verarbeitung getroffen werden können, oder sogar auf den Geräteprozessoren (wie Netzwerkkarten mit XDF).
+Die eBPF Programme laufen an der Schnittstelle zwischen Kernel und der Hardware, so dass Entscheidungen sehr früh in der Verarbeitung getroffen werden können, oder sogar auf den Geräteprozessoren (wie Netzwerkkarten mit XDP).
 Ein Artikel beschrieb es als: "eBPF ist für Linux was CRISPR für Genetik darstellt".
 
 Die Programme im User-Space können dann mittels Tracepoints, Interrupts und geteilten Datenstrukturen mit den eBPF Programmen kommunizieren.
@@ -67,7 +67,7 @@ Er prüft unter anderen:
 Nach erfolgreicher Überprüfung wird der Bytecode an einen der vielen  Schnittstellen ((1700+ hooks) im Kernel gebunden.
 Dort wird er entweder interpretiert oder mit einem Just-In-Time Compiler in optimierten Maschinencode übersetzt und sehr effizient in einer virtuellen Maschine in einer Sandbox ausgeführt.
 
-// celium (go) k8s
+// cilium (go) k8s
 // kprobes, uprobes (user space)
 // helpers functions, maps store and share, 
 // kfuncs - CO-RE (supercede helpers) 
@@ -211,7 +211,7 @@ Das O'Reilly Buch "Learning eBPF" [eBPF-Buch] von Isovalent (jetzt Cisco) ist ko
 Normalerweise werden, wie im Beispiel gezeigt, eBPF Programme in C geschrieben und dann mittels des clang Compilers in Bytecode übersetzt.
 Aber es gibt jetzt auch die Möglichkeit prototypisch eBPF Programme in Java zu schreiben. 
 
-Johannes Bechberger JVM-Entwickler bei SAP (SapMachine) hat mit seinem Projekt "hello-eBPF" gezeigt, wie das aussehen kann. Bei eBPF-Summit hat er dazu auch einen kurzen Vortrag gehalten [eBPF-Java-Agent] und auf vielen anderen Konferenz [Bechberger-Slides] auch.
+Johannes Bechberger, JVM-Entwickler bei SAP (SapMachine), hat mit seinem Projekt hello-ebpf gezeigt, wie das aussehen kann. Beim eBPF-Summit hat er dazu auch einen kurzen Vortrag gehalten [eBPF-Java-Agent] und auf vielen anderen Konferenz [Bechberger-Slides] auch.
 
 Während das in der Realität wahrscheinlich noch eher selten passieren wird, ist es doch eine interessante Exploration, die Details besser verständlich macht.
 
@@ -221,7 +221,7 @@ Sein initiales Ziel war die Python BPF Compiler Collection (BCC) APIs in Java ab
 
 In der aktuellen Entwicklung ist BCC durch libbpf ersetzt worden.
 
-Das Projekt kann mittels git gecloned werden und dann auf einer Maschine mit Linux 6.12, mit aktiviertem eBPF und BTF gebaut werden, nachdem man die notwendigen Bibliotheken und Tools mittels `install.sh` installiert hat (siehe Listing {counter:listing}).
+Das Projekt kann mittels git gecloned werden und dann auf einer Maschine mit Linux 6.12 (oder neuer), mit aktiviertem eBPF und BTF gebaut werden, nachdem man die notwendigen Bibliotheken und Tools mittels `install.sh` installiert hat (siehe Listing {counter:listing}).
 Alternativ kann das Setup auch auf anderen Betriebssystemen mit einer VM erfolgen, z.B. "Lima" wie in der Readme beschrieben.
 
 .Listing {listing}
@@ -258,7 +258,7 @@ public abstract class HelloWorld
 
     public static void main(String[] args) {
         try (HelloWorld program = BPFProgram.load(HelloWorld.class)) {
-            // Programm Installieren and Hooks
+            // Programm laden and Hooks installieren
             program.autoAttachPrograms();
             // Ausgabe 
             program.tracePrintLoop(f -> String.format("%d: %s: %s", (int)f.ts(), f.task(), f.msg()));
@@ -267,7 +267,7 @@ public abstract class HelloWorld
 }
 ----
 
-Ich habe das Beispiel modifiziert lasse es zusätzlich noch den Dateinamen ausgeben, wie in Listing {counter:listing} zu sehen.
+Ich habe das Beispiel modifiziert und lasse es zusätzlich noch den Dateinamen ausgeben, wie in Listing {counter:listing} zu sehen.
 
 .Listing {listing} Ausgaben von HelloWorld.java
 ----
@@ -464,7 +464,8 @@ public abstract class MinimalScheduler extends BPFProgram implements Scheduler {
     // Prozess wird in Warteschlange gestellt zum späteren Ausführen 
     @Override
     public void enqueue(Ptr<task_struct> p, long enq_flags) {
-        // beschränkte Maximale Länge Ausführungszeit (jeder Prozess bekommt gleiche Laufzeit)
+        // Beschränkte Maximale Länge Ausführungszeit (jeder Prozess bekommt gleiche Laufzeit)
+        // skaliert mit der Anzahl der wartenden Prozesse, damit das System benutzbar bleibt
         var sliceLength = ((@Unsigned int) 5_000_000) / scx_bpf_dsq_nr_queued(SHARED_DSQ_ID);
         scx_bpf_dispatch(p, SHARED_DSQ_ID, sliceLength, enq_flags);    }
 
@@ -543,7 +544,7 @@ eBPF ist ein mächtiges Werkzeug das im Linux-Observability Stack heutzutage ein
 Ohne einen Kernel neu zu compilieren oder Kernelmodule zu schreiben, können relevante Kernelfunktionalitäten effizient mit eigenem Code vorgenommen werden.
 Viele Tools im Monitoring und Performance Bereich machen schon breite Nutzung von eBPF, durch die aktive Entwicklung ist da noch viel mehr zu erwarten.
 
-Das Java-Projekt hello-eBPF ist schon heute mächtig, und macht die ePBF Programmierung für Java Entwickler zugänglicher.
+Das Java-Projekt hello-ebpf ist schon heute mächtig, und macht die ePBF Programmierung für Java Entwickler zugänglicher.
 Es wird spannend wie es sich weiterentwickelt und welche Rolle es in der zukünftigen eBPF Java Community spielen wird.
 // TODO Fazit zu hello-epbf
 
