@@ -1,8 +1,9 @@
-== Unterwegs im Kernel mit eBPF
+== Java Bienen - Unterwegs im Linux Kernel mit eBPF
 
 In dieser Kolumne steigen wir etwas tiefer ab in den Linux Kernel.
 Normalerweise ist dieser ja Gerätetreibern, Speicher-, Prozess- und Thread-Management vorbehalten und Nutzercode hat dort aus Sicherheitsgründen nichts zu suchen.
 
+.eBPF Logo
 image::https://upload.wikimedia.org/wikipedia/commons/b/b0/EBPF_logo.png[]
 
 Auf der anderen Seite ist der Kernel die richtige Stelle um systemnahes Monitoring und Performance-Messungen vorzunehmen.
@@ -28,7 +29,9 @@ Die Programme im User-Space können dann mittels Tracepoints, Interrupts und get
 // links back to programs in user-space
 // xdf on interface card
 
-image::https://www.syseleven.de/wp-content/uploads/2023/05/syseleven-website-blog-ebpf-verification-ebpf.io_.png[Quelle: https://ebpf.io/what-is-ebpf/]
+.eBPF Verification, Quelle https://ebpf.io/what-is-ebpf/
+image::https://ebpf.io/static/7eec5ccd8f6fbaf055256da4910acd5a/fb370/loader.webp[Bild von epbf.io]
+// image::https://www.syseleven.de/wp-content/uploads/2023/05/syseleven-website-blog-ebpf-verification-ebpf.io_.png[Quelle: https://ebpf.io/what-is-ebpf/]
 
 Das ist ein Punkt, der normalerweise unter Sicherheitsaspekten undenkbar ist - Nutzercode im Betriebssystemkern auszuführen. 
 Das würde zu viele Türen öffnen, sowohl für Missbrauch als auch Fehlverhalten das zur Instabilität für das ganze System führen würde.
@@ -329,7 +332,7 @@ Es ist von BPFProgram abgeleitet, einer umfangreiche Superklasse, die die Infras
 Es können auch klassische C-Programme innerhalb eines Java BPFPrograms spezifiziert und genutzt werden, diese werden dann als String übergeben.
 Methoden und Klassen mit nur einem einzigen String Variablen Deklaration werden als C-Code interpretiert und übersetzt.
 
-
+.Quelle Bechberger Slides "Building a lightning fast Firewall in Java & eBPF"
 image::https://imgur.com/CYuCDuC.png[]
 // image::https://speakerdeck.com/player/6e75aaa3377e4650b6108f49a9241249?slide=55[]
 
