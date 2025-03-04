@@ -394,6 +394,7 @@ MCP follows a https://modelcontextprotocol.io/docs/concepts/architecture[client-
 The protocol layer handles message framing, request/response linking, notificaitons and high-level communication patterns.
 
 The MCP allows for different transport protocols, currently supported are HTTPS (with Server-Sent-Events (SSE) for server->client messages and HTTP POST for client->server) and STDIO for local servers where the server is started by the client and can communicate via stdin/stdout.
+The protocol has a lifecycle of initialization, message exchange and termination.
 
 All transport messages exchanges are based on a https://spec.modelcontextprotocol.io/specification/[specification^] using JSON-RPC 2.0. 
 So it encourages to implement the protocol in other languages or transport layers.
@@ -406,6 +407,15 @@ The based message types are:
 * *Sampling*: Server-initiated agentic behaviors and recursive LLM interactions
 
 With additional relevant aspects being configuration, progress tracking, cancellation, error reporting, logging.
+
+Message types are:
+
+* Client->Server: Requests (expect response) and Notifications with method name and parameters.
+* Server->Client: Notifications, Results (Dictionary), and Errors (code, message, data) with some error codes from the JSON RPC spec and others from the application/SDKs.
+
+The MCP site also documents sample client and server implementations in Python and TypeScript to enable implementers to get started quickly.
+Additionally it provides a list of good practices to adhere to for security, error handling and request processing.
+
 
 The protocol spec is also considering *security and trust*, which is an important aspect when allowing LLMs to access external data sources, because especially with write access to databases and filesystems and servers running locally and the potential for malicious code execution, security is a top priority.
 The foundation models are known to be vulnerable to adversarial attacks and hallucinations.
@@ -491,23 +501,23 @@ There is a small check that we only allow read statements in the read tool and v
 
 [source,python]
 ----
-    @server.call_tool()
-    async def handle_call_tool(
-        name: str, arguments: dict[str, Any] | None
-    ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-        """Handle tool execution requests"""
-        try:
-            if name == "get-neo4j-schema":
-                results = db._execute_query(
-                    """
-CALL apoc.meta.data() yield label, property, type, other, unique, index, elementType
-WHERE elementType = 'node'
-RETURN label, 
-    collect(case when type <> 'RELATIONSHIP' then [property, type] end) as attributes,
-    collect(case when type = 'RELATIONSHIP' then [property, head(other)] end) as relationships
-                    """
-                )
-                return [types.TextContent(type="text", text=str(results))]
+      @server.call_tool()
+      async def handle_call_tool(
+          name: str, arguments: dict[str, Any] | None
+      ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+          """Handle tool execution requests"""
+          try:
+              if name == "get-neo4j-schema":
+                  results = db._execute_query(
+                      """
+  CALL apoc.meta.data() yield label, property, type, other, unique, index, elementType
+  WHERE elementType = 'node'
+  RETURN label, 
+      collect(case when type <> 'RELATIONSHIP' then [property, type] end) as attributes,
+      collect(case when type = 'RELATIONSHIP' then [property, head(other)] end) as relationships
+                      """
+                  )
+                  return [types.TextContent(type="text", text=str(results))]
 ----
 
 == Conversational Memory as a Graph 

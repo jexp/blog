@@ -64,7 +64,7 @@ Jetzt können wir das gerade heruntergeladene Modell ausführen und eine Frage s
 Das kleine Modell ist wie gesagt, nicht besonders gut, oft kommen sehr fragwürdige Antworten. 
 Daher sollte auch in kritischen, praktischen Anwendungen nur die Sprachfähigkeiten der LLMs, aber möglichst nicht ihr "Wissen" benutzt werden, sondern dieses aus vertrauenswürdigen Quellen, wie Datenbanken beziehen (mittels Retrieval Augmented Generation - RAG).
 
-.Listing {listing}
+.Listing {listing} - Test mit jbang, erste Frage
 [source,shell]
 ----
 jbang Llama3.java --model ../$MODEL --prompt "Kurz: Wie funktioniert physikalisch ein Induktionsherd?"
@@ -231,13 +231,14 @@ Zum Glück ist bei GGUF/GGMF das Token-Vokabular direkt in das Modelldatei integ
 
 Die Hauptprobleme für Tokenizierung treten bei asiatischen Sprachen z.b. mit Kanji und interessanterweise mit Emoji auf.
 
-Die `Tokenizer` Klasse kümmert sich um die Konvertierung zwischen Text und den Token-Ids:
+Die `Tokenizer` Klasse (Listing {counter:listing}) kümmert sich um die Konvertierung zwischen Text und den Token-Ids:
 
 * Implementiert den "Byte Pair Encoding" (BPE) Algorithmus
 * Behandlung spezieller Tokens
 * Effiziente Textaufteilung mittels regulärer Ausdrücke
 
-[source,java]
+.Listing {listing} - Tokenizer Implementierung
+[source,java] 
 ----
 class Tokenizer {
     private final Pattern compiledPattern;
@@ -397,7 +398,7 @@ Model
 
 Konfigurierbare Auswahl des nächsten Token aus dem Vektor der Wahrscheinlichkeitsverteilung (Logits) abhänging von Temperatur, Top-P aber auch Grammatik- oder Funktionssignatur-getriebene Auswahl.
 
-Es gibt verschiedene Sampling-Strategien:
+Es gibt verschiedene Sampling-Strategien, siehe Listing {counter:listing}:
 
 * `Sampler`: Basis Sampler Strategie Interface
 * `CategoricalSampler`: Global nach Wahrscheinlichkeitsverteilung
