@@ -1,0 +1,884 @@
+= Lama3.java - LLM Inferenz auf GraalVM
+
+In dieser Kolumne haben wir ja schon öfter über Performance Grenzen der JVM gesprochen von LMAX-Disruptor bis zur 1 Billion Row Challenge. Ein neue Herausforderung in der Leistungsgesellschaft der Hardcore Optimierer ist die Beschleunigung der Ausführung (Inferenz) und Training von großen Sprachmodellen (LLMs).
+
+Tiefe Neuronale Netzwerke [3brown1blue] und da sind LLMs keine Ausnahme, beruhen auf einer langen Kette von Schichten (Layers) großer Matrizen (Zehntausende Spalten und Zeilen). 
+Neue Werte für die nächste Schicht werden aus Millonen und Milliarden von Matrixoperationen (zumeist Multiplikationen und Skalarprodukte) berechnet. 
+In GPUs wird das auf die Matrix-Kernel Operationen mittels Programmiersprachen wie Nvdia's CUDA oder OpenCL abgebildet. 
+Auf CPUs kann es mittels SIMD Operationen und effizientem Cache-Management (meist in Assembler) optimiert werden.
+Die bekanntesten, hochoptimierten Inferenz Tools für CPUs sind vLLM (Mozilla), Ollama, vLite, oder TGI von Huggingface.
+
+Aber auf der Devoxx in Antwerpen gab es einen sehr beeindruckenden Vortrag von Alfonso Peterssen und Alina Yurenko vom GraalVM Team, wie das bekannte open-weights LLM Llama3 von Meta in einer komplett isolierten Java Implementierung mit der Java Vector API und dem Graal Compiler und Native Image (Ahead-of-Time Compiliation [Hun0119]) zu durchaus nutzbaren Inferenz-Geschwindigkeiten gebracht werden konnte.
+Und das wollen wir heute mal etwas genauer beleuchten.
+
+Aber beginnen wir mit dem praktischen Beispiel.
+
+== Beispiel
+
+Man kann [Llama3.java] auf dem eigenen Rechner direkt mittels `jbang` ausführen, ein geeignetes LLama3 Modell muss vorher heruntergeladen geladen, siehe Listing {counter:listing}.
+Das kleine Modell mit auf 4 Bit pro Gewicht reduzierter Genauigkeit ist qualitativ nicht besonders gut, aber für die Demonstration der Inferenz ausreichend.
+
+.Listing {listing} - GraalVM, jbang, Repository und Modell herunterladen
+[source,shell]
+----
+# aktuelle GraalVM installieren
+sdk install java grl25.ea.8-graal
+# jbang installieren
+sdk install jbang
+
+# Git Repository Clonen
+git clone https://github.com/mukel/llama3.java.git
+cd llama3.java
+
+# 4 bit quantized, 3B parameter Llama 3.2 Modell - 1.7GB
+export MODEL=Llama-3.2-3B-Instruct-Q4_0.gguf
+# Modell herunterladen
+curl -L -O https://huggingface.co/mukel/Llama-3.2-3B-Instruct-GGUF/resolve/main/$MODEL
+
+jbang Llama3.java --help
+
+Usage:  jbang Llama3.java [options]
+
+Options:
+  --model, -m <path>            required, path to .gguf file
+  --interactive, --chat, -i     run in chat mode
+  --instruct                    run in instruct (once) mode, default mode
+  --prompt, -p <string>         input prompt
+  --system-prompt, -sp <string> (optional) system prompt
+  --temperature, -temp <float>  temperature in [0,inf], default 0.1
+  --top-p <float>               p value in top-p (nucleus) sampling in [0,1] default 0.95
+  --seed <long>                 random seed, default System.nanoTime()
+  --max-tokens, -n <int>        number of steps to run for < 0 = limited by context length
+  --stream <boolean>            print tokens during generation; may cause encoding artifacts
+  --echo <boolean>              print ALL tokens to stderr, if true, then set stream to false
+
+Examples:
+  jbang Llama3.java --model $MODEL --prompt "Tell me a joke"
+  jbang Llama3.java --model $MODEL --system-prompt "Reply concisely, in French" \
+                    --prompt "Who was Marie Curie?"
+  jbang Llama3.java --model $MODEL --system-prompt "Answer concisely" --chat
+  jbang Llama3.java --model $MODEL --prompt "Print 5 emojis" --stream=false
+----
+
+Jetzt können wir das gerade heruntergeladene Modell ausführen und eine Frage stellen, siehe Listing {counter:listing}.
+Das kleine Modell ist wie gesagt, nicht besonders gut, oft kommen sehr fragwürdige Antworten. 
+Daher sollte auch in kritischen, praktischen Anwendungen nur die Sprachfähigkeiten der LLMs, aber möglichst nicht ihr "Wissen" benutzt werden, sondern dieses aus vertrauenswürdigen Quellen, wie Datenbanken beziehen (mittels Retrieval Augmented Generation - RAG).
+
+.Listing {listing}
+[source,shell]
+----
+jbang Llama3.java --model ../$MODEL --prompt "Kurz: Wie funktioniert physikalisch ein Induktionsherd?"
+Parse ../Llama-3.2-3B-Instruct-Q4_0.gguf: 562 millis
+Load LlaMa model: 275 millis
+
+WARNING: Using incubator modules: jdk.incubator.vector
+WARNING: sun.misc.Unsafe::getShort will be removed in a future release
+
+Ein Induktionsherd funktioniert physikalisch wie folgt:
+
+1.  Elektrische Energie: Der Herd hat einen elektrischen Strom, der durch einen Kabel in den Herd eingeht.
+2.  Elektromagnetfeld: Der Strom im Kabel erzeugt ein elektromagnetisches Feld, das sich um den Herd und die Oberfläche der Kochfläche ausdehnt.
+3.  Induktion: Wenn ein Metallgegenstand, wie ein Kochtopf, in das elektromagnetische Feld gerät, induziert es einen Strom im Metallgegenstand.
+4.  Heizung: Der Strom im Metallgegenstand erzeugt Wärme, die als Hitze auftritt.
+5.  Kochfläche: Die Hitze wird auf die Kochfläche übertragen, die dann die Nahrung erhitzt.
+context: 228/512 prompt: 10,89 tokens/s (27) generation: 10,08 tokens/s (201)
+----
+
+== Historie
+
+Andrey [Karpathy] implementierte ein simples LLM in [llama2.c] welche auf einer spezifischen Modellrepräsentation basierte.
+Davon inspiriert schrieb Alfonso eine erste Implementierung in Java, sehr nah an der Vorlage. 
+Diese war aber nicht besonders performant, mit nur 1.5 Token pro Sekunde für Llama2.
+
+Nach einer erneuten Ermutigung im [airhacks-Podcast] mit Adam Bien gab es einen neuen Anlauf desser Ergebnis jetzt Llama3.java ist.
+Das ist eine einzelne Java Datei ohne externe Abhängigkeiten, das ganze Modell-Management, die Inferenz des Neuralen Netzwerks, effiziente Matrix Repräsentation und Operationen sind darin implementiert (2500 Zeilen Quellcode mit vielen Kommentaren und Erklärungen). 
+
+Ein wichtiger Schritt war der Wechsel der spezifischen Repräsentation des Models und seiner Gewichte (Tensoren) von Andrey Karpathy zum allgemeineren GGUF Format (GPT Generated Unfied Format) mit dem die Unterstützung vieler Modelle ermöglicht wurde.
+
+Es nutzt die Vector API (JEP489) für SIMD Operationen und Foreign Memory API (JEP454,442) und profitiert besonders von der Beta-Unterstützung der Vector-API in GraalVM (nur auf AMD64, nicht ARM) und natürlich von den Effizienzen die der Graal-Compiler und die native Kompilierung mit sich bringen.
+
+== Lokale Inferenz
+
+Warum ist lokale Inferenz interessant?
+Neben der rein technologischen Faszinierung mit dem Thema gibt es auch rein praktische Erwägungen, warum lokale Inferenz notwendig sein kann.
+
+Neben dem Kostenfaktor, den man viel besser kontrollieren kann wenn Inferenz auf eigener Infrastruktur läuft, auch durch die Wahl geeigneter, spezifischerer, kleinerer Modelle (Small Language Model - SLM), ist vor allem Datensicherheit und Datenschutz ein Hauptaspekt. Die Infrastruktur kann sowohl in server-seitig vorliegen, aber auch bei leistungsfähigen Maschinen am Arbeitsplatz erfolgen.
+
+Viele Daten die ggf. mit KI analysiert werden sollen, oder auf deren Basis neue Einsichten gewonnen oder Entscheidungen vorgeschlagen werden sollen, sind durch Regularien geschützt und sollten nicht an die Inferenz-APIs der großen Anbieter weitergegeben werden.
+
+Mit der Verfügbarkeit von open-source (bzw. open-weights) Modellen, ist es jetzt möglich ähnliche Inferenzleistungen selbst zu erbringen.
+Natürlich würde in einem realistischen Einsatz eine GPU-basierte Inferenz viel leistungsfähiger und effizienter sein und CPUs nur im Ausnahmefall genutzt werden.
+
+== Bestandteile Großer Sprachmodelle (Kurzübersicht - Box?)
+
+**Token:** Tokens sind die Grundbausteine, mit denen LLMs arbeiten. Sie repräsentieren Textfragmente wie einzelne Zeichen, Silben, Wörter oder Wortteile. Der Text wird in eine Sequenz solcher Tokens umgewandelt, bevor er vom Modell verarbeitet wird. Ein durchschnittliches deutsches Wort umfasst etwa 1,5-2 Tokens, wobei die Tokenisierung auf statistischen Mustern basiert, die während des Trainings gelernt wurden und modellspezifisch sind.
+
+**Neurales Netzwerk:** LLMs sind komplexe neurale Netzwerke, die aus Milliarden von Parametern bestehen. Diese Parameter sind in mehreren Schichten angeordnet, die Informationen von einer Ebene zur nächsten weitergeben. Jede Schicht extrahiert und transformiert Merkmale aus den Eingabedaten, wobei tiefere Schichten zunehmend abstraktere Konzepte erfassen können. Diese Architektur ermöglicht es dem Modell, komplexe sprachliche Muster zu erkennen und zu generieren.
+
+**Transformer:** Die Transformer-Architektur bildet das Rückgrat moderner LLMs. Der Schlüsselmechanismus ist die Attention (Aufmerksamkeit), die es dem Modell ermöglicht, Beziehungen zwischen allen Wörtern in einem Text gleichzeitig zu modellieren. 
+
+////
+Multi-head Attention erlaubt dem Modell, verschiedene Aspekte dieser Beziehungen parallel zu betrachten. Cross-Attention wird besonders in Encoder-Decoder-Architekturen verwendet, um Informationen zwischen verschiedenen Textsequenzen auszutauschen.
+////
+
+**Training:** Das Training eines LLM erfolgt in zwei Hauptphasen: Zuerst das Pretraining, bei dem das Modell auf enormen Datenmengen trainiert wird, um Sprache(n) und ihre Konzepte allgemein zu verstehen. Dabei lernt es, das nächste Wort (Token) in einer Sequenz vorherzusagen. Anschließend folgt oft Feintuning, bei dem das Modell auf spezifischere Aufgaben wie das Befolgen von Anweisungen optimiert wird, häufig mithilfe von menschlichem Feedback (RLHF - Reinforcement Learning from Human Feedback).
+
+**Inferenz:** Bei der Inferenz generiert das LLM Text basierend auf einer Eingabeaufforderung (Prompt). Das Modell berechnet Wahrscheinlichkeiten für jedes mögliche nächste Token und wählt dann eines aus. Dieser Prozess wird wiederholt, um eine Sequenz zu erzeugen. Die Inferenz erfordert erhebliche Rechenressourcen, besonders für größere Modelle, und kann je nach Modellgröße und verfügbarer Hardware unterschiedlich schnell sein.
+
+**Sampling:** Sampling bezeichnet den Prozess der Auswahl des nächsten Tokens während der Textgenerierung. Statt einfach das wahrscheinlichste Token zu wählen (greedy decoding), verwenden LLMs verschiedene Sampling-Strategien. Parameter wie Temperatur steuern die Zufälligkeit: Eine höhere Temperatur führt zu kreativeren, aber potenziell weniger kohärenten Antworten, während eine niedrigere Temperatur konsistentere, aber möglicherweise repetitivere Antworten erzeugt. Weitere Techniken wie Top-p (Betrachtung des wahrscheinlichsten Subsets) Sampling helfen, die Balance zwischen Kreativität und Kohärenz zu optimieren.
+
+== Bestandteile von Llama3.java
+
+Alfonso betont immer wieder in Vorträgen und Podcasts, dass die ganze Inferenz-Berechnung keine Magie oder Hexenwerk ist und auch keine tiefen Data-Science Kenntnisse benötigt, sondern nur Datei- und Speicher-Management, sowie einige einfache Matrix- und Vektor-Operationen vor allen Kombinationen von Multiplikation und Addition für Skalarprodukte.
+
+Die Bestandteile des Systems sind gekapselt und anpassbar (es gibt Varianten für Tokenizer, Sampler und Inferenz).
+
+Insgesamt sind folgende Bausteine implementiert, die exemplarisch mit einigen Codebeispielen erläutert werden:
+
+=== GGUF Datei Parser
+
+Lesen der Metadaten, inklusive Hyperparameter (Anzahl Schichte, Attention-Heads), Token-Vokabular für das Modell (Liste von Strings mit ggf. Gewichten), Informationen über die Gewichte-Tensoren (auch Quantisierung) und die Liste der Layer mit den Tensor-Gewichten. (siehe Listing {counter:listing}). Dabei werden alle Informationen der Header auf typsichere Java Enums und Records abgebildet.
+Die Implementierung nutzt `FileChannel` für das Memory Mapping, um die großen (multi-Gigabyte) Modell-Daten effizient in MemorySegmente aus der Foreign Memory API zu mappen.
+
+.Listing {listing} Laden der Tensor-Gewichte in Memory-Segmente
+[source,java]
+----
+public static Map<String, GGMLTensorEntry> loadTensors(
+        FileChannel fileChannel, long tensorDataOffset, Map<String, GGUFTensorInfo> tensorInfos) 
+        throws IOException {
+    Arena arena = Arena.ofAuto();
+    MemorySegment tensorData = fileChannel.map(FileChannel.MapMode.READ_ONLY, 
+                        tensorDataOffset, fileChannel.size() - tensorDataOffset, arena);
+    Map<String, GGMLTensorEntry> tensorEntries = HashMap.newHashMap(tensorInfos.size());
+    for (Map.Entry<String, GGUFTensorInfo> entry : tensorInfos.entrySet()) {
+        GGUFTensorInfo ti = entry.getValue();
+        int numberOfElements = FloatTensor.numberOfElements(ti.dimensions());
+        int sizeInBytes = Math.toIntExact(ti.ggmlType().byteSizeFor(numberOfElements));
+        MemorySegment memorySegment = tensorData.asSlice(ti.offset(), sizeInBytes);
+        tensorEntries.put(ti.name(), 
+            new GGMLTensorEntry(tensorData, ti.name(), ti.ggmlType(), 
+                                ti.dimensions(), memorySegment));
+    }
+    return tensorEntries;
+}
+
+public record GGUFTensorInfo(String name, int[] dimensions, GGMLType ggmlType, long offset) {
+}
+----
+
+=== Matrizenoperationen und Quantisierung mittels Vector API
+
+Es werden verschiedene Quantisierungen unterstützt, um sowohl Speicherverbrauch als besonders auch Durchsatz zu reduzieren, von 4-Bit bis volle 32 Bit Auflösung für die Gewichte.
+
+Die abstrakte Basisklasse ist `FloatTensor`, davon sind jeweilige Spezialisierungen für die verschiedenen Quantisierungen abgeleitet:
+
+* `Q4_0FloatTensor`
+* `Q8_0FloatTensor`
+* `BF16FloatTensor`
+* `F16FloatTensor`
+* `ArrayFloatTensor`
+
+Jede Subklasse implementiert das Skalarprodukt mittels der [VectorAPI] bei der das Decoding der Quantisierung während der Berechnung vorgenommen wird (exemplarisch für BFloat16 in Listing {counter:listing} mit einer 16 Bit kleineren Mantisse).
+Die kleinen Quantisierungen erfordern teilweise deutlich mehr Code (60 Zeilen), da die Formate vor dem Laden in die SIMD Register partiell ausgelesen und dekomprimiert werden müssen.
+
+.Listing {listing} Skalarprodukt in BFloat16 Tensor Subklasse
+[source,java]
+----
+private static float vectorDot(BF16FloatTensor thiz, int thisOffset, 
+                        ArrayFloatTensor that, int thatOffset, int size) {
+    FloatVector val = FloatVector.zero(F_SPECIES);
+    int upperBound = F_SPECIES.loopBound(size);
+    for (int i = 0; i < upperBound; i += F_SPECIES.length()) {
+        FloatVector thatVector = that.getFloatVector(F_SPECIES, thatOffset + i);
+        ShortVector bfloat16 = 
+            ShortVector.fromMemorySegment(S_SPECIES_HALF, thiz.memorySegment, 
+            (thisOffset + i) * (long) GGMLType.BFLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+        FloatVector thizVector = bfloat16
+                .castShape(I_SPECIES, 0) // (int) vi
+                .lanewise(VectorOperators.LSHL, 16) // vi <<= 16
+                .reinterpretAsFloats(); // Float.intBitsToFloat(vi)
+        // Skalarprodukt
+        val = thizVector.fma(thatVector, val);
+    }
+    float result = val.reduceLanes(VectorOperators.ADD);
+    if (upperBound < size) {
+        result += scalarDot(thiz, thisOffset + upperBound, that, thatOffset + upperBound, size - upperBound);
+    }
+
+    return result;
+}
+----
+
+
+////
+a magic number with an optional version number
+model-specific hyperparameters, including
+metadata about the model, such as the number of layers, the number of heads, etc.
+a ftype that describes the type of the majority of the tensors,
+for GGML files, the quantization version is encoded in the ftype divided by 1000
+an embedded vocabulary, which is a list of strings with length prepended. The GGMF/GGJT formats embed a float32 score next to the strings.
+finally, a list of tensors with their length-prepended name, type, and (aligned, in the case of GGJT) tensor data
+////
+
+// Die Gewichte können direkt mittels Memory-Mapping in den Speicher abgebildet werden, und damit direkt für den Zugriff mittels Foreign-Memory-API (FFM) und dann die Matrix-Multiplikation mittels Vektor API zur Verfügung stehen.
+
+=== Tokenizer
+
+Die Umwandlung der textuellen Ein- und Ausgaben erfolgt mittels der Abbildung von Silben auf Token, deren Index dann in den Matrizen und Vektoren mit Gewichten repräsentiert wird
+
+Jedes Modell hat seine etwas abweichende Behandlung von Tokens.
+Zum Glück ist bei GGUF/GGMF das Token-Vokabular direkt in das Modelldatei integriert und nicht ausserhalb implementiert.
+
+Die Hauptprobleme für Tokenizierung treten bei asiatischen Sprachen z.b. mit Kanji und interessanterweise mit Emoji auf.
+
+Die `Tokenizer` Klasse kümmert sich um die Konvertierung zwischen Text und den Token-Ids:
+
+* Implementiert den "Byte Pair Encoding" (BPE) Algorithmus
+* Behandlung spezieller Tokens
+* Effiziente Textaufteilung mittels regulärer Ausdrücke
+
+[source,java]
+----
+class Tokenizer {
+    private final Pattern compiledPattern;
+    private final Vocabulary vocabulary;
+    private final Map<Pair<Integer, Integer>, Integer> merges;
+    private final Map<String, Integer> specialTokens;
+...
+
+    List<Integer> encode(String text, Set<String> allowedSpecial) {
+        Set<String> special = allowedSpecial;
+        if (special.isEmpty()) {
+            return encodeOrdinary(text);
+        }
+        // ...
+        // "special" Charakter separieren
+        String[] specialChunks = text.split(specialPattern);
+
+        List<Integer> ids = new ArrayList<>();
+        for (String part : specialChunks) {
+            if (special.contains(part)) {
+                ids.add(getSpecialTokens().get(part));
+            } else {
+                ids.addAll(encodeOrdinary(part));
+            }
+        }
+        return ids;
+    }
+
+    public List<Integer> encodeOrdinary(String text) {
+        List<String> textChunks = findAll(compiledPattern, text);
+        List<Integer> ids = new ArrayList<>();
+        for (String chunk : textChunks) {
+            List<Integer> chunkIds = encodeChunk(chunk);
+            ids.addAll(chunkIds);
+        }
+        return ids;
+    }
+
+    private List<Integer> encodeChunk(String chunk) {
+        List<Integer> ids = new ArrayList<>();
+        for (int b : chunk.toCharArray()) {
+            int tokenIndex = this.vocabulary.getIndex((char) b);
+            ids.add(tokenIndex);
+        }
+        // ... merging ...
+        return ids;
+    }
+
+}
+----
+
+=== Prompt Formate
+
+Verschiedene Modelle erwarten Prompts in leicht unterschiedlichen Formaten, daher mussten in Llama3.java Möglichkeiten integriert werden, um das zu ermöglichen.
+
+=== Inferenz Berechnung
+
+Nach der Umwandlung in Tokens werden mit der kompletten bisherigen Eingabe, durch Lesen und Multiplikation mit den Gewichten der aufeinanderfolgenden Schichten die Wahrscheinlichen aller Tokens berechnet, siehe Listing {counter:listing}.
+
+Trotz des Aufwands für die Quantisierung ist die Inferenz-Implementierung verständlich.
+Man sieht wie Informationen durch das Modell fliessen, und kann den Gleichungen folgen.
+
+.Listing {listing} - Inferenz Implementierung - Forward pass durch das Transformer Modell
+[source,java]
+----
+static FloatTensor forward(Llama model, State state, int[] tokens, 
+                           int position, boolean computeLogits) {
+    // a few convenience variables
+    Configuration config = model.configuration();
+    Weights weights = model.weights();
+    int dim = config.dim;
+    int headSize = config.headSize;
+    int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
+    final int nTokens = tokens.length;
+
+    // copy the token embedding into x
+    Parallel.parallelFor(0, nTokens, t ->
+        weights.token_embedding_table.copyTo(tokens[t] * dim, state.x[t], 0, dim)
+    );
+
+    // forward durch alle Layers mit RMSNorm + RoPE positional Encoding
+    for (int l = 0; l < config.numberOfLayers; l++) {
+        final int curLayer = l;
+        Parallel.parallelFor(0, nTokens, t ->
+            rmsnorm(state.xb[t], state.x[t], weights.rms_att_weight[curLayer], dim, config.rmsNormEps)
+        );
+...
+
+        // Attention-Mechanismus: iteriere über alle heads
+        Parallel.parallelForLong(0, (long) nTokens * (long) config.numberOfHeads, ht -> {
+            int token = (int) (ht / config.numberOfHeads);
+...
+            // iterate over all timesteps, including the current one
+            for (int t = 0; t <= position + token; t++) {
+...
+            }
+
+            // softmax the scores to get attention weights, from 0..position inclusively
+            state.att[token].softmaxInPlace(attOffset, position + token + 1);
+...
+        });
+...
+        // Feed-forward Netzwerk - SwiGLU non-linearity (logistic sigmoid)
+        Parallel.parallelFor(0, nTokens, t -> {
+            state.hb[t].mapInPlace(value -> value / (float) (1.0 + Math.exp(-value)));
+        });
+...
+    }
+...
+    // Wandel classifier in logits
+    weights.wcls.matmul(state.x[nTokens - 1], state.logits, config.vocabularySize, dim);
+    state.idxPrevBlock = nTokens - 1;
+
+    return state.logits;
+}
+----
+
+• Umwandlung von Token in Vektoren
+• Layer-Normalisierung: Stabilisierung der Aktivierungen
+• Multi-Head-Attention mit RoPE: Erfassung von Wortbeziehungen mit Positionsinformation
+• Residual-Verbindungen: Verhinderung von Informationsverlust
+• Feed-Forward-Netzwerk mit SwiGLU: Nicht-lineare Transformation
+• Finale Normalisierung und Projektion zu Logits: Berechnung der Token-Wahrscheinlichkeiten
+
+////
+Die verschiedenen unterstützten LLMs sind sich alle ziemlich ähnlich, so dass nach der initialen A
+
+class FloatTensor ...
+
+ft.matmul()
+weights.wq[l].matmul(state.xb, dim, dim)
+each equation / operation implemented in a pure java with nested loops
+
+verständlich wie Informationen durch das Modell fliessen, man kann den Gleichungen folgen
+
+"you multiply some matrices and this thing starts speaking to you"
+the power is in the data (i.e. compression of all the pre-training data into weights and biases captures both information and language)
+
+Model
+- Vor allem Matrizen
+- Quantisierung - Projektion von FP32 oder FP16 auf 4 oder 8 bit
+- Jedes Gewicht (1B oder 3B - x GB) wird genau einmal gelesen für jeden generierten Token
+
+- Inputs == Sampling
+- Pre RMS Layernorm
+- RoPE Embeddings* (Rotary Position Encoding)
+- Multihead Attention*
+- Residual
+- Post RMS Layernorm
+- MLP / SwiGLU*
+- Residual
+- RMS Layernorm
+- Logits -> vector of probabilities for token (sampler picks)
+////
+
+=== Sampler
+
+Konfigurierbare Auswahl des nächsten Token aus dem Vektor der Wahrscheinlichkeitsverteilung (Logits) abhänging von Temperatur, Top-P aber auch Grammatik- oder Funktionssignatur-getriebene Auswahl.
+
+Es gibt verschiedene Sampling-Strategien:
+
+* `Sampler`: Basis Sampler Strategie Interface
+* `CategoricalSampler`: Global nach Wahrscheinlichkeitsverteilung
+* `ToppSampler`: Auswahl aus der Menge top-p der wahrscheinlichsten Token
+* `ARGMAX`: Nulltemperatur Sampler - nimmt immer das wahrscheinlichste Token
+
+.Listing {listing} - Sampler Factor Methode
+[source,java]
+----
+static Sampler selectSampler(int vocabularySize, float temperature, float topp, long rngSeed) {
+    Sampler sampler;
+    if (temperature == 0.0f) {
+        // greedy argmax sampling
+        sampler = Sampler.ARGMAX;
+    } else {
+        // temperature-based sampling
+        RandomGenerator rng = RandomGeneratorFactory.getDefault().create(rngSeed);
+        if (topp <= 0 || topp >= 1) {
+            // simple probabilistic sampling
+            sampler = new CategoricalSampler(rng);
+        } else {
+            // nucleus (top-p) sampling
+            sampler = new ToppSampler(vocabularySize, topp, rng);
+        }
+    }
+    return sampler;
+}
+----
+
+////
+=== Weiteres
+
+- Transformer Architecture (Picture)
+
+3brown1blue
+bild schritte
+////
+
+////
+== Herausforderungen
+
+Unsafe -> Memory Segment API
+
+- memory bandwidth is the limitation -> quantization, larger models are more resilient against quantization
+- reduces the amount of information every weight carries
+
+- vector API JEP 489  / memory segment
+- 90% of inference is matrix + vektor operationen 
+- andere Operationen müssen nicht getuned werden solange Matrixmultiplikation noch der Flaschenhals ist (softmax, attention)
+
+
+----
+void matrixVectorMul(FloatTensor m, FloatTensor v, FloatTensor out, int dim0, int dim1) {
+    for (int i = 0; i < dim0; ++i) {
+        float result = 0f;
+        for (int j= 0; j < dim1; j++) {
+            result += m.getFloat (i * dim1 + j) * v.getFloat (j) ;
+        }
+        out. setFloat(i, result);
+    }
+}
+// - optimized ->
+void matmul(FloatTensor that, FloatTensor out, int dim0, int dim1) {
+    // parallelisierter äußere Schleife, mit IntStream.parallel
+    // skalarprodukt innen
+    Parallel.parallelFor(0, dim0, i -> out.setFloat(i, dot(i * dim1, that, 0, dim1)));
+}
+// Skalarprodukt
+float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
+    float result = 0f;
+    for (int j = 0; j < size; j++) {
+        result += this.getFloat(thisOffset + j) * that.getFloat(thatOffset + j);
+    }
+    return result;
+}
+
+final class Parallel {
+    public static void parallelFor(int startInclusive, int endExclusive, IntConsumer action) {
+        if (startInclusive == 0 && endExclusive == 1) {
+            action.accept(0);
+            return;
+        }
+        IntStream.range(startInclusive, endExclusive).parallel().forEach(action);
+    }
+
+    public static void parallelForLong(long startInclusive, long endExclusive, LongConsumer action) {
+        if (startInclusive == 0 && endExclusive == 1) {
+            action.accept(0);
+            return;
+        }
+        LongStream.range(startInclusive, endExclusive).parallel().forEach(action);
+    }
+}
+----
+
+Vector API Skalarprodukt für quatisierte Operation -> 60 zeilen code
+Höhere Komplexität da Werte vor dem Laden in die SIMD Register erst dekomprimiert werden müssen
+
+----
+   private static float vectorDot(Q4_0FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
+        float result = 0f;
+        int j = 0;
+
+        // Align thisOffset + j to type().getBlockSize().
+        assert Integer.bitCount(GGMLType.Q4_0.getBlockSize()) == 1 : "power of 2";
+        int alignmentBound = Math.min(size, -thisOffset & (GGMLType.Q4_0.getBlockSize() - 1));
+        if (alignmentBound > 0) {
+            result += FloatTensor.scalarDot(thiz, thisOffset, that, thatOffset, alignmentBound);
+            j += alignmentBound;
+        }
+        assert (thisOffset + j) % GGMLType.Q4_0.getBlockSize() == 0;
+
+        FloatVector val = FloatVector.zero(F_SPECIES);
+        int blockOffset = (thisOffset + j) / GGMLType.Q4_0.getBlockSize() * GGMLType.Q4_0.getTypeSize();
+        int upperBound = size / GGMLType.Q4_0.getBlockSize() * GGMLType.Q4_0.getBlockSize();
+        for (; j < upperBound; j += GGMLType.Q4_0.getBlockSize(), blockOffset += GGMLType.Q4_0.getTypeSize()) {
+            float wScaleValue = Float.float16ToFloat(readShort(thiz.memorySegment, blockOffset));
+            var wScale = FloatVector.broadcast(F_SPECIES, wScaleValue);
+            var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_128, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+            var loBytes = wBytes.and((byte) 0xF).sub((byte) 8);
+            var hiBytes = wBytes.lanewise(VectorOperators.LSHR, 4).sub((byte) 8);
+            switch (F_SPECIES.vectorBitSize()) {
+                case 512 -> {
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 0));
+                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 0));
+                    val = sum0.add(sum2).fma(wScale, val);
+                }
+                case 256 -> {
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 0));
+                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 1));
+                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 2 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 0));
+                    var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + 3 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 1));
+                    val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
+                }
+                case 128 -> {
+                    // This loop cannot be unrolled, why?
+                    for (int i = 0; i < 2; ++i) {
+                        var tmp = i == 0 ? loBytes : hiBytes;
+                        var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 0) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 0));
+                        var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 1) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 1));
+                        var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 2) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 2));
+                        var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 3) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 3));
+                        val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
+                    }
+                }
+                default -> throw new UnsupportedOperationException(F_SPECIES.toString());
+            }
+        }
+        result += val.reduceLanes(VectorOperators.ADD);
+
+        // Remaining entries.
+        if (j < size) {
+            result += FloatTensor.scalarDot(thiz, thisOffset + j, that, thatOffset + j, size - j);
+        }
+
+        return result;
+    }
+}
+----
+////
+
+== GraalVM
+
+Alfonso arbeitet bei Oracle an GraalVM, speziell an der Java on Java (Espresso) Implementierung bei der Java Bytecode auf der VM mittels der Truffle-Sprachbibliothek abgebildet wird. [Hun0119]
+
+Daher war es naheliegend die Vorteile von GraalVM für aggressive Optimierung von ausführlicheren Java-Sprachkonstrukten auf effizienten Maschinencode und die Möglichkeiten der Ahead-of-Time (AOT) Kompilierung und Vorberechnungen auszunutzen.
+
+Ein Aspekt war beiderseits vorteilhaft - dass die Unterstützung der Java Vektor API für SIMD (Single Instruction Multiple Data) in GraalVM schon für Java 21 (mehr Unterstützung in Java 24) in der Entwicklung war, und hier damit sehr früh genutzt und auch getestet werden konnte. Diese API ist immer noch ein Preview-Feature im JDK und wird wahrscheinlich bis zum Erscheinen von Value Classes (Valhalla) in diesem Zustand verbleiben.
+
+Die Foreign Function und Memory API, die den Zugriff auf native Bibliotheken und (gemappte) Speicherbereiche sauberer, effizienter und ohne die Hilfe von `sun.misc.Unsafe` ermöglicht, funktionierte schon ohne Probleme auf GraalVM im JIT Modus. 
+
+== Inferenz mit Native Image 
+
+Wir kompilieren erst einmal den Java Quelltext und erzeugen eine Jar-Datei wie in Listing {counter:listing} gezeigt, die wir dann später nativ übersetzen. 
+Dazu müssen wir die Vorschau-Features aktivieren und das Vector Modul hinzufügen.
+Wir können die (weniger als 80 Kilobyte kleine!) Jar Datei direkt testen.
+
+.Listing {listing} Java Jar File erzeugen
+[source,shell]
+----
+javac -g --enable-preview -source 25 --add-modules jdk.incubator.vector \
+      -d target/classes Llama3.java
+jar -cvfe llama3.jar com.llama4j.Llama3 LICENSE -C target/classes .
+
+# Jar File Testen
+java --enable-preview --add-modules jdk.incubator.vector -jar llama3.jar \
+     --model $MODEL --prompt "What is the currency in the UK?"
+Parse Llama-3.2-3B-Instruct-Q4_0.gguf: 506 millis
+
+The official currency of the United Kingdom is the Pound Sterling (GBP). 
+It is commonly abbreviated as "£" and is divided into 100 pence.
+context: 50/512 prompt: 14.92 tokens/s (18) generation: 18.92 tokens/s (32)
+----
+
+Das Native Image Kompilat der Vector API war schon in den Tests etwas (15%) schneller als die JDK/JIT Variante. Vor allem da sich die Eliminierung von Schleifen, die dabei passiert, gut mit der nativen Kompilierung ergänzt.
+
+Für Native Image (AOT) muss die experimentelle Unterstützung der FFM APIs noch mittels `-H:+ForeignAPISupport` aktiviert werden.
+
+Man kann mit `-O3` maximale Optimierung aktivieren und zum Beispiel den Check auf Array-Grenzen in der Vektor-API abschalten, wie in Listing {counter:listing} zu sehen.
+
+.Listing {listing} Natives Binary erzeugen und testen
+[source,shell]
+----
+native-image -H:+UnlockExperimentalVMOptions -H:+VectorAPISupport \
+-H:+ForeignAPISupport -O3 -march=native --enable-preview \
+--add-modules jdk.incubator.vector \
+--initialize-at-build-time=com.llama4j.FloatTensor \
+-Djdk.incubator.vector.VECTOR_ACCESS_OOB_CHECK=0 \
+-jar llama3.jar -o llama3
+
+GraalVM Native Image: Generating 'llama3' (executable)...
+[1/8] Initializing...                       (4.4s @ 0.35GB)
+ Java version: 25+8-LTS, vendor: Oracle GraalVM 25-dev+8.1
+ Graal compiler: optimization level: 3, target machine: native
+[2/8] Performing analysis...       [******] (4.1s @ 0.60GB)
+[3/8] Building universe...                  (1.7s @ 0.53GB)
+[4/8] Parsing methods...               [**] (2.3s @ 0.92GB)
+[5/8] Inlining methods...             [***] (0.4s @ 0.72GB)
+[6/8] Compiling methods...           [****] (13.7s @ 0.60GB)
+[7/8] Laying out methods...            [**] (2.1s @ 0.76GB)
+[8/8] Creating image...                 [*] (1.6s @ 0.82GB)
+
+Finished generating 'llama3' in 31.6s - 24.54MB in total.
+
+./llama3 --model $MODEL --prompt "Translate 'Slava Ukraini'"
+Load LlaMa model: 231 millis
+The phrase "Slava Ukraini" is a Ukrainian expression that translates to "Glory to Ukraine" in English.
+context: 42/512 prompt: 24.41 tokens/s (17) generation: 12.24 tokens/s (25)
+----
+
+////
+WARNING: Using incubator modules: jdk.incubator.vector
+========================================================================================================================
+GraalVM Native Image: Generating 'llama3' (executable)...
+========================================================================================================================
+[1/8] Initializing...                                                                                    (4.4s @ 0.35GB)
+ Java version: 25+8-LTS, vendor version: Oracle GraalVM 25-dev+8.1
+ Graal compiler: optimization level: 3, target machine: native, PGO: ML-inferred
+ C compiler: gcc (linux, x86_64, 12.2.0)
+ Garbage collector: Serial GC (max heap size: 80% of RAM)
+ 1 user-specific feature(s):
+ - com.oracle.svm.thirdparty.gson.GsonFeature
+------------------------------------------------------------------------------------------------------------------------
+ 2 experimental option(s) unlocked:
+ - '-H:+ForeignAPISupport' (origin(s): command line)
+ - '-H:+VectorAPISupport' (origin(s): command line)
+------------------------------------------------------------------------------------------------------------------------
+Build resources:
+ - 28.45GB of memory (21.4% of system memory, using available memory)
+ - 32 thread(s) (100.0% of 32 available processor(s), determined at start)
+[2/8] Performing analysis...  [******]                                                                   (4.1s @ 0.60GB)
+    4,588 reachable types   (74.7% of    6,143 total)
+    4,325 reachable fields  (36.8% of   11,737 total)
+   23,811 reachable methods (45.4% of   52,416 total)
+    1,266 types,    12 fields, and   161 methods registered for reflection
+       57 types,    58 fields, and    52 methods registered for JNI access
+        0 downcalls and 0 upcalls registered for foreign access
+        4 native libraries: dl, pthread, rt, z
+[3/8] Building universe...                                                                               (1.7s @ 0.53GB)
+[4/8] Parsing methods...      [**]                                                                       (2.3s @ 0.92GB)
+[5/8] Inlining methods...     [***]                                                                      (0.4s @ 0.72GB)
+[6/8] Compiling methods...    [****]                                                                    (13.7s @ 0.60GB)
+[7/8] Laying out methods...   [**]                                                                       (2.1s @ 0.76GB)
+[8/8] Creating image...       [*]                                                                        (1.6s @ 0.82GB)
+  13.81MB (56.29%) for code area:    10,461 compilation units
+   8.52MB (34.71%) for image heap:  110,650 objects and 55 resources
+   2.21MB ( 9.00%) for other data
+  24.54MB in total
+------------------------------------------------------------------------------------------------------------------------
+Top 10 origins of code area:                                Top 10 object types in image heap:
+   8.94MB java.base                                            2.66MB byte[] for code metadata
+   2.40MB svm.jar (Native Image)                               1.33MB byte[] for java.lang.String
+   1.31MB jdk.incubator.vector                               735.02kB java.lang.String
+ 392.17kB llama3.jar                                         540.26kB java.lang.Class
+ 240.33kB com.oracle.svm.svm_enterprise                      477.15kB com.oracle.svm.core.hub.DynamicHubCompanion
+ 205.48kB java.logging                                       475.25kB heap alignment
+  80.32kB org.graalvm.nativeimage.base                       284.34kB byte[] for general heap data
+  39.33kB org.graalvm.collections                            259.10kB java.util.HashMap$Node
+  36.91kB jdk.internal.vm.ci                                 175.52kB byte[] for embedded resources
+  33.12kB jdk.graal.compiler                                 161.79kB java.lang.Object[]
+  62.39kB for 8 more packages                                  1.43MB for 1579 more object types
+                            Use '--emit build-report' to create a report with more details.
+------------------------------------------------------------------------------------------------------------------------
+Security report:
+ - Binary includes Java deserialization.
+ - Use '--enable-sbom' to assemble a Software Bill of Materials (SBOM).
+------------------------------------------------------------------------------------------------------------------------
+Recommendations:
+ G1GC: Use the G1 GC ('--gc=G1') for improved latency and throughput.
+ PGO:  Use Profile-Guided Optimizations ('--pgo') for improved throughput.
+ HEAP: Set max heap for improved and more predictable memory usage.
+ QBM:  Use the quick build mode ('-Ob') to speed up builds during development.
+------------------------------------------------------------------------------------------------------------------------
+                       2.0s (6.1% of total time) in 206 GCs | Peak RSS: 2.73GB | CPU load: 19.19
+------------------------------------------------------------------------------------------------------------------------
+Build artifacts:
+ /root/llama3.java/llama3 (executable)
+========================================================================================================================
+Finished generating 'llama3' in 31.6s.
+////
+
+// Error: Support for the Foreign Function and Memory API is currently available only on the AMD64 architecture.
+
+////
+JIT and native image
+
+- experimental options in graalvm
+- enable preview
+- vector api + ffm
+- native optimization
+- o3 max optimize
+- disable vector array out of bounds checks
+- native build 35s - 23m - 32tok/s
+- 73kb jar !!
+- 1.2s load model
+
+- preparse model build with metadata of model
+- PRELOAD_GGUF modelfile make native
+- more work at build-time
+- 0ms pre-parsing of the same model (bake data into image heap)
+- 
+
+////
+
+Eine weitere Optimierung ergibt sich durch die erweiterten Möglichkeiten, in der Native Image Build-Phase schon teilweise Berechnungen und Speicherbelegung vorzunehmen und diese in die Binärdatei zu integrieren.
+Hier können die Metadaten der GGUF Datei schon gelesen und als vorinitialisierte Datenstrukturen vorgehalten werden, so dass bei der Ausführung wirklich nur noch die Gewichte aus der Datei in den Speicher gemappt werden müssen, der restliche Aufwand zum Parsen fällt weg und spart noch einmal ein paar Hundert Millisekunden.
+
+////
+Single file, no dependencies
+GGUF format parser
+Llama 3 tokenizer based on minbpe
+Llama 3 inference with Grouped-Query Attention
+Support Llama 3.1 (ad-hoc RoPE scaling) and 3.2 (tie word embeddings)
+Support for Q8_0 and Q4_0 quantizations
+Fast matrix-vector multiplication routines for quantized tensors using Java's Vector API
+Simple CLI with --chat and --instruct modes.
+GraalVM's Native Image support (EA builds here)
+AOT model pre-loading for instant time-to-first-token
+
+LC4J - 100 lines
+streaming chat model 
+generate response
+stream output back to user
+flight assistant
+////
+
+== Leistungsvergleich
+
+Im Beispielvergleich mit Ollama und llama.cpp ergaben sich ähnliche Token-Raten von ca. 27-30 Token pro Sekunde mit der optimierten, Binärdatei von Llama3.java. 
+Das das ganze mit idiomatischen, leicht lesbaren Java-Code möglich ist, ist schon beeindruckend, im Gegensatz zu llama.cpp, welches handoptimierten Code für die Tensorberechnung enthält.
+Die Basisrate von 5-8 Tokens pro Sekunde entspricht schon der menschlichen Leserate, alles darüber hinaus ist ein Bonus für maschinelle Verarbeitung.
+Die Leistungssteigerung ist vor allem auf die Vektor API und Quantisierung zurückzuführen, um den Speicherdurchsatz zu erhöhen.
+
+Natürlich sind GPU Implementierungen und auch spezielle Inferenz-Chips um viele Größenordnungen schneller, z.B. Groq-Inferenz mit 1200 Tokens pro Sekunde.
+Für den Einsatz in produktiven Inferenzsystemen sind viele andere Aspekte wichtig, wie maximale Auslastung der GPUs, kombinierte Nutzung  mehrerer GPU-Speicher für große Modelle (Multiple von 80GB), Vermeidung des Ladens der Gewichte pro Anfrage und vieles mehr.
+
+== Unterstützung anderer Sprachmodelle
+
+Bisher unterstützt Llama3.java die folgenden open-source/weights Modelle:
+
+- Llama 2 und Llama 3
+- Mistral
+- Qwen
+- Microsoft Phi
+- Google Gemma
+
+Für die Unterstützung verschiedener Modelle war das GGUF Format sehr gut geeignet, es gibt nur einige Unterschiede in der Token-Übersetzung, Prompt-Übergabe, Inferenz und in der Ergebnis Selektion (Sampler), die, wie schon erläutert, durch minimale, angepasste Implementierungen abgedeckt sind.
+
+== Ausblick
+
+Laut Alfonso gibt es noch viel zu tun für das Projekt.
+Besonders die Unterstützung von ARM/Apple Silikon/AVX512 und GPUs (z.B. mittels TornadoVM) und Leistungstests und -verbesserungen sind erwünscht.
+Die Implementierung fortgeschrittener Techniken u.a Audio/Video Unterstützung, Caching von Prompts, mehr Quantisierungen, größere Kontexte mittels YARN (Yet another RoPE extensioN method) und bessere Integration in Java Bibliotheken steht auch hoch auf der Prioritätenliste.
+
+////
+• FAST LLM inference in pure, modern Java
+• No dependencies (73kB jar file)
+• GraalVM makes it even faster
+口
+github.com/mukel/llama3.java
+
+• Native Image support with AOT model pre-loading/pre-parsing of metdata/header, for instant time-to-first-token
+• Simple, accessible and with a high educational value for learning about LLMS
+• Use a lightweight local inference engine or your inspiration for your next Java project
+• Fun to hack and fun to use!
+
+== Tricks
+
+can pre-parse GGUF metadata + cache prompts at build time for near instant inference
+////
+
+////
+== Features
+
+Single file, no dependencies
+GGUF format parser
+Llama 3 tokenizer based on minbpe
+Llama 3 inference with Grouped-Query Attention
+Support Llama 3.1 (ad-hoc RoPE scaling) and 3.2 (tie word embeddings)
+Support F16, BF16 weights + Q8_0 and Q4_0 quantizations
+Fast matrix-vector multiplication routines using Java's Vector API
+Simple CLI with --chat and --instruct modes.
+GraalVM's Native Image support (EA builds here)
+AOT model pre-loading for instant time-to-first-token
+////
+
+////
+== Beispiel mit LangChain4j
+
+Da die Implementierung für eine Reihe von Sprachmodellen realisiert ist, und als reine Java-Lösung auf der CPU läuft, gab es schon früh Anfragen, ob sie in LangChain4j integriert werden könnte, um eine rein lokale, eingebette Möglichkeit der Ausführung zu haben.
+
+Durch den Verzicht auf Abhängigkeiten war das ziemlich einfach, so dass eine LangChain4j Integration wie in Listing {counter:listing} zu finden ist.
+
+.Listing {listing}
+[source,java]
+----
+TODO Bien
+----
+////
+
+== JLama als Alternative
+
+Bei der Devoxx wurde mit [JLama] auch ein weiteres beeindruckendes Projekt vorgestellt, dass wie Llama3.java Inferenz auf CPU bereitstellt, mit änlichen Ansätzen durch die Vektor und Forein Memory API. Für (auch verteilte) Inferenz werden aktuelle Methoden wie Flash-Attention, Group Query Attention, Mixture of Experts uvm. implementiert.
+
+Es unterstützt auch open source Sprachmodelle wie Llama, Qwen, Granite, Gemma und Mixtral.
+Desweiteren intergriert es sich in Langchain4j und nutzt Datastax' JVector Bibliothek für Ähnlichkeitssuche für einen kompletten Java GenAI Stack.
+
+////
+🚀 Features
+Model Support:
+
+Gemma & Gemma 2 Models
+Llama & Llama2 & Llama3 Models
+Mistral & Mixtral Models
+Qwen2 Models
+IBM Granite Models
+GPT-2 Models
+BERT Models
+BPE Tokenizers
+WordPiece Tokenizers
+Implements:
+
+Paged Attention
+Mixture of Experts
+Tool Calling
+Generate Embeddings
+Classifier Support
+Huggingface SafeTensors model and tokenizer format
+Support for F32, F16, BF16 types
+Support for Q8, Q4 model quantization
+Fast GEMM operations
+Distributed Inference!
+
+Jlama requires Java 20 or later and utilizes the new Vector API for faster inference.
+////
+
+== Fazit
+
+Ich finde es schon beeindruckend, dass vernünftig geschriebener Java Code durch die Nutzung der modernen Java APIs (Vector und Foreign Memory API) und durch GraalVM und den Graal Compiler auf eine CPU Leistung kommt, die den C/C++ Äquivalenten nicht nachsteht.
+
+Alfonso hat hier eine beeindruckende Leistung gezeigt, die noch viel Potential für Nutzung in Java Systemen hat. Aber auch von einem reinen pädagogischen Standpunkt ist es ein deutlicher Zugewinn an Verständlichkeit.
+
+Schauen Sie sich die genannten Projekte doch einmal an, und entzaubern die Welt der großen Sprachmodelle, deren Anwendung im Endeffekt doch nichts weiter ist als ein paar Transformationen und Matrizenmultiplikationen.
+
+== Referenzen
+
+* [Hun0119] Javaspektrum, GraalVM Teil 1 und 2
+* [Llama3.java-Talk] https://www.youtube.com/watch?v=zgAMxC7lzkc
+* [GraalVM Vector] https://github.com/oracle/graal/issues/10285
+* [Llama3.java] http://github.com/mukel/llama3.java
+* [vLLM] https://docs.vllm.ai/en/v0.6.4/
+* [Ollama] https://ollama.com/
+* [Llama3] https://www.llama.com/
+* [JLama] https://github.com/tjake/Jlama
+* [JLama-Talk] https://www.youtube.com/watch?v=p-p_oRjEVow
+* [airhacks podcast] https://airhacks.fm/#episode_294
+* [3brown1blue Neural Networks] https://www.3blue1brown.com/topics/neural-networks
+* [llama2.c] https://github.com/karpathy/llama2.c
+* [Karpathy] https://www.youtube.com/watch?v=kCc8FmEb1nY
+* [Devoxx-Inference-Java] https://dev.to/stephanj/llm-inference-using-100-modern-java-30i2
+* [HF-Modelle] https://huggingface.co/mukel
+* [llama2.java] https://github.com/mukel/llama2.java
+* [VectorAPI] https://download.java.net/java/early_access/loom/docs/api/jdk.incubator.vector/jdk/incubator/vector/package-summary.html
+* [FFMAPI] https://docs.oracle.com/en/java/javase/23/core/foreign-function-and-memory-api.html
