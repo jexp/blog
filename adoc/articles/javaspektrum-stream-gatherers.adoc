@@ -1,5 +1,6 @@
 = Stream-Gatherers - Das PowerUp für Java-Streams
 
+image::https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Stikine_River_delta_in_Alaska.jpg/1024px-Stikine_River_delta_in_Alaska.jpg[Stikine River delta in Alaska,link=https://commons.wikimedia.org/wiki/File:Stikine_River_delta_in_Alaska.jpg, title="Stikine River delta in Alaska by Sam Beebe"]
 Java Streams sind seit ihrer Einführung in Java 8 eine echte Erfolgsgeschichte.
 Dank der guten Integration von Lambda-Funktionen (und Functional Interfaces) und der kontinuierlichen Weiterentwicklung der API, machen sie die Verarbeitung von Datenströmen in Java einfach und performant.
 Mit Streams wurde auch der Wechsel von imperativen for-Schleifen zu deklarativen, funktionalen Verarbeitung vorgenommen.
@@ -691,7 +692,7 @@ Entwicklern eröffnet sich ein Baukasten, um *eigene Zwischenoperationen* zu def
 
 Man relativ leicht eigene Gatherer entwickeln,
 // wie z.B. einen `DistinctByGatherer`, der ein `Set` von gesehenen Schlüsseln führt und Duplikate anhand eines Kriteriums herausfiltert.
-die Java-Community hat bereits begonnen, solche Helfer zu bauen und zu teilen, zum Beispiel https://tginsberg.github.io/gatherers4j/[gatherers4j - 60] und https://github.com/jhspetersson/packrat[Packrat - 40].
+die Java-Community hat bereits begonnen, solche Helfer zu bauen und zu teilen, zum Beispiel https://tginsberg.github.io/gatherers4j/[gatherers4j - 60^] und https://github.com/jhspetersson/packrat[Packrat - 40^].
 
 In Java 24 ist die Gatherer API dank https://openjdk.org/jeps/485[JEP 485^] final.
 Es ist abzusehen, dass dieser Schritt die Streams noch einmal deutlich aufwertet und Java gegenüber modernen Sprachen wie Kotlin oder Python konkurrenzfähiger wird.
