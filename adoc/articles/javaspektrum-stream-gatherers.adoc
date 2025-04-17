@@ -1,0 +1,922 @@
+= Stream-Gatherers - Das PowerUp für Java-Streams
+
+Java Streams sind seit ihrer Einführung in Java 8 eine echte Erfolgsgeschichte.
+Dank der guten Integration von Lambda-Funktionen (und Functional Interfaces) und der kontinuierlichen Weiterentwicklung der API, machen sie die Verarbeitung von Datenströmen in Java einfach und performant.
+Mit Streams wurde auch der Wechsel von imperativen for-Schleifen zu deklarativen, funktionalen Verarbeitung vorgenommen.
+Konsistente Benutzung über Arrays, Collections und andere Ströme von Daten erleichtert die Kapselung der Verarbeitung an einer Stelle ohne von der Quelle abhängig zu sein.
+
+Und mit der eingebauten Parallelisierung mittels Fork-Join-Pool und Work-Stealing gabe es auch eine hinreichend effiziente Art und Weise, die jetzt vorhandenen CPU-Kerne effektiv und ohne fehleranfälliges, manuelles Multithreading zu benutzen.
+
+Es gab bisher nur ein kleines "Aber".
+
+"Wenn es doch nur *genau diese* eingebaute Stream-Operation gäbe!" - Diese Frage mag sich mancher Java-Profi seit der Einführung der Streams in Java 8 gestellt haben.
+
+Trotz der reichhaltigen Stream-API stieß man immer wieder an Grenzen: Bestimmte Datenmanipulationen innerhalb der Stream-Verarbeitung ließen sich nicht ohne Weiteres als Stream-Pipeline ausdrücken.
+
+Genau hier setzen die *Stream-Gatherer* an,  eine Neuerung, die erstmals mit https://openjdk.org/jeps/461[JEP 461: Stream Gatherers^] in Java 22 als Preview eingeführt wurde, und als https://openjdk.org/jeps/473[JEP 473^] in Java 23 in zweiter Preview fortgeführt, finalisiert und veröffentlicht in Java 24 in https://openjdk.org/jeps/485[JEP 485^].
+
+Für unsere Beispiele nutzen wir Java 24, bei vorherigen Versionen müsste man mit `--enable-preview` das Feature aktivieren.
+
+Die Benutzung von Streams besteht grob aus 3 Phasen:
+
+* Erstellung, z.b. mit `stream()` auf Collections oder `Stream.of()`
+* Vearbeitung (intermediate Operation) z.b. mit `map()`, `filter()`, `limit()`, `flatMap()`
+* Ausgabe (terminale Operation), mittles `count()`, `forEach()`, `toList()` oder allgemein `collect()`
+
+Die letztgenannte Methode `collect()` is mächtig aber auch komplex - mit der Collectors-API können komplexe Aggregations-Operationen ausgedrückt werden, wie in Listing {counter:listing} gezeigt.
+
+.Listing {listing} - Stream Beispiel
+----
+List.of("Java", "JavaScript", "Python", "JRuby", "Jython", "Julia")
+.stream()
+.filter(s -> s.startsWith("J"))
+.collect(Collectors.groupingBy(String::length));
+//  {4=[Java], 5=[JRuby, Julia], 6=[Jython], 10=[JavaScript]}
+----
+
+Stream-Gatherer erweitern die Stream-API um *benutzerdefinierte "Intermediate" Operationen* als Äquivalent zur Collectors-API.
+
+Dadurch lassen sich Streams auf flexible Weise transformieren - mit eigenen Zwischenoperationen, die vorher "nicht leicht machbar" oder nur mit umständlichen Workarounds möglich waren.
+
+== Motivation: Wenn die Stream-API an Grenzen stößt
+
+Ein Blick zurück: Die Stream-API bietet seit Java 8 etliche eingebaute Operationen - etwa `map()`, `filter()`, `distinct()`, `sorted()` usw.
+Dennoch blieben bestimmte Anwendungsfälle unbequem.
+
+Zwei oft zitierte Beispiele sind: 
+
+=== Distinct nach Kriterium
+
+Stellen wir uns vor, wir möchten aus einem Stream von Strings Duplikate anhand ihrer Länge entfernen (also höchstens ein String jeder Länge).
+Ideal wäre ein Aufruf wie `stream.distinctBy(String::length)` leider existiert eine solche Methode bisher nicht.
+
+Mit Bordmitteln musste man bislang zu Verrenkungen greifen, etwa eine Hilfsklasse schreiben, die Gleichheit anhand der Länge definiert, jedes Element darin wrappen, dann `distinct()` nutzen und anschließend wieder entpacken.
+
+Dieses Muster ist weder intuitiv noch wartungsfreundlich.
+Kein Wunder, dass der Wunsch nach einer eleganteren Lösung laut wurde.
+
+=== Erzeugung von Gruppierungen
+
+Ebenso mühsam war es, Elemente eines Streams in feste Gruppen (wie Window-Funktion in SQL) aufzuteilen.
+Beispielsweise sollen aus einem endlosen Integer-Stream `[0,1,2,3,4,5,6,…]` feste 3er-Blöcke gebildet und davon nur die ersten zwei Gruppen genommen werden, also `[0,1,2], [3,4,5]`.
+
+Aktuell gibt es dafür keine direkte Zwischenoperation.
+
+Man müsste die Logik in die finale Operation schieben, etwa via `collect()` mit einem eigenen Collector, kombiniert mit `limit()`, um den unendlichen Stream abzubrechen, wie in Listing {counter:listing} gezeigt.
+
+Alternativ könnte man mit dem ebenso nicht existierenden `zip()` Operation zwei Streams mit Werten und Positionen zusammenführen und aufgrund der Position gruppieren.
+
+.Listing {listing} - Simulierte Gruppierung
+[source,java]
+----
+int size = 3;
+int groups = 2;
+IntStream.iterate(0, i -> i + 1)
+.limit(size * groups)
+.boxed()
+.collect(Collectors.groupingBy(i -> i / size))
+.values();
+// Ausgabe: [[0, 1, 2], [3, 4, 5]]
+----
+
+Parallelisierung ist bei solch handgestrickten Lösungen oft ausgeschlossen, da zu komplex. 
+Dort müsste dann in Atomic-Referenzen ausserhalb des Streams ein Zustand gehalten werden.
+
+Kurzgesagt: Solche Lösungen funktionieren leidlich, sind aber umständlich und schlecht wartbar.
+
+Über die Jahre gab es zahlreiche Vorschläge für neue Stream-Operationen, die in bestimmten Situationen nützlich wäre.
+Doch alle ins JDK einzubauen, hätte die Streams API noch weiter unnötig aufgebläht, und dann doch wieder nicht alle Fälle abgedeckt.
+
+Bereits die Designer der Stream-API ahnten, dass solche Erweiterungspunkte sinnvoll wären.
+Für terminale Operationen steht die Methode `collect()` mit der Collectors-API ja schon seit Java 8 zur Verfügung.
+Eigentlich verblüffend dass es bis jetzt gedauert hat etwas Ähnliches für Zwischenoperationen hinzufügen!
+
+Genau diese Lücke, schließen die Stream-Gatherer, basierend auf der Arbeit von Viktor Klang mit den eingangs genannten JEPs.
+
+"Die Stream-API bot von Haus aus viele Operationen, doch es war immer angedacht, nutzerdefinierte Zwischenoperationen zu erlauben - nur fehlte damals der richtige Weg." so ähnlich beschrieb es Viktor Klang auf der JavaOne-Konferenz, als er die neuen Gatherer vorstellt (https://inside.java/2025/04/03/javaone-stream-gatherers/[Stream Gatherers - Deep Dive with the Expert - Inside.java^]).
+
+Die Lösung kommt nun in Form der Methode `Stream.gather(...)` und eines zugehörigen Interfaces `Gatherer`, sowie einer Hilfsklasse `Gatherers`, die gemeinsam die Tür für eigene Operationen im Stream öffnen.
+
+== Die Gatherer-API im Überblick
+
+Ein `Gatherer` ist im Grunde eine "Intermediate Operation zum Mitnehmen". 
+
+Statt fest im JDK verdrahtet zu sein, wird sie vom Entwickler selbst definiert und dann über `Stream.gather(gathererInstanz)` in die Pipeline eingeschleust. Damit werden viele Transformationsmuster als Stream-Operation ausdrückbar.
+
+Technisch handelt es sich bei einem Gatherer um eine Implementierung des neuen Interfaces `java.util.stream.Gatherer<IN, STATE, OUT>` (im JEP sind das `<T, A, R>` was aber weniger gut lesbar ist), mit dem drei generische Typen verbunden sind: 
+
+- `IN` (`T`) - der Typ der Input-Elemente im Stream (z.B. `String`).
+- `OUT` (`R`) - der Typ der Output-Elemente, die der Gatherer in den Stream zurückspeist (kann gleich `IN` sein oder anders,  z.B.
+`List<String>` bei einer Gruppiertung).
+- `STATE` (`A`) - ein interner Akkumulator-/Zustandstyp, den der Gatherer während der Verarbeitung nutzt (oft eine Collection oder ein einfacher Zähler).
+
+Die Funktionsweise eines Gatherers erinnert stark an die eines Collectors, allerdings für den laufenden Stream.
+
+Ein Gatherer wird durch bis zu vier Funktionen charakterisiert, die zusammenspielen.
+
+- Intializer - um den Anfangszustand zu erzeugen
+- Integrator - Kern der Verarbeitung, für Filter, Transformation und Zustandsverwaltung
+- Finisher - um etwaige am Ende im Zustand verbliebene Elemente auszugeben
+- Combiner - für parallele Streams
+
+Davon ist nur der Integrator zwingend erforderlich, die anderen benötigt man nur bei Bedarf, und dank default-Methoden muss man sie auch nicht implementieren.
+
+Instanzen von Gatherer können mittels der Factory-Methoden `of` und `ofSequential` (für nicht-parallele Streams) erzeugt werden, die überladen sind, so dass nur die relevanten Funktionen als Parameter-Lambdas übergeben werden können, zum Beispiel `Gatherer.ofSequential(initializer, integrator)`.
+
+=== Integrator 
+
+Das Herzstück der Gatherer API, sie wird für jedes eingehende Element (`IN`) aufgerufen und definiert, was mit dem Element passiert.
+
+Der Integrator hat Zugriff auf den privaten Zustand `STATE` und auf einen speziellen Downstream-Kanal, über den er Output-Elemente vom Typ `OUT` an die nächste Pipeline-Stufe weitergeben kann.
+
+Der Integrator ist typischerweise eine dreistellige Bi-Funktion `(STATE state, IN element, Downstream<? super OUT> out) -> boolean`.
+
+Er kann Elemente filtern, umwandeln, sammeln - praktisch alles was man sich so vorstellen kann.
+
+Sein boolscher Rückgabewert signalisiert, ob der Stream weiterlaufen soll oder vorzeitig abgebrochen wird, damit werden auch unendliche Streams behandelbar.
+
+Einige Beispiele sind im Listing {counter:listing} zu sehen.
+
+.Listing {listing} - Einfache Beispiel für Integratoren
+[source,java]
+----
+var zahlen = List.of(1,2,3,4,5,6);
+
+// keine Operation
+var nop = Gatherer.of(
+    (state, value, down) -> {
+        return down.push(value);
+    });
+zahlen.stream().gather(nop).toList();
+// [1, 2, 3, 4, 5, 6]
+
+// map
+var doppelt = Gatherer.<Integer,Integer>of(
+    (state, value, down) -> {
+        return down.push(value*2);
+    });
+
+zahlen.stream().gather(doppelt).toList();
+// [2, 4, 6, 8, 10, 12]
+
+// Filter
+var gerade = Gatherer.<Integer,Integer>of(
+    (state, value, down) -> {
+        if (value%2==1) return true;
+        else return down.push(value);
+    });
+
+zahlen.stream().gather(gerade).toList();
+// [2, 4, 6]
+----
+
+Ein Integrator könnte zum Beispiel eingehende Elemente sammeln, bis eine bestimmte Anzahl erreicht ist, dann diese als Gruppe als Liste `OUT` an `downstream.push()` senden und entscheiden, ob danach weiter gelesen wird.
+Dieses Beispiel kommt zum Schluss.
+
+Die `push()` Methode gibt auch einen Wahrheitswert zurück, der angibt ob weitere Elemente akzeptiert werden.
+Wenn der `downstream` keine Elemente mehr aufnimmt (`downstream.isRejecting()`), muss unser Integrator auch `false` zurückgeben.
+
+Ich weiss aber nicht, warum das nicht in der darunterliegenden Infrastruktur schon abgehandelt wird. 
+Vorliegende Beispiele machen das einmal so und einmal so, aber in Produktivcode würde ich es auch am Anfang der Implementierung sicherheitshalber mit abhandeln.
+
+=== Initializer
+
+Der optionale Initializer erzeugt beim Start mittels `Supplier<STATE> get()` einen neuen privaten Zustand für die Verarbeitung, in dem (stateful) Informationen gehalten werden können bis sie gebraucht werden.
+
+Dieser Zustand vom Typ `STATE` begleitet den Gatherer, um  z.B.
+bereits gesehene Elemente zu merken oder Zwischenwerte zu speichern.
+
+Ein Beispiel sind Zähler für Limit oder Positionen.
+Ein Gatherer, der Ausreißer in einem Zahlen-Stream erkennen soll, könnte  einen Speicher für den letzten gelesenen Wert anlegen, um Differenzen zu berechnen, siehe Listing {counter:listing}.
+
+
+.Listing {listing} - Beispiele für Initializer
+[source,java]
+----
+var zahlen = List.of(1,2,3,4,5,6);
+// Hilfsklasse für veränderlichen Integer-Wert
+class Counter { int counter; };
+int limit = 3;
+// Limit
+var limiter = Gatherer.ofSequential(
+    // Initializer
+    Counter::new,
+    (state, value, down) -> {
+        if (state.counter++ >= limit) return false;
+        return down.push(value);
+    });
+zahlen.stream().gather(limiter).toList();
+// [1, 2, 3]
+
+// Delta berechnen (oder Stetigkeit)
+var delta = Gatherer.<Integer,Counter,Integer>ofSequential(
+    // Initializer
+    Counter::new,
+    (state, value, down) -> {
+        int diff = value - state.counter;
+        state.counter = value;
+        return down.push(diff);
+    });
+zahlen.stream().gather(delta).toList();
+// [1, 1, 1, 1, 1, 1]
+----
+
+=== Finisher 
+
+Ein Finisher stellt eine Abschluss-Funktion dar, die am Ende der Verarbeitung einmalig ausgeführt wird.
+
+Hier kann der Gatherer z.B. einen letzten gespeicherten Rest aus dem Zustand an den Downstream schicken (falls  z.B. ein letztes unvollständiges Fenster übrig ist) oder einen Abschluss-Status signalisieren.
+
+Der Finisher entspricht dem Finisher eines Collectors, allerdings ohne Rückgabewert (Er ist ein `Void-BiConsumer`, da die eigentlichen Ergebnisse über den Downstream fließen).
+
+Jetzt können wir unser Anfangsbeispiel der Gruppierung umsetzen, da ohne den Finisher Reste von unfertigen Gruppen nicht ausgegeben würden, siehe Listing {counter:listing}.
+
+.Listing {listing} - Mit Finisher für Gruppierung
+[source,java]
+----
+var zahlen = List.of(1,2,3,4,5,6,7);
+int size = 3;
+var window = Gatherer.<Object,List<Object>,List<Object>>ofSequential(
+    // Initializer
+    ArrayList::new,
+    (state, value, down) -> {
+        state.add(value);
+        if (state.size()==size) {
+            var copy = new ArrayList<Object>(state);
+            state.clear();
+            return down.push(copy);
+        } 
+        else return true;
+    },
+    (state,down) -> {
+        if (!state.isEmpty()) {
+            down.push(state);
+        }
+    });
+zahlen.stream().gather(window).toList();
+// [[1, 2, 3], [4, 5, 6], [7]]
+----
+
+=== Combiner
+
+Ein optionaler `Combiner` enthält zusätzliche Zusammenführungs-Logik für parallele Streams.
+Ähnlich dem Combiner beim `Collector` definiert sie, wie getrennte Teilzustände `STATE` aus Parallel-Threads zu einem kombiniert werden.
+
+Gibt es keinen Combiner, kann der Gatherer zwar in einem parallelen Streams genutzt werden, läuft dort aber intern sequentiell (die Default-Combiner-Implementierung schaltet Parallelisierung effektiv siehe  https://docs.oracle.com/en/java/javase/24/core/stream-gatherers.html[Stream Gatherers^]).
+
+Manche Operationen sind inhärent nicht parallelisierbar (z.B.
+sortierte Fenster); dort lässt man den Combiner einfach weg - der Stream API ist dies Signal genug, diesen Gatherer in Parallelstreams nur sequentiell auszuführen).
+
+== Implementierung in Streams
+
+Bringt man nun einen solchen Gatherer in einen Stream ein, passiert unter der Haube folgendes
+
+1. Die Stream-Implementierung erzeugt zunächst ein Downstream-Objekt, über das Ausgabe-Elemente des Gatherers an die nächste Stage übergeben werden.
+2. Dann wird vom Gatherer der Initializer aufgerufen, um den privaten Zustand zu erzeugen.
+3. Anschließend greift er auf den Integrator zu und ruft dessen `integrate(state, element, downstream)` für jedes ankommende Element auf. +
+Der Integrator kann dabei jederzeit via `downstream.push(element)` ein Ausgabe-Element `element` weiterreichen.
+Liefert der Integrator `false` zurück, bricht der Stream die Schleife ab (Short-Circuit).
+4. Sind alle Input-Elemente verarbeitet, wird zum Abschluss noch - falls vorhanden - der Finisher mit dem zuletzt verbliebenen Zustand und Downstream aufgerufen.
+
+Insgesamt kann man sich die Funktionsweise der `gather()` Methode unter Nutzung der `Gatherer`-Instanz wie in Listing {counter:listing} gezeigt vorstellen.
+
+.Listing {listing} - "Implementierung" der gather() Methode
+[source,java]
+----
+Gatherer.Downstream<? super R> downstream = ...;
+A state = gatherer.initializer().get();
+for (T t : data) {
+    gatherer.integrator().integrate(state, t, downstream);
+}
+gatherer.finisher().accept(state, downstream);
+----
+
+Während der ganzen Operation fließen die vom Gatherer erzeugten Ausgabeelemente weiter durch die Pipeline, als wären sie normale Stream-Elemente.
+
+Damit lässt sich praktisch fast jede eingebaute Intermediate Operation umsetzen.
+
+Konzeptionell könnte man jede Stream-Pipeline als Kette von `gather()`-Aufrufen darstellen, aber das ist auch nicht zielführend. 
+Konkrete, semantisch benannte Operationen mit einer klaren API sind viel anwenderfreundlicher.
+Aber in der Implementierung könnte man Gatherer benutzen, da sie zum Teil diese Methoden effizienter umsetzen könnten.
+
+Die Entwickler von OpenJDK haben als Bonus direkt einige *fertige Gatherer* mitgeliefert, um gängige Use-Cases abzudecken - diese schauen wir uns jetzt an.
+
+== Fünf eingebaute Gatherer im JDK
+
+In der Hilfsklasse `java.util.stream.Gatherers` sind einige nützliche Gatherer schon implementiert.
+
+- `windowFixed(size)` - Gruppierung (Window), die letzte Gruppe kann teilweise gefüllt sein
+- `windowSliding(size)` - inkrementelle Gruppierung (sliding Window), das Fenster wird immer eine Position weitergeführt
+- `fold(supplier-akkumulator, folder)` - Reduce/Fold Funktion, die für Aggregationen eingesetzt werden kann
+- `scan(supplier-akkumulator, folder)` - Reduce/Fold Funktion, die jeden Zwischenwert ausgibt
+- `mapConcurrent(concurrency, mapFunction)` - benutzt virtuelle Threads, um die angegebene Map-Funktion parallel auszuführen
+
+=== Window Fixed - feste Gruppengröße
+
+Der Gatherer `Gatherers.windowFixed(int size)` fasst eingehende Elemente in Listen der festen Länge `size` zusammen.
+Man kann sich das wie einen Kassen-Trenner denken, der den Strom in Blöcke segmentiert (aber fester Größe).
+
+Sobald `size` Elemente gesammelt sind, wird diese Liste als Ganzes in den Downstream gegeben und ein neuer „leerer“ Block begonnen.
+
+Ist der Stream zu Ende, liefert der Finisher noch den letzten Block, falls dieser nicht voll geworden ist, siehe Listing {counter:listing}
+
+.Listing {listing} - windowFixed
+[source,java]
+----
+var zahlen = List.of(1,2,3,4,5,6,7);
+int size = 3;
+// eingebaute Funktion - feste Größe (fixed window)
+zahlen.stream().gather(Gatherers.windowFixed(3)).toList();
+// [[1, 2, 3], [4, 5, 6], [7]]
+----
+
+////
+*Beispiel:* Wir erzeugen mit `Stream.iterate()` einen unendlichen Zahlenstrom und segmentieren ihn in Vierer-Blöcke.
+Anschließend begrenzen wir auf 3 Blöcke (`limit(3)`) und sammeln diese als Listen ein: 
+
+[source,java]
+----
+var result = Stream.iterate(0, i -> i + 1)
+                   .gather(Gatherers.windowFixed(4))
+                   .limit(3)
+                   .toList();
+System.out.println(result);
+// Ausgabe: [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11]]
+---- 
+
+Wie erwartet erhalten wir drei 4er-Listen.
+
+Interessant ist der *Randfall*: Was passiert, wenn die Eingabe nicht durch `limit` begrenzt ist und der Stream vorzeitig endet, ohne dass das letzte Fenster voll wurde?
+In diesem Fall gibt `windowFixed` den unvollständigen letzten Block dennoch aus (statt ihn zu verwerfen).
+Beispiel: Ein endlicher Stream der Zahlen 0 bis 6 wird in Dreiergruppen aufgeteilt.
+Das ergibt zwei volle Dreierlisten und eine letzte Liste mit nur einem Element :
+
+[source,java]
+----
+Stream.of(0,1,2,3,4,5,6)
+      .gather(Gatherers.windowFixed(3))
+      .forEach(System.out::println);
+// Ausgabe: [0, 1, 2]
+//          [3, 4, 5]
+//          [6]
+---- 
+////
+
+Für viele Anwendungen - etwa das Paginieren von Ergebnissen oder Batch-Verarbeitung - ist `windowFixed` ungemein praktisch.
+Früher musste man dafür komplexe Collector-Konstrukte schreiben; jetzt genügen ein paar Stream-Aufrufe.
+
+=== Window Sliding - gleitende Gruppe 
+
+Der Gatherer `Gatherers.windowSliding(int size)` ähnelt `windowFixed`, mit dem Unterschied, dass *Gruppen überlappen* können.
+Konkret erzeugt `windowSliding(n)` zunächst ein volles Gruppe der angegebenen Länge.
+Danach wird jedes weitere Element am Ende der Gruppe angehängt und das jeweils erste Element entfernt.
+
+Mit anderen Worten: Ab der zweiten Gruppe „rutschen“ wir pro Element einen Schritt weiter, wie in Listing {counter:listing} zu sehen.
+
+.Listing {listing} - windowSliding
+[source,java]
+----
+var zahlen = List.of(1,2,3,4,5,6,7);
+int size = 3;
+
+// inkrementelle Gruppe (sliding window)
+zahlen.stream().gather(Gatherers.windowSliding(3)).toList();
+// [[1, 2, 3], [2, 3, 4], [3, 4, 5], [4, 5, 6], [5, 6, 7]]
+----
+
+Man sieht: Die zweite Gruppe startet bei `2` (enthält also `2,3,4`), die dritte bei `3` usw.
+
+Bei gleitenden Gruppen gibt keinen unvollständigen letzten Block - außer die gesamte Eingabe hat weniger Elemente als die gewünschte Größe.
+
+Gleitende Fenster eignen sich überall dort, wo man Sequenzen mit Überschneidung analysieren will - etwa bei Zeitreihen oder Event-Streams, in denen man aufeinanderfolgende Werte vergleichen möchte (siehe Praxisbeispiel weiter unten).
+
+=== Fold - Reduktion als Zwischenoperation
+
+Der Gatherer `Gatherers.fold(Supplier<OUT> initial, BiFunction<OUT,IN,OUT> folder)` führt eine akkumulative Berechnung über den Stream durch und gibt das Endergebnis als Stream aus.
+
+Das klingt erstmal wie `Stream.reduce()`, doch es gibt einen wichtigen Unterschied: Da `fold` eine Zwischenoperation ist, können wir nach dem Falten noch weitere Operationen in der Pipeline anhängen! 
+
+Außerdem kann der Typ `OUT` der Akkumulation von `IN` abweichen, was bei `reduce` nicht möglicht ist.
+
+Stellen Sie sich `fold` wie eine eingebaute Variante von `reduce` als Gatherer vor: 
+Man definiert einen Startwert (per `initial`-Supplier) und eine Faltungsfunktion, die diesen laufenden Zwischenwert mit jedem neuen Element kombiniert.
+
+Das Ergebnis dieses Faltens wird nicht sofort als einziges Terminal-Resultat zurückgegeben, sondern als Element `OUT` im Stream weitergereicht.
+
+Oft wird man nach `fold()` direkt einen Terminal-Operator wie `.findFirst()` oder `.toList()` aufrufen, um den akkumulierten Wert zu erhalten.
+Aber man könnte theoretisch auch noch weitere Schritte anhängen, etwa um das Resultat weiter zu transformieren.
+
+.Listing {listing} - Summieren der Zahlen 1 bis 7 mittels fold
+[source,java]
+----
+Optional<Integer> summe = Stream.of(1,2,3,4,5,6,7)
+    .gather(Gatherers.fold(
+        () -> 0L, // Initializer für Akkumulator
+        (sum, x) -> sum + x))
+    .filter(x -> x > 20)
+    .findFirst();
+// Ausgabe: Optional[28]
+---- 
+
+Hier sehen wir: `gather()` liefert einen Stream zurück - in diesem Fall einen Stream mit genau *einem* Element, nämlich der berechneten Summe (28),
+den wir noch weiter verarbeiten können (z.b. mit `filter()`).
+Danach nutzen wir `.findFirst()`, um diesen Wert bequem als `Optional` zu erhalten.
+
+Zum Vergleich die äquivalente Berechnung mit `reduce()`: 
+
+.Listing {listing} - Summierung mit reduce
+[source,java]
+----
+int summe = Stream.of(1,2,3,4,5,6,7)
+        .reduce(0, (sum, x) -> sum + x);
+// summer = 28
+----
+
+Beide liefern das gleiche Ergebnis.
+Doch `reduce` ist eine finale Terminal-Operation - danach kann nichts mehr im Stream kommen, und `reduce` kann auch keinen anderen Ergebnistyp liefern als den Eingabetyp (hier `int`).
+`fold` hingegen könnte den Result-Typ verändern und lässt uns die Pipeline fortsetzen.
+
+////
+Noch ein Vorteil von `fold`: Die Faltungsfunktion kann auch *Aktionen ausführen*, die mit dem ursprünglichen Typ nichts zu tun haben.
+Bei `reduce` ist man auf Operationen beschränkt, die auf dem Typ selbst definiert sind.
+Mit `fold` können wir den Akkumulator-Typ `OUT` frei wählen.
+Das erlaubt z.B., Strings während der Faltung zu bauen.
+
+Wir bauen einen String auf, der jede Zahl n aus dem Stream n-mal hintereinander enthält (also 1, dann 22, dann 333, …) und alles konkateniert: 
+
+.Listing {listing} - Umwandlung des Typen bei der Reduktion
+[source,java]
+----
+List<String> result = Stream.of(1,2,3,4)
+    .gather(Gatherers.fold(() -> "", // Initializer
+            (str, n) -> str + String.valueOf(n).repeat(n)))
+    .toList();
+System.out.println(result);
+// Ausgabe: [1223334444]
+---- 
+
+Hier ist `OUT` ein `String` und `IN` ein `Integer`.
+Der finale String *"1223334444"* wird als einziges Element in einer Liste ausgegeben.
+Dieses Beispiel zeigt etwas, das mit einem einzelnen `reduce()` so nicht direkt ginge (zumindest nicht ohne unsaubere Casts): Die Reduktion in einen völlig anderen Typ mit nicht-trivialer Logik.
+////
+
+=== Scan - Präfixe (laufende Teilergebnisse) 
+
+Der Gatherer `Gatherers.scan(Supplier<OUT> initial, BiFunction<OUT,IN,OUT> scanner)` verhält sich ähnlich wie `fold`, mit dem Unterschied, dass jedes Zwischenresultat ebenfalls ausgegeben wird.
+
+In der funktionalen Programmierung ist dies als "prefix scan" bekannt.
+Man kann es sich wie eine kumulative Summe vorstellen, die alle Teilsummen liefert, nicht nur die Endsummen, wie in Listing {counter:listing} zu sehen.
+
+.Listing {listing} - Summe mit allen aufaddierten Zwischensummen
+[source,java]
+----
+List<Integer> summen = Stream.of(1,2,3,4,5,6,7)
+    .gather(Gatherers.scan(
+        () -> 0, // Initializer
+        (sum, x) -> sum + x))
+    .toList();
+// Ausgabe: [1, 3, 6, 10, 15, 21, 28]
+---- 
+
+Im Gegensatz zu `fold` enthält der Output-Stream hier genauso viele Elemente wie der Input-Stream (bei leerem Input bleibt er leer).
+
+Auch hier kann man den Akkumulator-Typ wandeln.
+Verwenden wir als Startwert `""` und als Kombination `String + (n wiederholt n-mal)`, erhalten wir eine laufende Konkatenation, die Schritt für Schritt wächst (Listing {counter:listing})
+
+.Listing {listing} - laufende Konkatenation
+[source,java]
+----
+List<String> results = Stream.of(1,2,3,4)
+    .gather(Gatherers.scan(() -> "", 
+            (str, n) -> str + String.valueOf(n).repeat(n)))
+    .toList();
+System.out.println(results);
+// Ausgabe: [1, 122, 122333, 1223334444]
+---- 
+
+In vielen Fällen ist `scan` nützlich, um inkrementelle Ergebnisse zu erhalten,  z.B. fortlaufende Summen, gleitende Berechnungen oder History-Traces.
+In klassischen Java-Lösungen hätte man solche Sequenzen oft imperativ aufgebaut; nun geht es deklarativ im Stream.
+
+===  MapConcurrent - parallele Verarbeitung mit virtuellen Threads
+
+Der Gatherer `Gatherers.mapConcurrent(int maxConcurrency, mapper)` ermöglicht es, eine normale Abbildungsfunktion (`mapper`) auf Stream-Elementen parallel auszuführen, *selbst im sequentiellen Stream-Modus*, und zwar unter Nutzung von virtuellen Threads https://www.sigs.de/artikel/projekt-loom-verfuegbarkeit-und-langzeitsupport-in-java-21/[Virtuelle Threads, SIGS, Michael Hunger^].
+
+Warum braucht man das?
+
+Nun, `Stream.parallel()` parallelisiert zwar die gesamte Pipeline (mittels regulären Threads im ForkJoinPool), bietet aber wenig Kontrolle pro Schritt - insbesondere kann man die Parallelität nicht begrenzen und die Arbeit nicht gezielt auf virtuelle! Threads verteilen.
+
+`mapConcurrent` gibt uns feingranularen Zugriff:
+Mit `mapConcurrent(8, mapper)`, werden immer bis zu 8 Aufrufe von `mapper` gleichzeitig ausgeführt (jedes auf einem eigenen virtuellen Thread).
+Ist einer fertig, wird das nächste Element verarbeitet.
+
+Da `mapConcurrent` ein *stateful* Gatherer ist, muss intern ein wenig getrickst werden, um die Reihenfolge der Elemente (Encounter Order) zu erhalten.
+Im Wesentlichen puffert der Gatherer Ergebnisse, die ggf.
+außer Ordnung fertig werden, und reicht sie dann in richtiger Reihenfolge weiter, sobald frühere Ergebnisse vorliegen.
+Für uns als Nutzer läuft das aber vollkommen transparent ab.
+
+Wegen dieser Garantie, gibt es ein https://bugs.openjdk.org/browse/JDK-8347274[Problem in `mapConcurrent`^], wobei durch längerlaufende einzelne vorherige Elemente, sich nachfolgende, schon berechnete Werte aufstauen und Speicherprobleme verursachen können.
+Dies ist in Java 25 behoben, indem die Menge der in Verarbeitung befindlichen Elemente begrenzt wird.
+
+Einsatzfälle für `mapConcurrent` sind dort, wo ein Mapper pro Element aufwändige Operationen ausführt (die von virtuellen Threads profitieren) -  z.B.
+I/O, Netzwerkzugriffe oder CPU-lastige Berechnungen - und man diese nebenläufig erledigen möchte, ohne gleich den ganzen Stream parallel zu schalten.
+
+
+
+Ein typisches Beispiel ist das Parsen oder Verarbeiten von Datenzeilen in einer Datei oder Datenbank, wie weiter unten dargestellt wird.
+
+== Praxisbeispiele aus dem Alltag
+
+Die Theorie ist beeindruckend - doch wie nutzen wir Gatherer praktisch?
+Schauen wir auf zwei typische Szenarien aus dem Entwickleralltag: Event-Streams in der Heimautomatisierung und CSV-Datenverarbeitung.
+
+=== Ereignisstrom im Smart Home
+
+Angenommen, wir betreiben zu Hause ein smartes Thermometer, das regelmäßig Temperaturwerte sendet.
+Wir möchten einen Stream dieser Messwerte analysieren und auffällige Sprünge erkennen -  z.B.
+plötzliche Änderungen um mehr als 5 °C innerhalb von 5 Sekunden, was auf einen Sensorfehler oder ein offenes Fenster hindeuten könnte.
+
+Ohne Gatherer würden wir vermutlich alle Werte in eine Liste sammeln und dann mit einer Schleife benachbarte Elemente vergleichen.
+
+Mit Gatherern geht es eleganter im Stream selbst: Wir können nämlich mit `windowSliding(2)` jedes Paar von aufeinanderfolgenden Messungen erfassen.
+Anschließend filtern wir diese 2er-Fenster anhand unseres Kriteriums und sammeln die verdächtigen Paare ein, und geben eine neue Messung mit der Anfangszeit und dem Temperatursprung zurück, siehe Listing {counter:listing}.
+
+.Listing {listing} - Temperaturdifferenzen
+[source,java]
+----
+record Reading(int time, double temp) {};
+
+// Messwertestrom erzeugen mit Zeitstempeln und 6°C + 0..6°C Wert
+var messungen = IntStream.range(0,1000)
+    .mapToObj(time -> new Reading(time, Math.random()*6+6))
+    .toList();
+
+// windowSliding für Paare <1>
+messungen.stream()
+.gather(Gatherers.windowSliding(2))
+.filter(pair -> pair.size()==2 &&
+    Math.abs(pair.get(1).temp() - pair.get(0).temp()) > 5)
+.map(pair -> new Reading(pair.get(0).time(), 
+        Math.abs(pair.get(1).temp() - pair.get(0).temp())))
+.count();
+// 27 (variiert basierend auf dem Random)
+
+// filter & map als Gather Operation <2>
+messungen.stream()
+.gather(Gatherers.windowSliding(2))
+.gather(Gatherer.ofSequential((_, pair, down)
+    -> {
+        if (pair.size() < 2) return true; // Einzelwert
+        var p0=pair.get(0); var p1=pair.get(1);
+        double delta = Math.abs(pair.get(1).temp() - pair.get(0).temp());
+        if (delta > 5) {
+            return down.push(new Reading(p0.time(), delta));
+        }
+        return true;
+    }))
+.count();
+// auch 27
+
+// alles als eine Gather Operation <3>
+messungen.stream()
+.gather(
+    Gatherer.ofSequential(
+    () -> new Reading[1], // Zustand, einfach ein Array  
+    (prev, curr, down) -> {
+        if (prev[0]!=null) {
+            double delta = Math.abs(curr.temp() - prev[0].temp());
+            if (delta > 5) {
+                down.push(new Reading(prev[0].time(), delta));
+            }
+        }
+        prev[0]=curr; // Zustand aktualisieren
+        return true;
+    }))
+.count();
+// 27
+---- 
+
+Variante 1: mit windowSliding Paaren
+
+* `windowSliding(2)` erzeugt Stream von Listen der Länge 2
+* `filter` lässt nur die Paare durch, die unserem “Sprung >5°” Kriterium genügen
+* `map` erzeugt einen neuen Messwert der Anfangszeit und Delta kombiniert
+* `count` zählt die Anzahl der Ausreißer
+
+Genau dieses Muster - “vergleiche benachbarte Elemente” - war früher im Stream so nicht auszudrücken, nun ist es *eine* Pipeline.
+
+Variante 2: `filter` und `map` as Gatherer
+
+* `filter` und `map` werden als ein Gatherer umgesetzt, damit muss das Delta nicht 2x berechnet werden
+
+Variante 3: ein Gatherer
+
+* Nur noch ein Gatherer, mit Zustand
+* Vergleich mit dem Vorwert der im Zustand steckt
+* Berechnung des Deltas
+* ggf. Erzeugung des Ausreißer-Messwerts
+* Aktualisierung Zustand
+
+
+Man könnte dies noch ausbauen: Etwa einen benutzerdefinierten Gatherer, der nicht nur Paare, sondern flexibel "Aufsammeln bis ein bestimmtes Ereignis eintritt” bildet.
+
+Beispielsweise könnten wir Events sammeln, bis ein “Bewegung erkannt” Event kommt, und dann die Gruppe abschließen.
+Mit den bekannten Bausteinen (Initializer, Integrator, Finisher etc.) ließe sich ein solcher spezieller Gatherer recht einfach bauen.
+
+Die neuen Möglichkeiten laden förmlich dazu ein, kreative Lösungen für Event-Streams zu entwickeln - ob im Smart Home, in der Finanzdaten-Überwachung oder für Log-Analyse.
+
+=== Anwendungsfall 2: CSV-Daten effizient verarbeiten
+
+Ein weiteres alltägliches Szenario.
+Wir haben eine große CSV-Datei mit z.B. Messdaten oder Log-Einträgen.
+Wir wollen sie einlesen, parsen und vielleicht aggregieren.
+
+Mit klassischen Streams würde man die Datei zeilenweise lesen (`Files.lines(Path)` liefert einen Stream von Strings) und dann per `.map()` in eine Collection oder POJO parsen.
+
+Läuft das sequentiell, könnte es bei tausenden Zeilen dauern; als parallel Stream würde es auf allen Kernen laufen, aber unkontrolliert.
+
+Wie oben erwähnt, glänzt hier `mapConcurrent`.
+
+Verarbeite bis zu 8 Zeilen gleichzeitig mit meiner Parsing-Funktion.
+Das Parsing selbst bleibt deklarativ als Funktion `parseLine`.
+Wir bekommen einfach einen Stream der geparsten Objekte zurück, ohne uns um parallele Verarbeitung kümmern zu müssen, und da virtuelle Threads genutzt werden, werden unsere Resourcen effizient eingesetzt.
+
+Nehmen wir an, wir wollen darüber hinaus noch eine Berechnung über die Daten machen, etwa die Gesamtsumme eines bestimmten Zahlenfelds.
+
+Dank Gatherern können wir das in einem Rutsch kombinieren: Erst parallel parsen, dann innerhalb desselben Streams per `fold` die Anzahl der Zellen berechnen.
+Da `fold` nachgeschaltet ist, wartet es automatisch, bis alle Parsing-Ergebnisse da sind (wobei `mapConcurrent` die Reihenfolge garantiert).
+
+Im Beispiel (Listing {counter:listing} laden wir eine CSV-Datei von GitHub mit rund 50k Zeilen, mit dem HttpClient (seit Java 11).
+
+Und verarbeiten sie dann zeilenweise als Stream mittles `mapConcurrent` und `fold`.
+
+.Listing {listing} - Parallele Verarbeitung von CSV
+[source,java]
+----
+import java.net.http.*;
+
+// CSV Datei mit European Song Contest Votes (49833 Zeilen)
+var uri = new URI("https://gist.githubusercontent.com/jexp/745180a7d9a280576973bc913e21c566/raw/esc-1975-2019.csv");
+
+var r = HttpRequest.newBuilder(uri).GET().build();
+
+HttpResponse<Stream<String>> response = HttpClient.newBuilder()
+  .followRedirects(HttpClient.Redirect.ALWAYS)
+  .build()
+  .send(r, HttpResponse.BodyHandlers.ofLines());
+
+Function<String,List<String>> parseLine = 
+    str -> List.of(str.split(";\\s*"));
+
+response.body()
+    .gather(Gatherers.mapConcurrent(8, parseLine))
+    .gather(Gatherers.fold(()->0, (total, x) -> total + x.size()))
+    .findFirst();
+// 350360 Zellen 
+---- 
+
+Und das alles ohne je manuell einen Thread zu starten - die Stream-API orchestriert alles.
+Das ist schon beeindruckend! Hätten wir hier früher vielleicht auf Spliterator-Tricks oder externe Parallelismen zurückgegriffen, können wir nun die Lesbarkeit einer Stream-Pipeline beibehalten.
+
+Kein Wunder, dass Piotr Przybyl `Gatherers.mapConcurrent()` sogar als https://softwaregarden.dev/en/posts/new-java/gatherers/concurrent/["das beste neue Java-22-Feature"^] bezeichnet - denn es macht nebenläufige Verarbeitung im Stream so einfach wie eine einzelne Zeile Code.
+
+Natürlich ließen sich noch viele weitere Beispiele finden.
+Wichtig ist: Stream-Gatherer erlauben es, auch ausgefallenere Pipeline-Logiken *inline* zu realisieren.
+
+Damit rücken Streams näher an die Ausdrucksmächtigkeit von reaktiven Streams (Stichwort [Project Reactor/RxJava]) oder funktionalen Streams in anderen Sprachen heran, allerdings ohne gleich ein neues Framework zu bemühen - es ist Teil der gewohnten Java-Streams.
+
+== Ausblick und Fazit
+
+Die Einführung der Stream-Gatherer markiert einen ausgezeichneten Evolutionsschritt der Java-Streams.
+Entwicklern eröffnet sich ein Baukasten, um *eigene Zwischenoperationen* zu definieren und so die Stream-Verarbeitung an ihre Bedürfnisse anzupassen.
+
+Man relativ leicht eigene Gatherer entwickeln,
+// wie z.B. einen `DistinctByGatherer`, der ein `Set` von gesehenen Schlüsseln führt und Duplikate anhand eines Kriteriums herausfiltert.
+die Java-Community hat bereits begonnen, solche Helfer zu bauen und zu teilen, zum Beispiel https://tginsberg.github.io/gatherers4j/[gatherers4j - 60] und https://github.com/jhspetersson/packrat[Packrat - 40].
+
+In Java 24 ist die Gatherer API dank https://openjdk.org/jeps/485[JEP 485^] final.
+Es ist abzusehen, dass dieser Schritt die Streams noch einmal deutlich aufwertet und Java gegenüber modernen Sprachen wie Kotlin oder Python konkurrenzfähiger wird.
+
+Als erfahrener Java-Entwickler lohnt es sich definitiv, einen Blick auf Stream-Gatherer zu werfen.
+Sie kombinieren die vertraute Stream-Syntax mit neuer Flexibilität und Power.
+Ob man nun Event-Pipelines im IoT baut, Daten scientifisch analysiert oder einfach eleganter mit Collections hantiert - die Chancen stehen gut, dass einem Gatherer genau das fehlende Puzzleteil liefert, um die Aufgabe in einem Rutsch zu lösen.
+
+In diesem Sinne: *Happy Gathering!*
+
+=== Resourcen
+
+- JEP 461 - https://openjdk.org/jeps/461
+- JEP 473 - https://openjdk.org/jeps/74
+- JEP 485 - https://openjdk.org/jeps/485
+
+APIs & Dokumentation
+
+- https://docs.oracle.com/en/java/javase/24/core/stream-gatherers.html[Stream Gatherers, Oracle^]
+- https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/stream/Gatherer.html[Gatherer API, Oracle^]
+- https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/stream/Gatherers.html[Gatherers API, Oracle^]
+
+Blogs & Artikel
+
+- https://belief-driven-design.com/looking-at-java-22-stream-gatherers-9485d/[Looking at Java 22: Stream Gatherers | belief driven design^]
+- https://jax.de/blog/java-23-stream-gatherers-jep-473-neuerungen/[JAX - Stream Gatherers in Java 23  Neue Möglichkeiten für Entwickler^]
+- https://inside.java/2025/04/03/javaone-stream-gatherers/[Stream Gatherers - Deep Dive with the Expert - Inside.java^]
+- https://todd.ginsberg.com/post/java/gatherers/[Stream Gatherers: The Missing Piece in Java Stream Processing]
+
+Videos
+
+- https://www.youtube.com/watch?v=v_5SKpfkI2U[Stream Gatherers - Deep Dive with the Expert, Viktor Klang^]
+- https://www.youtube.com/watch?v=rvW8tu1n5x4[Hunting with Stream Gatherers, Devoxx, Piotr Przybyl^]
+- https://www.youtube.com/watch?v=jqUhObgDd5Q[Better Java Streams with Gatherers - JEP Cafe #23, José Paumard^]
+- https://www.youtube.com/watch?v=Y2pmZlP-cOU&list=PLX8CzqL3ArzV4BpOzLanxd4bZr46x5e87&index=3[Data Oriented Programming in Java 21, Solving the Countdown game - JEP Cafe #22, José Paumard^]
+- https://www.youtube.com/watch?v=epgJm2dZTSg[Better Java Streams with Gatherers - Inside Java Newscast #57, Nicolai Parlog^]
+- https://www.youtube.com/watch?v=pNQ5OXMXDbY[Implementing New Java Stream Operations, Nicolai Parlog^]
+
+
+////
+external vs.
+internal iterators
+
+APIs:
+- foreach
+- map / filter
+- limit / skip
+- terminal: toArray / collect
+
+parallel streams / fork-join pool
+
+Was fehlte?
+
+Stream Gatherers
+
+Vor 2 Jahren bei Devoxx zum ersten mal von Piotr
+
+
+gatherers
+
+stream methods always return a new stream
+each method on a stream only called once
+intermediate operations
+terminal operations - triggers the stream computation
+usually no sideeffects in stream processing methods
+flatMap / mapMulti -
+flatMap for converstions that handle errors -> empty stream (but not super efficient)
+mapMulti(element, downstream) -> predecessor to gatherers
+-> better than flatmap as it doesn't have to create intermediate streams
+parallel stream bifurcation until small enough 
+single CFJ-Pool -> contention!
+merge afterwards
+sorting - mergeSort combiner
+SIZED - better for paralell
+SUBSIZED - not for unequal distribution
+associative merge
+parallel stream for global computation
+not for concurrent users
+
+gatherers - intermediate
+- Stream.gather(Gatherer)
+- 
+- if (downstream.isRejecting()) return false; 
+  // already terminated downstream
+
+  downstream.push() - boolean - true if downstream continues to accept arguments
+
+can demo sliding window or fixed window gatherer with an internal state that has an inner list
+Greedy Gatherer - 
+regular streams -> Gather.ofSequential
+parallel streams -> Gatherer.of
+combiner - 
+non-parallel gatherer in parallel stream will not be executed in parallel but the other stream operations will be
+integrator is mandatory, the rest is not
+
+skip / dropWhile - delay processing
+limit / takeWhile -> internal mutable state
+bufferize -> sorted, distinct (hashset pass when not in set, changes stream characteristics) (not for unbound streams)
+// peek for debugging
+? collect, reduce 
+stream.gather()
+average, min, max -> optional (if no elements)
+reduce, depending if there's an identity element, Optional or not
+findFirst, findAny, any/all/noneMatch -> short circuit
+collect() - collector api - your own terminal operations
+toList, toSet, joining, groupingBy() (multi-map), 
+Collector<TYPE, STATE/RETURN, RETURN>
+initalizer / supplier -> state
+add to state/container -> accumulator
+combiner(containers)
+finisher -> return type of finisher
+don't see the stream (e.g. for characteristics)
+
+same principles with gatheres api
+
+ 
+- windowing, sub-sequencing, folding
+- 461 
+- meta-operation for intermediate operations
+- gatherers like collectors but for intermediate operations not terminal ones
+- 4 functions in a gatherer
+- stages source - intermediate - terminate
+- gather -> accepts gatherer, and transforms a stream
+- integrator - consume + emit elements (with state, element, downstream - to emit): boolean
+Integrator<Void, T, T> integrator = (state, element, downstream) -> {
+  downstream.push(element);
+  return true;
+}
+map(Function<T,R> mapper) -> as gatherer 
+-> downstream.push(mapper.apply(element))
+return true;
+filter(Predicate<T> filter) -> as gatherer
+-> if (filter.test(element)) {
+  downstream.push(element);
+}
+return true;
+
+Supplier (initializer)
+
+State -> integrator -> read + mutate
+
+implement limit:
+
+Supplier<AI> initializer =  AtomicInteger::new
+integrator = (state, element, downstream) ->
+  state.getAndIncrement() < limit;
+
+Gatherer.ofSequential(initializer, integrator)
+
+incremental sequence
+AtomicRefernece
+
++ compare current state with 
++ if bigger emit + update state
+
+
+finishers after last element is emitted, e.g. for grouping/aggreation to emit the groups at the end or hanging groups (partially filled state)
+-> 
+
+last function combiner to combine for parallel streams
+
+pass to Stream::gather
+Factory methods - 
+Gatherers.fold/scan/slidingWindow/
+
+intermediate operations on a stream
+
+sort, limit, map, ..., mapTo, flatMap, peek, skip, distinct
+
+terminal operations
+collect, reduce, ..., toList
+teeing, filtering, flatMapping
+
+Gatherer<UPSTREAM_TYPE, STATE, DOWNSTREAM_TYPE>
+interface
+
+Stream gatherers can:
+• transform elements 1:1, 1:N, N:1, M:N
+• track already processed elements
+• "suspend" elements
+• short-circuit (∞ → |)
+• keep state between executions
+• enable parallel execution
+
+public interface Gatherer<INPUT,STATE,OUTPUT> {
+
+BiConsumer<STATE, Gatherer.Downstream<? super OUPUT>> finisher();
+Supplier<STATE> initializer();
+Gatherer.Integrator<STATE,INPUT,OUTPUT> integrator(); // not optional
+BinaryOperator<STATE> combiner() 
+}
+
+integrator is the engine
+
+built in Gatherers.*
+
+- fold(intial, BiFunction folder) - reduce
+- scan(initial, BiFunction scanner) - prefix aggregation
+- windowFixed(size) - fixed size window
+- windowSliding(size) - sliding by 1 element
+- mapConcurrent(maxConcurrency, mapper) - 
+
+
+parallel stream pinning / blocking
+-> mapConcurrent -> virtual threads (for network io or sleeping threads)
+gather(mapConcurrent(100,handle))
+
+Gatherer -> name because other names have already been overused
+
+
+https://docs.oracle.com/en/java/javase/24/docs/api/java.base/java/util/stream/Gatherer.html
+
+[(13) Hunting with Stream Gatherers by Piotr Przybyl](https://www.youtube.com/watch?v=rvW8tu1n5x4)
+
+[(13) Better Java Streams with Gatherers - JEP Cafe #23](https://www.youtube.com/watch?v=jqUhObgDd5Q)
+
+[(13) Data Oriented Programming in Java 21, Solving the Countdown game - JEP Cafe #22](https://www.youtube.com/watch?v=Y2pmZlP-cOU&list=PLX8CzqL3ArzV4BpOzLanxd4bZr46x5e87&index=3)
+
+[(13) Stream Gatherers - Deep Dive with the Expert](https://www.youtube.com/watch?v=v_5SKpfkI2U)
+
+== Referenzen
+
+* Piotr Devoxx
+* Java One
+* JavaDoc
+* Artikel
+
+////
