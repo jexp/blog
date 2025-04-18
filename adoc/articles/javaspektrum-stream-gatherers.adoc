@@ -16,12 +16,12 @@ Trotz der reichhaltigen Stream-API stieß man immer wieder an Grenzen: Bestimmte
 
 Genau hier setzen die *Stream-Gatherer* an,  eine Neuerung, die erstmals mit https://openjdk.org/jeps/461[JEP 461: Stream Gatherers^] in Java 22 als Preview eingeführt wurde, und als https://openjdk.org/jeps/473[JEP 473^] in Java 23 in zweiter Preview fortgeführt, finalisiert und veröffentlicht in Java 24 in https://openjdk.org/jeps/485[JEP 485^].
 
-Für unsere Beispiele nutzen wir Java 24, bei vorherigen Versionen müsste man mit `--enable-preview` das Feature aktivieren.
+Für unsere Beispiele nutzen wir `jshell` mit Java 24, bei vorherigen Versionen müsste man mit `--enable-preview` das Feature aktivieren.
 
 Die Benutzung von Streams besteht grob aus 3 Phasen:
 
-* Erstellung, z.b. mit `stream()` auf Collections oder `Stream.of()`
-* Vearbeitung (intermediate Operation) z.b. mit `map()`, `filter()`, `limit()`, `flatMap()`
+* Erstellung der Quelle, z.b. mit `stream()` auf Collections oder `Stream.of()`
+* Vearbeitung in Zwischenschritten (intermediate Operationen) z.b. mit `map()`, `filter()`, `limit()`, `flatMap()`
 * Ausgabe (terminale Operation), mittles `count()`, `forEach()`, `toList()` oder allgemein `collect()`
 
 Die letztgenannte Methode `collect()` is mächtig aber auch komplex - mit der Collectors-API können komplexe Aggregations-Operationen ausgedrückt werden, wie in Listing {counter:listing} gezeigt.
@@ -98,6 +98,15 @@ Genau diese Lücke, schließen die Stream-Gatherer, basierend auf der Arbeit von
 
 Die Lösung kommt nun in Form der Methode `Stream.gather(...)` und eines zugehörigen Interfaces `Gatherer`, sowie einer Hilfsklasse `Gatherers`, die gemeinsam die Tür für eigene Operationen im Stream öffnen.
 
+Eigenschaften der API sind:
+
+* Zustandsbehaftet oder zustandslos
+* Sequentiell oder parallelisierbar
+* Beliebiges Verhältnis von Eingabe zu Ausgabekardinalität (`1..* : 0..*`)
+* Kann Stream partiell verarbeiten (z.B. für unendliche Streams)
+* Kombinierbar, für Transformationen beliebiger Komplexität
+* Kann auf Ende des Streams reagieren
+
 == Die Gatherer-API im Überblick
 
 Ein `Gatherer` ist im Grunde eine "Intermediate Operation zum Mitnehmen". 
@@ -120,9 +129,27 @@ Ein Gatherer wird durch bis zu vier Funktionen charakterisiert, die zusammenspie
 - Finisher - um etwaige am Ende im Zustand verbliebene Elemente auszugeben
 - Combiner - für parallele Streams
 
-Davon ist nur der Integrator zwingend erforderlich, die anderen benötigt man nur bei Bedarf, und dank default-Methoden muss man sie auch nicht implementieren.
+Im Interface sieht das ungefähr so aus wie in Listing {counter:listing}
+
+.Listing {listing} - Gatherer Interface
+[source,java]
+----
+package java.util.stream;
+
+interface Gatherer<IN, STATE, OUT> {
+    Supplier<STATE> initializer();
+    Integrator<STATE, IN, OUT> integrator();
+    BiConsumer<STATE, Downstream<OUT>> finisher();
+
+    BinaryOperator<STATE> combiner();
+}
+----
+
+Davon ist nur der Integrator zwingend erforderlich, die anderen benötigt man nur bei Bedarf, und dank default-Methoden muss man sie auch nicht bereitstellen, falls man sich entscheidet das Interface direkt zu implementieren (z.b. um komplexere Gatherer in einer Klasse zu kapseln).
 
 Instanzen von Gatherer können mittels der Factory-Methoden `of` und `ofSequential` (für nicht-parallele Streams) erzeugt werden, die überladen sind, so dass nur die relevanten Funktionen als Parameter-Lambdas übergeben werden können, zum Beispiel `Gatherer.ofSequential(initializer, integrator)`.
+
+Gather sind auch kombinierbar, damit können mehrere von Ihnen zusammen komponiert werden, mittels `andThen`, zum Beispiel: `filterGatherer.andThen(mapGatherer)`.
 
 === Integrator 
 
@@ -130,7 +157,7 @@ Das Herzstück der Gatherer API, sie wird für jedes eingehende Element (`IN`) a
 
 Der Integrator hat Zugriff auf den privaten Zustand `STATE` und auf einen speziellen Downstream-Kanal, über den er Output-Elemente vom Typ `OUT` an die nächste Pipeline-Stufe weitergeben kann.
 
-Der Integrator ist typischerweise eine dreistellige Bi-Funktion `(STATE state, IN element, Downstream<? super OUT> out) -> boolean`.
+Der Integrator ist typischerweise eine dreistellige Bi-Funktion `boolean integrate(STATE state, IN element, Downstream<R> out)`.
 
 Er kann Elemente filtern, umwandeln, sammeln - praktisch alles was man sich so vorstellen kann.
 
@@ -174,11 +201,12 @@ zahlen.stream().gather(gerade).toList();
 Ein Integrator könnte zum Beispiel eingehende Elemente sammeln, bis eine bestimmte Anzahl erreicht ist, dann diese als Gruppe als Liste `OUT` an `downstream.push()` senden und entscheiden, ob danach weiter gelesen wird.
 Dieses Beispiel kommt zum Schluss.
 
-Die `push()` Methode gibt auch einen Wahrheitswert zurück, der angibt ob weitere Elemente akzeptiert werden.
+Die `push()` Methode gibt einen Wahrheitswert zurück, der angibt ob weitere Elemente akzeptiert werden.
 Wenn der `downstream` keine Elemente mehr aufnimmt (`downstream.isRejecting()`), muss unser Integrator auch `false` zurückgeben.
 
 Ich weiss aber nicht, warum das nicht in der darunterliegenden Infrastruktur schon abgehandelt wird. 
-Vorliegende Beispiele machen das einmal so und einmal so, aber in Produktivcode würde ich es auch am Anfang der Implementierung sicherheitshalber mit abhandeln.
+Vorliegende Beispiele machen das einmal so und einmal so, aber in Produktivcode würde ich es auch am Anfang der Implementierung sicherheitshalber mit abhandeln. 
+Besonders, wenn der Gatherer selbst viel aufwändige Arbeit macht.
 
 === Initializer
 
@@ -281,15 +309,25 @@ Liefert der Integrator `false` zurück, bricht der Stream die Schleife ab (Short
 
 Insgesamt kann man sich die Funktionsweise der `gather()` Methode unter Nutzung der `Gatherer`-Instanz wie in Listing {counter:listing} gezeigt vorstellen.
 
-.Listing {listing} - "Implementierung" der gather() Methode
+.Listing {listing} - Pseudo-Implementierung der gather() Methode
 [source,java]
 ----
-Gatherer.Downstream<? super R> downstream = ...;
-A state = gatherer.initializer().get();
-for (T t : data) {
-    gatherer.integrator().integrate(state, t, downstream);
+<IN, STATE, OUT> void evaluate(
+    Iterator<IN> source, 
+    Gatherer<IN, STATE, OUT> gatherer, 
+    Consumer<R> output) {
+
+    Gatherer.Downstream<OUT> down = 
+        (OUT r) -> { output.accept(r); return true; };
+    var state = gatherer.initializer().get();
+    var integrator = gatherer.integrator();
+
+    while (source.hasNext() && 
+        !down.isRejecting() &&
+        integrator.integrate(state, source.next(), down));
+
+    gatherer.finisher().accept(state, down);
 }
-gatherer.finisher().accept(state, downstream);
 ----
 
 Während der ganzen Operation fließen die vom Gatherer erzeugten Ausgabeelemente weiter durch die Pipeline, als wären sie normale Stream-Elemente.
@@ -299,6 +337,18 @@ Damit lässt sich praktisch fast jede eingebaute Intermediate Operation umsetzen
 Konzeptionell könnte man jede Stream-Pipeline als Kette von `gather()`-Aufrufen darstellen, aber das ist auch nicht zielführend. 
 Konkrete, semantisch benannte Operationen mit einer klaren API sind viel anwenderfreundlicher.
 Aber in der Implementierung könnte man Gatherer benutzen, da sie zum Teil diese Methoden effizienter umsetzen könnten.
+
+Für die parallele Implementierung sind folgende Schritte notwendig:
+
+1. Rekursives Aufteilen des Upstreams in eine Baumstruktur, bis die Teilstücke klein genug sind
+2. Pro Endknoten (wie bei der seriellen Abarbeitung):
+* Erstellen eines `Gatherer.Downstream`-Instanz, als Ziel
+* Erstellen des Zustands über `gatherer.initializer().get()`
+* Abrufen einer Referenz auf den Integrator über `gatherer.integrator`
+* Solange weitere Eingabeelemente vorhanden sind und der Aufruf von `integrate` mit Zustand, dem nächsten Element und dem Downstream-Handle `true` zurückgibt, wiederholen
+3. Wenn beide Teilstücke fertig sind, deren Zustand mit `gatherer.combiner()` zusammenführen und die Ausgaben verketten
+4. Für den Wurzelknoten: Abrufen des Finishers über `gatherer.finisher()` und Aufruf mit Zustand und Downstream-Handle
+
 
 Die Entwickler von OpenJDK haben als Bonus direkt einige *fertige Gatherer* mitgeliefert, um gängige Use-Cases abzudecken - diese schauen wir uns jetzt an.
 
@@ -454,6 +504,18 @@ List<String> result = Stream.of(1,2,3,4)
     .toList();
 System.out.println(result);
 // Ausgabe: [1223334444]
+
+// Kombination von 2 Gatherern mit `andThen`
+var gruppenSumme = Gatherers.<Integer>windowSliding(2).andThen(
+    Gatherers.fold(
+        ()->0, 
+        (sum, x) -> sum + x.get(0)+x.get(1)));
+
+Stream.of(1,2,3,4,5,6,7)
+.gather(gruppenSumme)
+.filter(x -> x > 10)
+.findFirst();
+// Ausgabe: Optional[48]
 ---- 
 
 Hier ist `OUT` ein `String` und `IN` ein `Integer`.
@@ -870,12 +932,12 @@ Gatherer<UPSTREAM_TYPE, STATE, DOWNSTREAM_TYPE>
 interface
 
 Stream gatherers can:
-• transform elements 1:1, 1:N, N:1, M:N
-• track already processed elements
-• "suspend" elements
-• short-circuit (∞ → |)
-• keep state between executions
-• enable parallel execution
+* transform elements 1:1, 1:N, N:1, M:N
+* track already processed elements
+* "suspend" elements
+* short-circuit (∞ → |)
+* keep state between executions
+* enable parallel execution
 
 public interface Gatherer<INPUT,STATE,OUTPUT> {
 
