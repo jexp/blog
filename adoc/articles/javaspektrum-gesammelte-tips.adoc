@@ -1,0 +1,164 @@
+= Effective Java Sommerloch Edition - Gesammelte Tips
+
+In den letzten 12 Jahren haben 72 Kolumnen zum Thema "Effective Java" die Ausgaben des JavaSpektrums dekoriert.
+Viele davon waren spezifisch auf ein Thema fokussiert und tauchten tiefer in die jeweilige Problematik ein, um sie sowohl verständlich, als auch anwendbar zu machen.
+
+In dieser kurzen Ausgabe möchte ich eine Zusammenfassung der Themen, Ansätze und Tools geben, die wir über die Jahre diskutiert haben und die mir besonders wichtig erscheinen.
+Sie sollen als eine Art "Best-Of" dienen, um die wichtigsten Aspekte der effizienten Entwicklung in Java zu beleuchten und zu erläutern.
+
+"Effektiv" bezieht sich ja sowohl auf die Effektivität der Entwicklung, die aber meiste von meinem Kolumnistenkollegen, z.b. im "Praktiker" beleuchtet wurden, als auch auf die Effektivität unserer Anwendungen (also eigentlich Effizient), auf die ich mich meist konzentriert habe.
+
+== Softwareentwicklung im Allgemeinen
+
+Die Softwareentwicklung hat sich in den letzten 10 Jahren ja schon deutlich gewandelt. 
+Zum einen ist Java seit Version 8 deutlich schneller besser geworden, viele wichtige Features die die Sprache moderner und Anwendungen effizienter und wartbarer machen, wurden eingeführt.
+
+Zum anderen gibt es heute viele Tools die unser Leben in allen Phasen der Entwicklung leichter und effizienter machen.
+Von IDEs mit richtig guten Vervollständigung-, Navigations-, Refaktoring-, Versionsverwaltungs- und Kollaborationsfunktionen, über Build- und Test-Tools, bis hin zu Analyse- und Monitoring-Werkzeugen, die uns helfen, die Qualität und Performance unserer Anwendungen zu verbessern.
+
+Effiziente Bibliotheken für Collections, Bytecode Generierung, Performance-Tests, Server, Datenverarbeitung und vieles andere machen unser Leben leichter.
+
+Der Softwareentwicklungsprozess endet auch nicht mehr mit der Bereitstellung des Quelltextes, unsere Team sind jetzt auch mit Continuous Integration und Delivery weit in den Lebenszyklus der Anwendungen eingebunden und tragen so die Verantwortung für die Qualität und Performance der Anwendungen. Damit sind wir selbst von unseren Entscheidungen während des Entwicklungsprozesses betroffen, da diese während des gesamten Lebenszyklus der Anwendung Auswirkungen haben.
+
+== Java Plattform
+
+Der Releasezyklus von Java hat sich in den letzten Jahren deutlich beschleunigt und die Einführung von neuen Features und Verbesserungen ist jetzt alle 6 Monate zu erwarten. Wir gehen im Detail auf einige der Effizienzfeatures im folgenden ein, insgesamt ist der Prozess für die Weiterentwicklung der Java Plattform mit den JEPs und besonders den Inkubations- und Preview-Features sehr transparent und offen.
+
+In den Jahren seit dem hat sich auf allen Gebieten der Sprache, virtuellen Maschine und Ökosystem viel getan. 
+Von der Modularisierung über die Stream-API, Records [Hun0220], Pattern Matching, Typinferenz, bis hin zu den neuesten Features wie Virtual Threads, Textblöcken, Switch Expressions [Hun0322], und Foreign Function und Memory API, die in den nächsten Versionen verfügbar sein werden.
+
+== GraalVM
+
+Wie schon im letzten Heft detailliert dargestellt und auch in mehreren Kolumnen [Hun0119] thematisiert stellt GraalVM in vielerlei Hinsicht einen Meilenstein in der Entwicklung der JVM dar. 
+Zum einen ermöglicht der moderne, super effiziente Compiler, der in Java entwickelt wurde, Optimierungen von Java Code die denen von C/C++ nahekommt. 
+Herkömmlicher, objektorientierter Code wird mittels detaillierter Analyse und Annahmen über stabile Zustände in den effektivsten Bytecode (und Maschinencode) übersetzt, mit der Option das jederzeit wieder neu anzugehen.
+Der Graal Compiler ist seit Java 9 im JDK verfügbar und soll irgendwann den C2 Compiler als Standard ablösen und als einfacher verständliche und wartbare Implementierung des Just-In-Time Compilers der JVM dienen.
+
+Durch diese Compiler-Effizienz wird das zweite Feature des Oracle Labs Teams erst ermöglicht - die polyglotte Entwicklung auf der JVM.
+Mittels der Truffle Bibliothek können Sprachen wie Javascript, Python, Ruby, LLVM, und sogar Java (Bytecode) in Java implementiert und getestet werden, und dann richtig schnell auf der JVM ausgeführt werden. 
+Dank Truffle können die Sprachen miteinander und auch mit JVM Sprachen interagieren und auf gemeinsame Daten zugreifen.
+Die Graal.js Implementierung ersetzte Nashorn und GraalPython ermöglicht mittlerweile die effiziente Ausführung richtiger Data-Science Workloads in der JVM Umgebung.
+
+Und sogar binäre Ausführungsumgebungen für diese Sprachen, die sich nicht hinter den Originalen verstecken müssen, sind dank GraalVM verfügbar.
+Das ist auch der dritte große Vorteil von GraalVM, die Möglichkeit, mittels Vorkompilierung (Ahead of Time AOT) native Binaries zu erstellen, die ohne JVM und mit sehr schneller Startup-Zeit auskommen. Neben Kommandozeilentools ist dies auch für Cloud Services wichtig, die sowohl von der minimierten Größe und den kurzen Startzeiten profitieren. 
+Dabei finde ich so faszinierend dass hier eine ganze Java-JVM (Substrate-VM), die JDK Klassen und der eigene Code zusammen vorkompiliert und optimiert werden, und ein effizientes Maschinencodeprogramm am Ende herauskommt.
+
+Wie bei der "1 Billion Row Challenge" von Gunnar Morling [Hun0324] gezeigt, ist sowohl die schnelle Startup-Zeit der nativen Images als auch die Compiler-Effizienz für die Verarbeitung großer Datenmengen und die effiziente Ausführung von Algorithmen geeignet.
+
+== Kommandozeilentools
+
+Meine Artikel [Hun0420] und Vorträge zu nützlichen Kommandozeilentools für Java kommen beim Publikum immer wieder gut an.
+Das zeigt, dass viele dieser Werkzeuge immer noch nicht weit genug bekannt sind und viele Erleichterungen also auf sich warten lassen. (HunXx)
+
+Hier noch einmal eine kurz Übersicht der diskutierten Tools mit ihren Anwendungszwecken.
+
+.Java Kommandozeilentools
+[%autowidth,opts=header]
+|===
+| Tool | Beschreibung
+| sdkman | Verwaltung von lokalen JDKs und anderer Tools (Maven, Gradle, Micronaut, Spring, ...)
+| jbang | Mächtiges Tool um Java Source Dateien als Skripte auszuführen [Hun0621]
+| java | Ausführen von Class und Java Source Dateien
+| jps | Anzeige aller Java Prozesse mit Details
+| jstack | Thread-Dumps für Java Prozesse
+| jshell | Java REPL für interaktiven Test von Code, Nützlich zum Testen und Lernen
+| jcmd | Umfangreiches Tool für Analyse und Steuerung des JVM Prozesses (GC, JFR, Detailinformationen)
+| jinfo | Informationen über die laufende JVM
+| jol | Java Object Layout - detaillierte Aufschlüsselung des Speicherlayouts von Klassen
+| jdeprscan | Klassen ermitteln die abgekündigte APIs benutzen
+| jdeps | Modulabhängigkeiten von Klassen ermitteln
+| jlink | eigene angepasste JDK's erstellen, mit spezifischen Modulen [Hun0220]
+| async profiler | effiziente Messung von Aufrufhäufigkeiten und Objekterzeugung - erzeugt Flamegraphen
+|===
+
+== Garbage Collection
+
+Auch wenn wir es als Java Entwickler nicht gern hören, Garbage Collection ist Segen und Fluch zugleich.
+Zum einen müssen wir uns nicht um Speichermanagement kümmern und einer der Kollektoren der JVM kümmert sich um das Festellen ungenutzter Referenzen, deren Freigabe und die Reorganisation des Speichers ohne unser Zutun.
+Auf der anderen Seite ist diese Arbeit sehr aufwändig und kann sowohl viele Resource verbrauchen, als auch im ungünstigen Fall unsere Anwendung mit unerwarteten Pausen oder Verzögerungen beglücken. 
+
+Daher ist seit vielen Jahren die Entwicklung und Optimierung von Garbage Kollektoren ein stetes Thema in den JVM Teams und natürlich auch in unserer Kolumne [Hun0120]. 
+
+In den letzten Jahren gab es nach der Einführung des G1 (Garbage First GC) mit einem Fokus auf Einhaltung von GC-Pausenzeiten eine Reihe von spannenden Initiativen.
+Zum einen Shenandoah von Redhat als GC mit hohem Durchsatz und kurzen Pausen mit nebenläufiger Kollektion und Defragmentierung, der neue Ideen und Verbesserungen gebracht hat.
+Epsilon GC ist ein spezieller Kollektor, der nichts tut, also genau richtig für Anwendungen die keinen GC brauchen, d.h. nur kurz oder einmalig laufen, wissen was sie allozieren und sich den Aufwand sparen können.
+
+ZGC ist ein weiterer GC der auf kurze Pausen und geringen Overhead optimiert ist, und in vielen Anwendungen eine gute Wahl ist, vor kurzem in Java 21 kam erst die "generational" Version heraus, die durch die Integration von Heap Generationen und dynamische Anpassung der Pointer (wie ZingGC) die Performance weiter verbessert. 
+
+== Concurrency und Parallelismus
+
+Als mit Java 8 Fork Join Pool und Parallel Streams auf die Bildfläche traten, war das der erste Schritt zu einer modernen Nebenläufigkeitsentwicklung auf der JVM, deren Entwicklung bis heute noch nicht abgebremst wurde.
+Plötzlich konnte parallele Datenverarbeitung effizienter mittels einer angenehmen API erfolgen, ohne sich um den konkurrierenden Zugriff auf Datenstrukturen und die Synchronisation der Threads kümmern zu müssen.
+
+Dann kam Reactive - ich persönlich war ja nie so ein großer Fan von reaktiver Programmierung.
+Während durch effiziente Resourcennutzung ein deutlicher Vorteil entstehen kann, war es meines Erachtens nur in Bibliotheken oder Treibern sinnvoll den Aufwand zur Entwicklung und Wartung von reaktivem Code zu betreiben. 
+Die Nachteile für Verständnis, Komplexität, Fehlersuche und Handhabung von zustandsbehafteten Operationen sind in Anwendungen einfach nicht zu rechtfertigen.
+
+Und mit virtuellen Threads (Projekt Loom) [Hun0521] ist das Thema glücklicherweise wieder mit einer einfachen und effizienten Lösung versehen. Hier wird die Einfachheit der Thread-API mit der Effizienz einer leichtgewichtigen Implementierung verbunden, die zwar viel Aufwand im JDK verursacht hat, aber mittels Abgabe der Kontrolle an blockierenden Stellen (Continuations) große Mengen von virtuellen Threads auf einer kleinen Anzahl von echten Threads ausführen kann.
+
+Da für virtuelle Threads das Credo gilt: "Im Zweifelsfall einen neuen Thread erzeugen", bekommt ihre Verwaltung einen viel höheren Stellenwert. Hier sind die neuen APIs für strukturierte Nebenläufigkeit ein interessanter Ansatz, der eher deklarativ die Verwaltung von Aufgaben, deren Abhängigkeiten und die Ausführung handhabt.
+
+== Datenstrukturen, Bytecode
+
+Effiziente Datenstrukturen [Hun0520] sind neben der effektiven Nutzung von Compute-Resourcen ein wichtiger Aspekt der Performance von Anwendungen.
+Gerade wenn große Datenmengen verarbeitet werden müssen, ist es wichtig, Datenstrukturen zu verwenden die die Informationen kompakt ablegen und zugreifbar machen, damit sie effizient verarbeitet werden können.
+Mit Bitmanipulationen [Hun0523] und Bibliotheken wie Roaring Bitmaps können auch die letzten Bits Speicherplatz gespart werden.
+
+In Java gibt es eine Reihe von Bibliotheken, die spezielle Datenstrukturen für verschiedene Anwendungsfälle bereitstellen, wie z.B. die Eclipse Collections [Hun0321], Javaslang/Vavr [Hun0316], oder auch Bibliotheken zur ByteCode Erzeugung wie ByteBuddy [Hun0422].
+
+In modernem Java wird es mit Value Klassen in Zukunft einfacher werden, speichereffiziente Anwendungen zu entwickeln. 
+Bisher haben unveränderliche Records [Hun0220] und die Verbesserungen durch Pattern-Matching in `instance of`, `switch` und Destrukturierung [Hun0322] die Entwicklung von effizienten und wartbaren Anwendungen erleichtert.
+
+Mit Value Klassen und Objekten [Hun0317] (Valhalla, JEP401) wird es in Zukunft einfacher werden, speichereffiziente Anwendungen zu entwickeln.
+Dann wird eine Repräsentation von Objekten ohne Overhead möglich sein, so dass deren Attribute direkt, ohne Klassen- und Objekt-Header, im Speicher und Kollektionen abgelegt werden können.
+
+In der "1 Billion Row Challenge" (1BRC) von Gunnar Morling, am Anfang dieses Jahres wurden sowohl speichereffiziente Strukturen, effektive Parallelverarbeitung, als auch Bitmanipulationen eingesetzt, um die Verarbeitung von großen Datenmengen zu beschleunigen und die Speichernutzung zu optimieren.
+
+== Performancetests und -Messungen
+
+Um die Leistung eines Programms zu verbessern ist es unbedingt notwendig eine saubere Test-Infrastruktur zu benutzen, die zum einen reproduzierbare Messwerte ermitteln, und zum anderen ohne den Einfluss anderer Aspekte die (hoffentlich positive) Änderung des Durchsatzes bzw. Laufzeit von Algorithmen und Implementierungen nachweisen kann.
+Nur dann kann entschieden werden, ob es überhaupt notwendig und zielführend ist den betrachteten Code zu optimieren, es geht darum die Flaschenhälse festzustellen und diese zu adressieren. 
+Danach kann erneut gemessen werden um die Verbesserung nachzuweisen, ggf. Seiteneffekte festzustellen und die neuen Engstellen zu ermitteln.
+
+Für detaillierte Einsichten in die Laufzeit und Speichernutzung von Java Anwendungen gibt es eine Reihe von Tools, die ich im folgenden noch einmal kurz vorstellen möchte.
+
+"Async Profiler" kann mittels `AsyncGetCallTrace` und perf-Events die Aufrufhäufigkeit von Methoden und Codeblöcken ermitteln, ohne auf Savepoints angewiesen zu sein und in Flamegraphs darstellen. Dabei können sowohl Java als auch Kernel-Aufrufe aufgezeichnet werden, um die Interaktion zwischen Anwendung und Betriebssystem zu analysieren.
+
+Für eine dedizierte Aufzeichnung von JVM Ereignissen und Metriken gibt es den JDK Flight Recorder (JFR) [Hun0221], das in der OpenJDK Version seit Java 11 verfügbar ist. Mit JFR können detaillierte Informationen über die Laufzeit, Speicherallokation, Threads, I/O und viele andere Aspekte der JVM und der Anwendung aufgezeichnet und analysiert werden. Auch eigene Ereignisse können definiert und aufgezeichnet werden, um spezifische Aspekte der Anwendung zu untersuchen.
+
+Für korrekte Performance Tests hat Aleksey Shipilëv das JMH (Java Microbenchmark Harness) entwickelt, das eine Vielzahl von Optimierungen und Best Practices für die Erstellung von Microbenchmarks enthält. Mit JMH können sowohl die Laufzeit von Methoden und Algorithmen, als auch die Auswirkungen von JVM-Optionen und -Parametern auf die Performance der Anwendung gemessen werden.
+
+== Bücher
+
+Es gibt eine Reihe Bücher, die über die Jahre ihren Wert immer wieder bewiesen haben und die ich regelmäßig empfehle.
+Dazu gehören Josh Bloch's Effective Java (mittlerweile in der 3. Ausgabe), Brian Goetz's Grundlagen in "Java Concurrency in Practice", "Optimizing Java" von Ben Evans und Scott Oaks "Java Performance" sowie der "Java Performance Companion" von Charlie Hunt.
+
+Für Softwareentwicklung, Architektur und Betrieb ist Michael Nygard's "Release It" ein Klassiker, der immer noch aktuell ist und viele wichtige Themen behandelt.
+
+== Ausblick in die Zukunft
+
+Über die Nutzung von AI in der Softwareentwicklung gibt es sehr unterschiedliche Meinungen.
+Ich persönlich sehe AI als ein Werkzeug, das uns in vielen Bereichen unterstützen kann, aber nicht ersetzen wird, wie ein nützlicher Helfer, der uns bei der Arbeit unterstützt. Den Hauptnutzen von Codeassistenten sehe ich bei erfahrenen Entwicklern, die als "human-in-the-loop" schnell bewerten können, ob die Vorschläge sinnvoll sind und sie annehmen und anpassen können.
+
+Für das Erlernen von Sprachen, Frameworks und Projektdetails, können Assistenten hilfreich sein, aber nur wenn sie auf konkreten Informationen (Code, Dokumentation) des Projekts basieren und nicht auf den Trainingsdaten des LLMs.
+// Mit diesen wäre eine personalisierte, kontextsensitive Unterstützung möglich, die Entwickler in ihrer täglichen Arbeit unterstützt und ihm hilft, effizienter zu arbeiten.
+
+Im Java Ökosystem gibt es mittlerweile auch Bibliotheken für die Integration von Sprachmodellen (LLMs) besonders Spring.AI (Hun0623) und Langchain4j.
+Beide bilden in einer angenehmeren und durchdachten Java API typische Interaktionsmuster mit LLM-Architekturen ab und ermöglichen die Nutzung vieler Modelle, Datenquellen und Tools, die von den verschiedenen Anbietern bereitgestellt werden.
+
+
+In den nächsten Java Releases stehen viele spannende Weiterentwicklungen vor der Tür.
+Zum einen sind die Foreign Function und Foreign Memory API die meine Kollegen Junghanns und Horn in diversen Kolumnen (JuHo0224) erklärt haben, in Java 22 allgemeinen Verfügbarkeit (GA) in Java 22. 
+Damit ist der effiziente Zugriff auf native Bibliotheken und Speicherbereiche in Java möglich, ohne auf JNI und Unsafe zurückgreifen zu müssen.
+Das öffnet auch die Tür für die Deprekation der Speicherzugriffsmethoden von `Unsafe` und die damit verbundenen Verbesserung in Sicherheit und Stabilität der JVM, das ist für Java 23 vorhergesehen (JEP471).
+
+In einem ähnlichen Bereich wird die Vector API den strukturierten Zugriff auf SIMD-Instruktionen in modernen Prozessoren ermöglichen und damit die Performance von numerischen Berechnungen deutlich verbessern, was für Data Science und Machine Learning Anwendungen besonders interessant ist. Dann muss man nicht mehr auf die Cleverness des Java-Compilers hoffen, sondern kann die SIMD-Operatoren direkt und prozessorunabhängig ansprechen.
+Die Vector API wird in der mittlerweile 8. Runde immer noch im Inkubations-Status in Java 23 (JEP469) erscheinen, ihre finale Verfügbarkeit ist noch nicht geklärt.
+
+Desweiteren hoffen wir darauf mit Value Klassen und Objekten (JEP401), nach einer gefühlten Ewigkeit, strukturierte Datentypen ohne Speicheroverhead in Java bekommen. 
+Zur Zeit immer noch im "Early Access", und nur über spezielle Builds verfügbar, hoffe ich auf eine Inkubation im JDK im nächsten Jahr.
+
+Nachdem jetzt virtuelle Threads seit Java 21 verfügbar sind, lässt die Finalisierung der strukturierten Nebenläufigkeits APIs (structured concurrency) auf sich warten (dritter Preview in Java 23, JEP480) um effizient große Mengen von virtuellen Threads zu verwalten.
+Ein offenes Thema ist dort auch noch die Implementierung von virtuellen Threads für Dateioperationen, das zumindest unter Linux mit IO-uring [Hun0223] umgesetzt werden soll.
+
+Insgesamt bin ich immer noch sehr begeistert von der Entwicklung der Java Plattform und dem Ökosystem, und freue mich auf die nächsten Jahre, in denen wir hoffentlich noch viele spannende Entwicklungen und Verbesserungen sehen werden.
