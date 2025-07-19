@@ -7,28 +7,28 @@ Michael Hunger <michael@jexp.de>
 :source-highlighter: coderay
 :imagesdir: ../../img/
 
-== Einleitung: Wenn Mythen Performance zerstören
-// go faster or wider
-// we can't go faster, so we go wider
+== Einleitung: Wenn Mythen Performance verhindern
 
 „Ihr müsst kein Ingenieur sein, um Rennfahrer zu werden, aber ihr braucht mechanische Sympathie" - mit diesen Worten beschrieb Formel-1-Legende Jackie Stewart das Verständnis dafür, wie ein Rennwagen funktioniert.
-
-Wie ich schon vor langer Zeit in den LMAX-Disruptor Artikeln [HunXX] beschrieb, übertrug Martin [Thompson]  dieses Konzept auf die Softwareentwicklung. 
-*Mechanische Sympathie* bedeutet, Code zu schreiben, der mit der Hardware (und Systemsoftware) arbeitet, nicht gegen sie.
-Gerade in der Welt von hochperformanten Anwendungen für Finanzmärkte, war es notwendig, die maximale Leistung, aus einem trotzdem sauber designten System herauszuholen, was dem LMAX Team auch gelang.
-
-Auch im One-Billion-Row [1BRC] Wettbewerb, den wir etwas genauer beleuchteten, zeigte sich, dass die Performance von leistungsfähigen Java-Anwendungen stark von der Kenntnis der Prozessor- und Speicherinteraktion abhängt.
 
 Selbst in unserer Java-Welt ist mechanische Sympathie entgültig entscheidend für Performance, und oft sind kleine Details entscheidend, um die darunterliegende Infrastruktur optimal zu nutzen.
 Wir haben in der Vergangenheit über Performance-Optimierung, Garbage Collection, Cache-Effizienz und effiziente Datenstrukturen gesprochen. 
 Wissen um all diese Themen sind Teil der mechanischen Sympathie.
 
-Das Prinzip ist einfach: Kleine Details können überraschende Auswirkungen haben. 
+Wie ich schon vor langer Zeit in den LMAX-Disruptor Artikeln [HunXX] beschrieb, übertrug Martin [Thompson]  dieses Konzept auf die Softwareentwicklung. 
+Durch Vermeidung von Locks, Cache-Line-Padding und Single-Writer-Prinzip erreicht er *6 Millionen Transaktionen pro Sekunde.
+
+*Mechanische Sympathie* bedeutet, Code zu schreiben, der im Einklang mit der Hardware (und Systemsoftware) arbeitet, und deren Anforderungen nicht ignoriert.
+Gerade in der Welt von hochperformanten Anwendungen für Finanzmärkte, war es notwendig die maximale Leistung aus einem trotzdem sauber designten System herauszuholen, was dem LMAX Team auch gelang.
+
+Auch im One-Billion-Row [1BRC] Wettbewerb, den wir etwas genauer beleuchteten, zeigte sich, dass die Performance von leistungsfähigen Java-Anwendungen stark von der Kenntnis der Prozessor- und Speicherinteraktion abhängt.
+
+Kleine Änderungen können überraschende Auswirkungen haben. 
 Ein schlecht platziertes `if`-Statement kann die Performance um das Zehnfache verschlechtern. 
-Ein zusätzliches `try-catch` kann verhindern dass eine Methode vom HotSpot JIT-Compiler geinlined wird, was die Performance massiv verschlechtert.
+Ein zusätzliches `try-catch` kann verhindern, dass eine Methode vom HotSpot JIT-Compiler geinlined wird, was die Performance massiv verschlechtert.
 Ein falsch gewählter Datentyp mit ungünstigem Layout kann Cache-Misses verursachen, die teure Speicherzugriffe und Cache-Verschwendungen nach sich ziehen.
 
-Viele der notwendigen Optimierungen werden vom Compiler und der JVM automatisch durchgeführt, aber es ist wichtig, die Grundlagen zu verstehen, um im Fehlerfall die richtigen Schlussfolgerungen zu ziehen und die darunterlegende Probleme zu lösen.
+Viele der notwendigen Optimierungen werden vom Compiler und der JVM automatisch durchgeführt, aber es ist trotzdem wichtig, die Grundlagen zu verstehen, um im Fehlerfall die richtigen Schlussfolgerungen zu ziehen und die darunterlegende Probleme zu lösen.
 
 Doch viele Entwickler verlassen sich auf Mythen und veraltete Ratschläge, die mehr schaden als nützen.
 
@@ -38,19 +38,18 @@ Hawley zeigt, wie veraltete Annahmen ("Mythen") über Java-Performance uns daran
 Aktuelle Prozessoren sind komplexe Maschinen, die weit über einfache Annahmen hinausgehen, die wir vielleicht noch aus der Zeit unserer ersten Java-Programme kennen. 
 
 Meine Tochter hat gerade angefangen, Informatik zu studieren. 
-In technischer Informatik werden ihnen immer noch die Grundlagen der Hardware beigebracht, was für das Grundverständnis wichtig ist, wie verhalten sich Register, ALU, Befehlsausführung, Cache und Speicher.
-
+In technischer Informatik werden ihnen immer noch die Grundlagen der Hardware beigebracht, was für das Grundverständnis wichtig ist.
+Wie verhalten sich Register, ALU, Befehlsausführung, Cache und Speicher.
 Aber die dort vermittelten Konzepte sind einfache Modellprozessoren und Speichersysteme, die nicht die Komplexität moderner Hardware widerspiegeln.
 
-Wie im Bild 1 für eine aktuelle ARM Cortex X925 CPU zu sehen, sind moderne Prozessoren komplexe Systeme mit mehreren Kernen, Caches und Pipelines.
+Wie im Bild 1 für eine aktuelle ARM Cortex X925 CPU zu sehen, sind moderne Prozessoren komplexe Systeme mit vielen Kernen, Caches und Pipelines.
 
 .ARM Cortex X925: Ein Beispiel für moderne Hardware (Quelle: Cardyak on X)
 image::cardyak-arm-cortex-x925.jpeg[title="ARM Cortex X925",width=400,align="center"]
 
+== Moderne Prozessoren verstehen
 
-=== Moderne Prozessoren verstehen
-
-Mechanische Sympathie ist mehr als nur ein Konzept - es ist eine Denkweise. 
+Mechanische Sympathie ist mehr als nur ein theoretisches Konzept - es ist eine praktische Denkweise. 
 Anstatt die Hardware als abstrakte Black Box zu betrachten, müssen wir verstehen, wie *CPU-Caches, Branch-Prediction und Speicher-Hierarchien* funktionieren. 
 
 Ein Taktzyklus in einem Prozessor führt normalwerweise einen einfachen Befehl aus, wie ein Setzen eines Wertes in ein Register oder das Bitschieben eines Wertes. 
@@ -58,15 +57,22 @@ Andere Befehle benötigen mehrere Taktzyklen, besonders wenn sie auf den Hauptsp
 
 Moderene Prozessoren können aber mit ihren breiten Pipelines und superscalarer Execution mehrere Befehle gleichzeitig ausführen. 
 
-Dabei werden Befehle in mehreren Pipelines verarbeitet, die jeweils mehrere (Unter-)Stufen umfassen: Fetch, Decode, Execute, Memory Access und Write Back.
-Die bestmöglichste Auslastung der Pipeline ist entscheidend für die Performance. 
+Dabei werden Befehle in mehreren Pipelines verarbeitet, die jeweils mehrere (Unter-)Stufen umfassen: 
+
+1. Fetch, 
+2. Decode, 
+3. Execute, 
+4. Memory Access
+5. Write Back
+
+Die bestmöglichste Auslastung der Pipeline ist entscheidend für die Gesamtleistung des Systems. 
 
 Zum einen wird versucht unabhängige Befehle gleichzeitig auszuführen, dazu können Compiler auch Befehle umsortieren, um die Pipeline zu füllen (*Out-of-Order Execution*).
 
 Zum anderen werden Techniken wie *Branch-Prediction* eingesetzt, um das Ergebnis von Verzweigungen möglichst korrekt vorherzusagen und so die Pipeline schon mit Befehlen nach der Verzweigung zu füllen und auszuführen, bevor das Ergebnis der Verzweigung bekannt ist.
 Im Fehlerfall müssen die Befehle verworfen werden, was mehrere Taktzyklen kosten kann, da die Pipeline geleert und neu gefüllt werden muss.
 Daher ist die Qualität der Branch-Prediction entscheidend für die Performance von Code, der viele Verzweigungen enthält, dafür werden unter anderem historische Verzweigungsinformationen verwendet, um die Wahrscheinlichkeit von Verzweigungen vorherzusagen (was dann auch zu Angriffsmustern wie Spectre und Meltdown führte) [HunXX].
-Wenn wir der Vorhersagen helfen können, indem wir vorhersagbare, einfachere Ausdrücke verwenden, können wir die Performance erheblich steigern, also hilft eine Dekomposition von komplexen Bedingungen in einfache, vorhersagbare Ausdrücke, oder auch Vorausberechnung von Teil-Ergebnissen, die dann in den Verzweigungen verwendet werden.
+Wenn wir der Vorhersagen helfen können, indem wir vorhersagbare, einfachere Ausdrücke verwenden, können wir die Performance erheblich steigern, daher auch hilft eine Dekomposition von komplexen Bedingungen in einfachere, vorhersagbarere Ausdrücke, oder auch Vorausberechnung von Teil-Ergebnissen, die dann in den Verzweigungen verwendet werden.
 
 // Moderne Prozessoren können *mehrere Instruktionen pro Taktzyklus* ausführen (superscalar execution). Intel-Prozessoren schaffen bis zu 4+ Instruktionen gleichzeitig. 
 
@@ -77,7 +83,7 @@ Ungünstige Entscheidungsbefehle können jedoch diese Parallelität limitieren, 
 ----
 // Schlecht: Unvorhersagbare Verzweigung
 for (int i = 0; i < array.length; i++) {
-    if (Math.random() > 0.5) {  // Zufällige Verzweigung
+    if (array[i] > 0.5) {  // Datenabhängige Verzweigung
         process(array[i]);
     }
 }
@@ -121,7 +127,17 @@ public int testSorted() {
 }
 ----
 
-TODO: Mit [JMH] (Java Microbenchmark Harness) gemessen zeigt sortiertes Array 2x+ bessere Performance als unsortiertes - ausschließlich wegen Branch-Prediction.
+Mit [JMH] (Java Microbenchmark Harness) gemessen zeigt sortiertes Array mehr als 5x bessere Performance als unsortiertes - ausschließlich wegen Branch-Prediction, siehe Lisitng {counter:listing}.
+
+.Listing {listing}
+----
+mvn verify
+java -jar target/benchmarks.jar
+
+Benchmark                   Mode  Cnt      Score   Error  Units
+ArrayBenchmark.testSorted         thrpt    2  389.888          ops/s
+ArrayBenchmark.testUnSorted       thrpt    2   53.969          ops/s
+----
 
 == Mythos 2: Muster für Speicher-Zugriff-Patterns sind egal
 
@@ -151,14 +167,14 @@ Ein einfaches Beispiel zeigt den Unterschied zwischen spalten- und zeilenorienti
 .Listing {counter}: Spalten- vs. zeilenorientierter Zugriff
 [source,java]
 ----
-// Schlecht: Column-Major auf Row-Major Storage
+// Schlecht: Spaltenweiser Zugriff auf zeilenorientierte Matrix
 for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
         result += matrix[j][i];  // Cache-Miss-intensiv
     }
 }
 
-// Besser: Sequential Memory Access
+// Besser: Sequentieller (zeilenweiser) Speicherzugriff
 for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
         result += matrix[i][j];  // Cache-freundlich
@@ -166,38 +182,67 @@ for (int i = 0; i < rows; i++) {
 }
 ----
 
-== Mythos 3: False Sharing ist ein Randproblem
+Im Ergebnis sieht man den Einfluss der Zugriffsart auf die Matrix, der zeilenweise Zugriff ist 10x schneller, wie in Listing {counter:listing} zu sehen.
+
+.Listing {listing}
+----
+MatrixBenchmark.testSpaltenWeise  thrpt    2    3.054          ops/s
+MatrixBenchmark.testZeilenWeise   thrpt    2   37.435          ops/s
+----
+
+== Mythos 3: Cache Line Sharing ist ein Randproblem
 
 *Der Mythos:* Unabhängige Variablen beeinflussen sich nicht gegenseitig.
 
-*Die Realität:* False Sharing kann die *Skalierbarkeit von linear zu katastrophal* verschlechtern. Variablen in derselben 64-Byte Cache-Line können schwere Performance-Degradation verursachen.
+*Die Realität:* Cache-Line Sharing kann die Skalierbarkeit von Anwendungen deutlich verschlechtern.
+// Norman Maurer hatte zu diesem Thema mal einen guten Vortrag, den ich aber nicht mehr finden kann.
+Variablen die dieselbe 64-Byte Cache-Line teilen, können erhebliche Performance-Degradation verursachen [Baeldung] [Yadav].
 
-```java
+[source,java]
+----
 // Problem: False Sharing
 public class Counter {
-    private volatile long counterA = 0;  // Selbe Cache-Line
-    private volatile long counterB = 0;  // Selbe Cache-Line
+    private volatile long counterA = 0;  // Selbe Cache-Zeile
+    private volatile long counterB = 0;  // Selbe Cache-Zeile
 }
 
 // Lösung: @Contended Annotation (Java 8+)
 public class OptimizedCounter {
-    @sun.misc.Contended
+    @jdk.internal.vm.annotation.Contended
     private volatile long counterA = 0;
     
-    @sun.misc.Contended  
+    @jdk.internal.vm.annotation.Contended
     private volatile long counterB = 0;
 }
-```
 
-Die `@Contended`-Annotation weist die JVM an, automatisch *128-Byte Padding* hinzuzufügen, um False Sharing zu vermeiden.
+// Lösung: Manuelles Padding
+public class OptimizedCounter {
+    private volatile long counterA = 0;
+    
+    // zusätzlich 7x long Werte für Padding auf 64 Bytes
+    private volatile long p1,p2,p3,p4,p5,p6,p7;
+    
+    private volatile long counterB = 0;
+}
+----
+
+Die `@Contended`-Annotation weist die JVM an, automatisch Padding* hinzuzufügen, um False Sharing zu vermeiden.
+
+Sie ist leider nicht mehr so einfach zugreifbar (benötigt `-XX:-RestrictContended`) in aktuellen JDKs, da die privaten `Sun`-Pakete in Java 9 nach `jdk.internal` verschoben wurden.
+
+
+Alternativ kann man auch manuell long-Felder (jeweils 8 Byte) für Padding einfügen.
+Norman Maurer gab dazu mal einen Vortrag, der darauf hinwies, dass diese Felder aber vom Compiler umsortiert werden können und dass daher ggf. eine Vererbungshierachie pro Feld notwendig wäre.
 
 == Werkzeuge für mechanische Sympathie
 
-=== Async-Profiler: Die moderne Lösung
+=== Async-Profiler: Die moderne Lösung für Profiling
 
-*Async-Profiler* ist das Tool der Wahl für Java-Performance-Analyse. Im Gegensatz zu herkömmlichen Profilern vermeidet es Safepoint-Bias und bietet *sub-1% Overhead*:
+*Async-Profiler* ist das Tool der Wahl für Java-Performance-Analyse, das wir auch schon in vielen Kolumne benutzt haben, besonders nützlich mit Flamegraphs [HunXxx].
+Im Gegensatz zu herkömmlichen Profilern vermeidet es Safepoint-Bias (benutzt `AsyncGetStackTrace`) und kostet weniger als 1% Overhead [Bechberger].
 
-```bash
+[source,shell]
+----
 # CPU-Profiling mit Flame Graph
 ./profiler.sh -d 30 -f flamegraph.html PID
 
@@ -206,13 +251,14 @@ Die `@Contended`-Annotation weist die JVM an, automatisch *128-Byte Padding* hin
 
 # JFR-Integration
 ./profiler.sh -o jfr -d 30 -f profile.jfr PID
-```
+----
 
 === JMH: Reliable Microbenchmarks
 
 Für präzise Performance-Messungen bietet *JMH* (Java Microbenchmark Harness) statistisch valide Ergebnisse:
 
-```java
+[source,java]
+----
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
@@ -231,71 +277,63 @@ public class CacheBenchmark {
         return processArray(randomArray);
     }
 }
-```
+----
 
 === Hardware-Performance-Counter
 
-Für tiefere Einblicke helfen *Hardware-Performance-Counter*:
+Für tiefere Einblicke helfen *Hardware-Performance-Counter*, wie auch in [1BRC] erklärt.
 
-```bash
+[source,shell]
+----
 # Cache-Miss-Analyse mit perf
 perf stat -e cache-misses,cache-references java MyApp
 
 # Branch-Prediction mit Intel VTune
 vtune -collect uarch-exploration java MyApp
-```
-
-== Praktische Anwendung: Das LMAX-Disruptor-Beispiel
-
-Der *LMAX Disruptor* demonstriert mechanische Sympathie in Perfektion. Durch Vermeidung von Locks, Cache-Line-Padding und Single-Writer-Prinzip erreicht er *6 Millionen Transaktionen pro Sekunde*:
-
-```java
-// Ring Buffer mit Cache-Line-Padding
-public final class RingBuffer<E> {
-    // Cache line padding
-    protected long p1, p2, p3, p4, p5, p6, p7;
-    
-    private volatile long cursor = INITIAL_CURSOR_VALUE;
-    
-    // Cache line padding  
-    protected long p8, p9, p10, p11, p12, p13, p14;
-    
-    // Ring buffer logic...
-}
-```
+----
 
 == Actionable Takeaways: Mechanische Sympathie anwenden
 
-=== 1. Profiling vor Optimierung
+* Profiling vor Optimierung: +
 Verwende *async-profiler* und *JMH* für akkurate Messungen. Intuition versagt bei moderner Hardware.
 
-=== 2. Hardware-Bewusstsein entwickeln
-Verstehe Cache-Hierarchie, Branch-Prediction und Prozessor-Architektur. *Small Details, Big Effects*.
+* Hardware-Bewusstsein entwickeln: +
+Verstehe Cache-Hierarchie, Branch-Prediction und Prozessor-Architektur. *Kleine Details, große Auswirkungen*.
 
-=== 3. Vorhersagbarkeit fördern  
-Bevorzuge vorhersagbare Branches und sequenzielle Speicherzugriffe. *Sorted beats Random*.
+* Vorhersagbarkeit fördern: +
+Bevorzuge vorhersagbare Branches und sequenzielle Speicherzugriffe. *Sortierte Daten helfen Vorhersagbarkeit*.
 
-=== 4. False Sharing vermeiden
+* False Sharing vermeiden: +
 Nutze `@Contended` oder manuelles Padding für geteilte Datenstrukturen. *Cache-Line-Awareness* ist essentiell.
 
-=== 5. Realistische Workloads messen
+* Realistische Workloads messen: +
 Vermeide Mikro-Optimierungen, die nicht auf echte Performance übertragen. *Macro beats Micro*.
 
-=== 6. Single-threaded Lösungen erwägen
-Wie der Disruptor zeigt, können Single-threaded Designs Multi-threaded übertreffen. *Concurrency ist nicht immer besser*.
+* Single-threaded Lösungen erwägen: +
+Wie der LMAX-Disruptor zeigt, können Single-threaded Designs Multi-threaded übertreffen. *Concurrency ist nicht immer besser*.
 
-== Fazit: Hardware als Partner, nicht Gegner
+== Fazit: Hardware als Partner, nicht anyonme Black Box
 
-Mechanische Sympathie verändert die Art, wie wir Java-Code schreiben. Anstatt Hardware als Abstraktion zu behandeln, verstehen wir sie als kritische Komponente des System-Designs. *Performance ist nicht nur schnellerer Code - es ist Code, der die Hardware optimal nutzt.*
+Mechanische Sympathie verändert die Art, wie wir Java-Code schreiben. 
+Anstatt Hardware als Abstraktion zu behandeln, verstehen wir sie als kritische Komponente des System-Designs. 
+Performance wird durch Code erreicht, der die Hardware optimal nutzt.
 
-Die Tools existieren: async-profiler für Analyse, JMH für Benchmarks, JFR für Continuous Profiling. Die Konzepte sind verstanden: Cache-Lines, Branch-Prediction, Memory-Hierarchien. Was fehlt, ist die *Denkweise*: Hardware als Partner zu betrachten, nicht als Hindernis.
+Die Tools existieren: `async-profiler`` für Analyse, `JMH` für Benchmarks, `JFR` für Continuous Profiling. 
+Die Konzepte sind verstanden: Cache-Lines, Branch-Prediction, Memory-Hierarchien. 
+Was fehlt, ist oft die Denkweise: _Hardware als Partner zu betrachten, nicht als Hindernis._
 
 In einer Zeit, in der Anwendungen höhere Performance und Effizienz verlangen, wird mechanische Sympathie vom Nice-to-have zum Must-have. *Verstehen Sie Ihre Hardware - sie wird es Ihnen danken.*
 
 == Referenzen
 
 * [HunXX] Michael Hunger, Javaspektrum "LMAX Disruptor"
+* [1BRC] Michael Hunger, Javaspektrum "1 Billion Row Challenge"
+* [HunXxx] Michael Hunger, Javaspektrum "Java Performance Tools"
 * [Thompson] Martin Thompson, "Mechanical Sympathy", https://mechanical-sympathy.blogspot.com/2011/07/why-mechanical-sympathy.html
-* [Thompson ], Martin Thompson, "Mythbusting Modern Hardware to Gain 'Mechanical Sympathy'" https://www.youtube.com/watch?v=MC1EKLQ2Wmg
+* [Thompson], Martin Thompson, "Mythbusting Modern Hardware to Gain 'Mechanical Sympathy'" https://www.youtube.com/watch?v=MC1EKLQ2Wmg
 * [SE-Radio] Martin Thompson, "Mechanical Sympathy", https://www.youtube.com/watch?v=z7twjdnSYy4
 * [Hawley] Andrew Hawley, "Almost Everything I Knew About Java Performance Was Wrong", FOSDEM 2025, https://fosdem.org/2025/schedule/event/fosdem-2025-4987--almost-everything-i-knew-about-java-performance-was-wrong/
+* [Belanger] https://medium.com/@python-javascript-php-html-css/exploring-the-efficiency-of-sorted-arrays-in-java-5a396ebb53f2
+* [Yadav] https://medium.com/@umeshcapg/understanding-contended-and-false-sharing-in-java-2d434dbfdb95
+* [Bechberger] https://mostlynerdless.de/blog/2023/01/19/asyncgetstacktrace-a-better-stack-trace-api-for-the-jvm/
+* [Baeldung] https://www.baeldung.com/java-false-sharing-contended
