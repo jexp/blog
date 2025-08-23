@@ -1,0 +1,462 @@
+= Bessere Benchmarks - Neues CPU-Profiling in Java 25
+
+== Zukunft der Kolumne "Effective Java"
+
+Zuerst eine Information in eigener Sache - da meine Arbeitslast in den letzten 12 Monaten zu stark angewachsen ist, kann ich dem Anspruch den ich für die Kolumne "Effective Java" habe, nicht mehr voll gerecht werden.
+Daher habe ich mich schweren Herzens entschlossen, den Staffelstab für die Autorschaft weiterzugeben.
+
+In 13 Jahren haben wir viele Themen behandelt, die effizientere Java Entwicklung unterstützen von Garbage Kollektoren, über Datenstrukturen, Profiling und asynchrone Vearbeitung bis zu Kommandozeilentools.
+Ich hoffe Sie hatten genau wie ich beim Schreiben, viel Spass beim Lesen der Kolumne.
+Für mich war es immer eine gute Gelegenheit tiefer in spannende Themen einzutauchen und diese hoffentlich verständlich darzustellen und zu erklären.
+
+Die Kolumne wird von meine Freunden und Kollegen Michael Simons und Martin Junghanns weitergeführt, die Sie ja in der Vergangenheit schon als Gastautoren lesen konnten.
+
+Bleiben Sie immer neugierig auf die spannenden neuen Entwicklungen in der JVM - mit Valhalla und der Finalisierung der Vektor API kommen ja wichtige Meilensteine auf uns zu, und halten Sie ihre Java Programme effizient.
+
+Alles Gute, Michael Hunger
+
+Aber jetzt zum eigentlichen Thema der Kolumne:
+
+Java 25 fügt einen neuen, experimentellen *CPU-Time-Profiler* im JDK Flight Recorder (JFR) hinzu, der gegenüber dem bisherigen *Execution-Time-Profiler* deutliche Vorteile bietet.
+Nach über drei Jahren Entwicklungszeit - mit intensivem Endspurt im letzten Jahr - hat Johannes Bechberger mit Unterstützung von Jaroslav Bachorík und Ron Pressler diesen neuen Profiler für https://openjdk.org/jeps/509[JEP 509^] in Java 25 integriert.
+Er hat dazu eine Reihe von Blog Posts geschrieben, die das https://mostlynerdless.de/blog/category/java-servicability/profiling/[Thema CPU-Profiling in Java^] im Detail beleuchten, und sich auch mit der Vermeidung von Safepoint-Bias beschäftigen.
+
+In diesem Artikel schauen wir uns an, welche Probleme das bisherige Profiling hatte, wie der neue Ansatz funktioniert, warum er nötig ist, welche Vor- und Nachteile er mit sich bringt und wie der aktuelle Stand der Dinge ist.
+
+== Probleme klassischer Java-Profiler
+
+=== Execution Time (CPU-Zeit) Sampling
+
+Profiler sollen aufzeigen, welche Teile eines Programms wie viel Ressourcen verbrauchen - typischerweise werden Speicherallokationen oder CPU-Zeit gemessen.
+
+In Java werden dafür traditionell *Sampling-Profiler* eingesetzt, die in regelmäßigen Intervallen Stichproben der Programmausführung nehmen.
+Der JDK Flight Recorder (JFR) bietet z.B. das `ExecutionSampler` Profiling, das alle 10-20 ms einen Snapshots eines Teils der Java- und nativen-Threads aufnimmt.
+
+Allerdings arbeitet dieser Standard-Profiler mit *CPU-Ausführungszeit* (Wall-Clock-Time) und hat dabei einige Einschränkungen.
+
+=== Safepoint-Bias und lückenhafte Stacks
+
+Normalerweise kann ein Stack Trace für Java Threads nur in Safepoints korrekt gelesen werden, das ist z.b. an Methoden-Einsprüngen oder Schleifenanfängen der Fall.
+Da nur ein Teil der Threads zum Profiling-Zeitpunkt in einem Safepoint ist (bzw. darauf gewartet werden muss) haben klassische Profiler ein Abdeckungsproblem (Safepoint Bias) und führen zur Verzerrungen, die echte Quellen von Probleme verstecken können.
+
+Safepoint Bias bedeutet - Methoden, die selten Safepoints passieren (z.B. lange Rechenschleifen), werden unterproportional erfasst, während häufig blockierende Threads (mit vielen Safepoints) überproportional im Profil auftauchen.
+
+Modernere kooperative Ansätze wie in JDK 25 (https://openjdk.org/jeps/509[JEP518^]) erzwingen daher, dass Stacks nur an Safepoints gesampelt werden, aber die notwendigen Informationen zur späteren korrekten Analyse zu jeder Zeit durch kurzzeitige Unterbrechung des Threads ermittelt werden können.
+
+// https://mostlynerdless.de/blog/2025/05/20/taming-the-bias-unbiased-safepoint-based-stack-walking-in-jfr/
+
+=== Subsampling und Thread-Auswahl
+
+Der aktuelle JFR `ExecutionSampler` wählt pro Intervall nur eine Handvoll Threads aus, anstatt alle zu betrachten.
+Standardmäßig werden z.B. 5 Threads, die gerade Java-Code ausführen, und 1 Thread im nativen Code gesampelt.
+Auf Systemen mit vielen CPU-Kernen bedeutet das, dass effektiv nur ein Bruchteil der laufenden Threads beprobt wird.
+Bei 32 parallel laufenden Threads werden z.B. maximal ~19% tatsächlich erfasst - ein Intervall von 10 ms dehnt sich effektiv auf ~53 ms zwischen zwei Samples pro Thread aus.
+Dadurch sinkt die zeitliche Auflösung des Profils erheblich.
+
+Zudem ist die Auswahl nicht rein zufällig: Threads in Java werden bevorzugt.
+Läuft ein Großteil der Threads gerade im nativen Code, wird trotzdem immer nur einer davon gesampelt, während alle Java-Threads drankommen.
+Dieses inkonsistente Verhalten kann zu Fehlinterpretationen führen.
+
+=== Keine nativen Stacktraces und fehlende Samples
+
+Das Execution-Sampling ignoriert per se die CPU-Zeit von nativen Aufrufen (z.B. im nativen Teil des JDK und der JVM oder in JNI) - es werden nur Java-Methoden-Stacktraces erfasst.
+
+In modernen Anwendungen so ein beträchtlicher Teil der echten CPU-Auslastung unsichtbar bleiben.
+Zudem können Sampling-Versuche aus "technischen Gründen" fehlschlagen ("lost-samples"), ohne dass dies dem Benutzer gemeldet wird.
+Zum Beispiel wenn Threads im falschen Zustand, oder die Sampling-Datenstrukturen gerade voll sind.
+
+Laut Ron Pressler, können bis zu ein Drittel aller Proben im aktuellen Profiler verloren gehen können, ohne Hinweis im Profil.
+Diese stillen Lücken erschweren die Interpretation des Ausführungszeit-Profils zusätzlich.
+
+Die Konsequenz dieser Einschränkungen ist ein potenziell ungenaues Bild der Performance-Hotspots.
+Besonders in kurzen Profiling-Sessions (z.B. 1 Minute) kann das verzerrte Ergebnis in die Irre führen.
+
+So unterscheiden *Ausführungszeit-Profile* nicht, ob eine Methode rechenintensiv ist oder hauptsächlich auf I/O wartet (und blockiert ist) - beides trägt zur gleichen gemessenen "verbrachten Ausführungszeit" bei.
+
+Optimiert man aufgrund eines solchen Profils die falsche Stelle, ist der Effekt auf die Gesamtperformance minimal (https://de.wikipedia.org/wiki/Amdahlsches_Gesetz[Amdahls Law^]).
+
+== Bisherige Lösungen und Workarounds
+
+Um die genannten Limitierungen zu umgehen, griffen viele Entwickler in der Vergangenheit zu externen Tools wie https://github.com/async-profiler/async-profiler[async-profiler] siehe auch https://github.com/jexp/blog/blob/gh-pages/adoc/articles/javaspektrum-flamegraphs.adoc[HunXX - Flamegraphs^].
+
+Async-Profiler nutzt Linux-spezifische Mechanismen (Perf-Events bzw. CPU-Timer-Signale) und die inoffizielle JVM-Funktion `AsyncGetCallTrace`, um asynchrone Stack-Samples zu erzeugen - unabhängig von JVM-Safepoints und auch innerhalb nativer Methoden.
+
+Damit liefert es wesentlich realistischere CPU-Auslastungsprofile und erkennt Hotspots, die der JFR-Standardprofiler übersieht.
+
+Der Haken - diese Tools nutzen nicht unterstützte interne Schnittstellen in der JVM.
+Dies birgt Stabilitätsrisiken bis hin zu JVM-Abstürzen, da z.B. das asynchrone Auslesen von Threads ohne Safepoint koordinierte Sicherheitsnetze erfolgen muss.
+In Produktionsumgebungen scheuen Entwickler, solche inoffiziellen Hooks zu verwenden, trotz des demonstrierten Nutzens.
+
+Eine andere Herangehensweise sind *instrumentierende* Profiler (z.B.
+mittels JVMTI oder bytecode weaving), die Methodenaufrufe zählen oder Zeiten messen.
+
+Diese können zwar genauere Daten liefern (inkl. exakter Zeitmessungen pro Methode), fügen aber erheblichen *Overhead* hinzu und verändern selbst das Laufzeitverhalten.
+
+Sampling ist in aller Regel vorzuziehen, da es das Programm nur minimal beeinflusst (weniger als 10% Overhead).
+
+Die Java-Community und JDK-Entwickler waren sich der Problematik bewusst.
+
+Verbesserungen wurden schrittweise angegangen: 
+So wurde in JDK 16 mit https://openjdk.org/jeps/376[JEP 376 (ZGC Thread-Stack Processing)^] eine Grundlage geschaffen, die globale Safepoints für das Sampling zu eliminieren und stattdessen thread-lokale Handshakes zu nutzen.
+
+=== Vermeidung des Safepoint-Bias: JEP 518 - Kooperatives Safepoint-Sampling
+
+Ein zentrales Problem klassischer JFR-Profiler ist, wie schon erwähnt der *Safepoint-Sampling-Bias*: 
+Da Stacks nur an Safepoints aufgenommen werden, bleiben zeitlich intensive Codebereiche - etwa lange Rechenschleifen - unterrepräsentiert, wenn sie selten oder spät einen Safepoint erreichen.
+
+In JDK 25 folgt nun https://openjdk.org/jeps/518[JEP 518 (JFR Kooperatives Sampling)], das den JFR-Standardprofiler auf einen https://mostlynerdless.de/blog/2025/05/20/taming-the-bias-unbiased-safepoint-based-stack-walking-in-jfr/[kooperativen Safepoint-Ansatz^] umstellt.
+
+Dabei pausiert der Sampler-Thread einen Ziel-Thread nur kurz, schreibt dessen Registerzustand (Program Counter, Stack Pointer etc.) in eine Thread-lokale Queue und lässt den Thread sofort weiterlaufen.
+Erst beim nächsten regulären Safepoint des Threads greift der JVM-Safepoint-Handler diese Request aus der Queue ab, rekonstruiert den kompletten Stacktrace (mithilfe der zuvor gespeicherten Registerwerte) und schreibt das `ExecutionSample` Event ereignisgesteuert in den JFR-Puffer.
+
+Auf diese Weise umgeht man Out-of-Thread Stackanalysen.
+Gleichzeitig wird der Safepoint-Bias weitgehend eliminiert, da auch "unterwegs" aufgenommene Program Counter nachträglich aufgelöst werden können.
+
+Dieser Mechanismus verbessert sowohl *Sicherheit* als auch *Skalierbarkeit* des Samplings - weniger heuristische Arbeit für den Sampler-Thread, stabilere Stack-Traces und bessere Unterstützung thread-lokaler Safepoints.
+Dennoch bleibt der Bias nicht völlig eliminiert, etwa bei intrinsics, wo eine vollständige Rekonstruktion schwierig ist - Optimierungen dazu sind angedacht.
+
+Dieser neue Mechanismus ist die Basis für alles folgende - er macht das standardmäßige Execution-Sampling in JDK 25 sicherer und ermöglicht ein präziseres CPU-Profiling.
+
+Allerdings bleibt auch mit "unbiased safepoint sampling" die grundlegende Limitierung bestehen: 
+Es wird weiterhin die *Ausführungszeit* betrachtet.
+
+Methoden, die viel warten, erscheinen dominierend, selbst wenn sie die CPU kaum belasten.
+Gleichzeitig fallen nativer Code und viele kurzlebige Threads durchs Raster.
+
+Die naheliegende Frage ist also: 
+Warum nicht direkt die tatsächliche CPU-Zeit messen, die jeder Thread verbraucht?
+
+== CPU-Time-Profiling: Ein neuer Ansatz in Java 25
+
+Um die genannten Probleme zu lösen, wurde in JDK 25 ein "CPU-Time Profiler" als Erweiterung von JFR eingeführt.
+Die https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/[Idee dahinter^]: Anstatt in festen Echtzeit-Intervallen zu sampeln, soll jede Thread-CPU-Zeit gleichberechtigt berücksichtigt werden.
+
+Konkret nutzt der Profiler einen in Linux seit Kernel 2.6.12 vorhandenen Timer, der Signale basierend auf verbrauchter CPU-Zeit sendet (auch bekannt als Profiling-Timer über `ITIMER_PROF`).
+Daher ist dieses Sampling zur Zeit nur unter Linux verwendbar.
+
+Dadurch kann die JVM nach jeweils z.B. 10 ms *CPU-Nutzung pro Thread* einen Stacktrace aufnehmen - unabhängig davon, wie lange das in Echtzeit dauert und was andere Threads tun.
+Dieses Verfahren liefert ein viel präziseres Bild der CPU-Zyklen-Verteilung auf die Codepfade.
+
+== Funktionsweise und Integration in die JVM
+
+Die Implementierung des CPU-Zeit-Profilers greift auf den vorhandenen Mechanismus des kooperativen Samplings zurück.
+
+Die zentralen Komponenten lassen sich wie folgt skizzieren, siehe https://mostlynerdless.de/blog/2025/07/30/java-25s-new-cpu-time-profiler-the-implementation-2/[Implementierungs-Artikel^]:
+
+=== CPU-Timer und Signal-Handler
+
+Beim Start registriert der Profiler einen native Timer (`ITIMER_PROF`) pro JVM-Thread.
+
+Dieser Timer löst ein Signal aus, sobald der Thread eine bestimmte CPU-Zeit verbraucht hat (konfigurierbar, standardmäßig 10 ms oder 500 mal pro Sekunde in `profiler.jfc`).
+
+Ein Signal-Handler in der JVM fängt dieses Ereignis ab und erstellt - ähnlich wie beim Execution-Sampler - einen Sample-Request mit dem aktuellen Thread-Zustand (Registerwerte).
+
+Dieser Request wird in eine thread-lokale Queue eingetragen (geschützt durch eine spezielle Lock-Free/Dreifach-Lock-Logik, um Nebenläufigkeit zu handhaben).
+
+=== Sampler-Thread und Safepoint-Integration
+
+Ein dedizierter `JfrCPUSamplerThread` wacht über alle Threads und koordiniert das Timing.
+
+Er kümmert sich um das Setzen der Sampling-Periode oder -Rate für neue Aufnahmen (über JNI-Aufrufe an die Hotspot-VM und verwaltet das (De-)Aktivieren der CPU-Zeit-Erfassung.
+
+Die eigentliche Stack Analyse eines Requests passiert entweder durch den Safepoint-Handler (wenn der Thread demnächst in einen Safepoint läuft) oder - falls der Thread gar nicht mehr in Java-Code zurückkehrt, weil er z.B. zu lange im nativen Code hängt - durch den Sampler-Thread selbst außerhalb des Safepoints.
+
+Damit werden auch Threads erfasst, die im nativen Bereich beschäftigt sind, ohne dass unbegrenzte Sample-Queues entstehen (ein Problem, das bei rein kooperativem Ansatz auftreten würde).
+
+=== JFR-Eventerstellung
+
+Sobald der Stacktrace ermittelt ist, wird ein neues Event vom Typ `jdk.CPUTimeSample` (neuer `@Experimental` Event) erstellt und in den Flight Recorder Ringpuffer geschrieben.
+
+Dieses Event enthält u.a. 
+
+* den aufgenommenen Stack, 
+* den Zeitstempel, 
+* den Thread-Kontext 
+* sowie Metadaten wie die aktuelle Sampling-Periode
+* und einen *Bias-Indikator*
+
+Letzterer (`biased` Flag) signalisiert, ob dieses Sample eventuell doch leicht safepoint-verzerrt sein könnte - was in seltenen Fällen passiert, wenn der Stack nicht vollständig rekonstruiert werden kann und doch auf den Safepoint-Frame zurückgegriffen werden muss.
+
+=== Verlorene Samples und Limits 
+
+Da auch in diesem Ansatz technische Limits existieren (z.B. vollgelaufene Buffer, blockierte Threads, Threads im falschen Zustand etc.), gibt es ein zusätzliches Event `jdk.CPUTimeSamplesLost`, das die Anzahl diese Fehlschläge aufsammelt und regelmäßig ausgibt, falls Samples verworfen werden mussten.
+
+So behält der Nutzer im Blick, ob das Profil lückenlos ist oder ob beispielsweise 5% der Messpunkte fehlten.
+Diese Transparenz fehlte dem alten Profiler vollständig.
+
+Alles in allem ähnelt die Architektur stark dem bisherigen JFR-Sampler, nutzt aber das *Betriebssystem als Taktgeber* für eine fairere Verteilung der Sample basierend auf in Anspruch genommener CPU-Zeit.
+
+Die Umsetzung war laut Johannes komplex - Signalhandling in der JVM ist berüchtigt für Herausforderungen wie Race-Conditions (daher auch die spezielle Locking-Logik für die Queue) und Segfault-Debugging.
+
+Doch durch die enge Verzahnung mit den neuen Safepoint-Mechanismen (JEP 518) konnte viel existierende Infrastruktur wiederverwendet werden, was die Implementierung wiederum erleichterte.
+
+=== Nutzung des CPU-Time Profilers
+
+Die neue Profiling-Variante ist als experimentell gekennzeichnet und standardmäßig deaktiviert.
+
+Zum Ausprobieren kann man sie gezielt einschalten. 
+So lässt sich z.B. bereits beim Programmstart eine Flight-Recording mit CPU-Profilierung initiieren:
+
+[source,shell]
+----
+java -XX:StartFlightRecording=\
+jdk.CPUTimeSample#enabled=true,filename=profile.jfr ...
+----
+
+Damit zeichnet JFR im laufenden Programm CPU-Zeit-Samples aller Threads auf (zur Zeit nur unter Linux).
+
+Alternativ kann man auch zur Laufzeit via JDK Mission Control (JMC) oder dem Kommandozeilen-Tool `jcmd` eine Aufnahme starten.
+
+Beispielsweise konfiguiert das folgende `jfr` Kommando die CPU-Zeit-Proben mit einem Intervall von 20 ms CPU-Zeit pro Sample.
+Und dann wird die Konfiguration mit `jcmd` benutzt und zeichnet 4 Minuten lang auf.
+
+[source,shell]
+----
+# Konfigurationsdatei cpu_profile.jfc erzeugen
+jfr configure --input profile.jfc \
+  --output /tmp/cpu_profile.jfc \
+  jdk.CPUTimeSample#enabled=true \
+  jdk.CPUTimeSample#throttle=20ms
+
+# Profiling für 4 Minuten ausführen
+jcmd <pid> JFR.start settings=/tmp/cpu_profile.jfc \
+  duration=4m
+----
+
+Hier wird zunächst ein vorhandenes, im JDK mitgegebenes Profiling-Setting (`profile.jfc`) kopiert und um die Aktivierung des CPU-Time Events mit `throttle=20ms` ergänzt.
+
+Anschließend startet `jcmd` die Aufnahme im laufenden Prozess.
+Die Option `throttle` erlaubt es, entweder eine feste Periodendauer (z.B. 10ms) oder eine Samplerate (500/s) vorzugeben.
+
+Standardmäßig ist in der mitgelieferten Profiling-Konfiguration `profile.jfc` ein Intervall von 10 ms eingestellt, was etwa 100 Samples pro Sekunde und Thread entspricht.
+Für kontinuierliches Profiling in Produktion kann man die Rate jedoch auch deutlich reduzieren (z.B. 50 Samples/s), um die Overhead-Belastung gering zu halten.
+
+Die gesammelten Daten lassen sich wie gewohnt mit JFR-Tools auswerten.
+
+Man kann etwa die Aufzeichnung in JDK Mission Control (JMC) öffnen und einen Flame Graph visualisieren, oder das  Kommandozeilen-Tool jfr nutzen.
+
+Beispielsweise listet `jfr view cpu-time-hot-methods cpu_profile.jfr` die heißesten Methoden nach CPU-Zeit auf.
+
+In unserem Beispiel erweisen sich jedoch Flame Graphs als anschaulicher.
+
+== Beispiel: CPU-Zeit vs. Ausführungszeit
+
+=== Beispiel HTTP-Anfragen
+
+Um den Unterschied zwischen einem herkömmlichen Ausführungszeit-Profil und dem neuen CPU-Zeit-Profil zu verdeutlichen, betrachten wir ein einfaches Szenario, das Johannes auf https://gist.github.com/parttimenerd/d66364f2086089761eb2fec7eda026d7[GitHub verfügbar gemacht hat^]. 
+
+Ein Programm startet zwei Threads, die HTTP-Anfragen ausführen (`HttpRequestsExample`). 
+
+* *Thread A* ruft in der Methode `tenFastRequests()` zehnmal hintereinander einen Dienst auf, der jeweils in 10 ms antwortet. 
+
+* *Thread B* ruft in `oneSlowRequest()` nur ein einziges Mal einen Dienst auf, der 100 ms zum Antworten braucht.
+
+Beide Threads sind also in etwa gleich lang mit ihren Aufgaben beschäftigt - insgesamt dauert sowohl die zehn schnellen als auch die eine langsame Anfrage rund 100 ms.
+
+=== Ausführungszeit-Profil
+
+Ein Execution Sampling würde nun erwarten lassen, dass beide Methoden ähnlich viel Prozent der Laufzeit ausmachen.
+
+Tatsächlich zeigt ein JFR-Execution-Profil die meiste Zeit in blockierenden Socket-Leseoperationen.
+
+Mit dem Befehl `jfr view native-methods` erhalten wir z.B.
+eine Ausgabe, die rund 98% der Samples in `SocketDispatcher.read0` verortet - also dem Warten auf eingehende Daten.
+
+image::https://bugs.openjdk.org/secure/attachment/110756/profile.png[]
+
+Beide Threads kommen im Ausführungszeit-Flame-Graph (Bilder aus https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/[Original-Artikel^]) ungefähr gleichgewichtig vor, da ihre *Gesamt-Laufzeit* ähnlich war (hauptsächlich Wartzeit).
+
+=== CPU-Zeit-Profil
+
+Hier zählen nur die aktiven CPU-Zyklen.
+Intuitiv erwarten wir, dass `tenFastRequests` wesentlich mehr CPU-Arbeit verursacht als `oneSlowRequest` - zehn Mal Ausführung der Anfrage, 10x Parsing von HTTP-Antworten, 10x mehr Objekt-Erstellung etc., versus einmalige Arbeit bei der langsamen Anfrage.
+
+Genau das bestätigt das CPU-Profil.
+Schaltet man den neuen Profiler ein und visualisiert beispielsweise den Flame Graph der CPU-Zeit, wird deutlich, dass nahezu die gesamten CPU-Ressourcen im Thread A (`tenFastRequests`) verbraten werden, während Thread B (`oneSlowRequest`) kaum CPU-Anteil hat.
+Die Wartezeit auf das Netzwerk hat im CPU-Flame-Graph keinen nennenswerten Platz mehr, stattdessen dominieren die tatsächlichen Rechenroutinen.
+
+
+image::https://bugs.openjdk.org/secure/attachment/110757/cpu_profile.png[]
+
+Beispielhafter Flame Graph einer CPU-Zeit-Profilierung: Man erkennt, dass die Methode `HttpRequestsExample.tenFastRequests()` (grün) den Großteil der CPU-Zyklen verbraucht.
+
+=== Vergleichende Auswertung
+
+Durch dieses differenzierte Bild kann man richtige Optimierungsentscheidungen treffen.
+
+Im obigen Beispiel würde ein Ausführungszeit-Profil evtl.
+suggerieren, den langsamen Request zu untersuchen (weil dort viel Zeit *vergeht*), während das CPU-Profil klar zeigt, dass die vielen schnellen Aufrufe die CPU auslasten und daher vorrangig optimiert werden könnten.
+
+Allgemein gilt: In IO-lastigen Anwendungen (z.B.
+Server mit vielen Netzwerkzugriffen oder Datenbankabfragen) bestimmt oft die CPU unter Last die *Durchsatzleistung*, obwohl die *Latenz* einzelner Operationen vor allem von Wartezeiten abhängt.
+
+Ein CPU-Zeit-Profiler deckt solche versteckten CPU-Hotspots auf, die ein Ausführungszeit-Profiler verschleiern würde.
+
+=== Exkurs - Datenbanken
+
+Exkurs: Auch in komplexen Systemen wie Datenbank-Servern kann dieses neue Profiling helfen.
+
+Nehmen wir eine in Java implementierte Graphdatenbank (etwa Neo4j), die parallele Cypher-Anfragen ausführt.
+
+Ein traditionelles Profil würde viel Zeit in Lock-Warteschlangen oder IO zeigen, während ein CPU-Profil z.B.
+enthüllen kann, welcher Teil der Anfrageausführung (Parsing, Transformationen, Filter, Sortierung, Pfadberechnung etc.) die meisten CPU-Ressourcen frisst.
+So ließe sich gezielt der Durchsatz der DB steigern, ohne von unvermeidbaren Wartezeiten (auf Speicher oder Disk) in die Irre geleitet zu werden.
+
+== Vorteile des CPU-Zeit-Profilers
+
+Der neue Ansatz bietet mehrere handfeste Vorteile gegenüber dem bisherigen Zustand:
+
+=== Präzise CPU-Verteilung
+
+Das Profil zeigt, wo die *CPU-Zyklen* tatsächlich verbraucht werden.
+Rechenintensive Methoden werden nun korrekt als Hotspots identifiziert, auch wenn ihre Ausführungszeit durch Wartephasen kaschiert war.
+
+Entwickler erhalten ein echtes Abbild der CPU-Auslastung ihrer Anwendung, ähnlich wie bei nativen Linux-Profilern (perf) - jedoch bequem innerhalb der JVM.
+
+=== Erfassung nativer Arbeit
+
+Da auf *CPU-Zeit* abgestellt wird, erfasst JFR jetzt auch Threads, die lange im nativen Code laufen oder auf JNI-Seite aktiv sind.
+Früher tauchten solche Abschnitte im Profil kaum auf[\[10\]](https://openjdk.org/jeps/509).
+Mit dem CPU-Time Profiler werden auch diese Abschnitte beprobt, sofern sie CPU verbrauchen.
+Insbesondere in C++-basierten Bibliotheken oder beim GC/Compiler-Threadprofiling ist das wertvoll.
+
+=== Keine Thread-Subsampling-Bias
+
+Jeder Thread wird entsprechend seiner CPU-Nutzung berücksichtigt, da genau die Threads gesampelt werden, die auf den CPUs aktiv waren.
+Die Problematik, dass beim Subsampling nur ein Teil der Threads pro Interval gesampelt wird, entfällt.
+
+In der Summe entspricht die Anzahl der Samples pro Thread direkt dessen CPU-Anteil.
+
+Die maximale Samplingrate wird lediglich durch die Hardware-Parallelität begrenzt (d.h. es können nie mehr Threads gleichzeitig sampeln als es CPU-Kerne gibt, was aber physikalisch ohnehin nicht möglich ist).
+
+=== Geringeres Crash-Risiko
+
+Der Profiler ist in die JVM integriert und nutzt offizielle APIs.
+Im Gegensatz zu Async-Profiler & Co. muss keine unsichere Interna-Schnittstelle bemüht werden, was die Stabilität verbessert.
+Der Mechanismus baut auf dem sicheren Safepoint-basierten Sampling auf, d.h. das nevige asynchrone Stack Walking mit all seinen Tücken wird vermieden.
+
+=== Kontinuierliches Profiling in Produktion
+
+Durch die Throttle-Einstellung kann man die Overhead-Kosten gezielt begrenzen.
+
+Ein niedriger Sampling-Satz (z.B. 100 Hz verteilt über alle Threads) verursacht nur wenige Prozent CPU-Overhead und kann somit unterbrechungsfrei auch in Produktionssystemen laufen (*Continuous Profiling*).
+
+So etwas war mit JFR zwar möglich, jedoch ungenauer - und mit Async-Profiler zwar genauer, aber in sensiblen Umgebungen ungern gesehen.
+
+=== Parallel nutzbar mit Execution-Time-Profiling
+
+Das CPU-Time-Event kann parallel zu den normalen Execution-Samples aktiviert werden.
+
+Dadurch erhält man im selben Durchlauf beide Sichten nebeneinander, ohne dass sie sich gegenseitig beeinflussen.
+Dies kann z.B. hilfreich sein, um den Einfluss von Wartezeiten vs. CPU-Zeit in einer Analyse gegenüberzustellen.
+
+== Nachteile und Grenzen
+
+Es gbit auch ein paar Einschränkungen und (aktuelle) Nachteile:
+
+=== Plattformunterstützung
+
+Der CPU-Time Profiler funktioniert zunächst *nur unter Linux*, da nur dort die CPU Timer Events aktiv geliefert werden.
+
+Für Produktionsserver ist das meist ausreichend, da diese überwiegend auf Linux laufen.
+
+Aber für Entwickler-Workstations, die oft Windows oder macOS nutzen, bedeutet es, dass lokal kein CPU-Time-Profiling möglich ist - man muss entweder in einer VM/Linux-Container testen oder auf klassische Profiler ausweichen. 
+
+Auch Async-Profiler konnte bisher auf macOS nur Wall-Clock-Profiling und unterstützt offiziell Windows gar nicht.
+
+=== Experimenteller Status 
+
+Die Funktion ist in JDK 25 als *experimental* gekennzeichnet.
+
+Man benötigt zwar keine extra JVM-Flags zum Aktivieren, aber es ist möglich, dass sich Details noch ändern oder Bugs auftreten.
+
+Im Code-Review wurde vermerkt, dass manche Aspekte (Speichermodell, Thread-Interaktionen) noch nicht perfekt ausgereift sind und nachgebessert werden.
+Für den produktiven Einsatz sollte man also stets im Hinterkopf behalten, dass es noch ein neues Feature ist.
+
+=== *Overhead vs. Präzision
+
+Obwohl das Profiling sehr effizient implementiert ist, verursacht jedes Sampling natürlich einen gewissen Aufwand.
+
+Hohe Samplingraten (z.B. 1000 Hz pro Thread) sind zu vermeiden, da sie selbst signifikante CPU kosten würde.
+Es gilt einen sinnvollen Trade-off zu wählen.
+Allerdings war das bei allen Profilern so - neu ist hier nur, dass man die Rate explizit konfigurieren kann.
+
+* *Interpretation und neue Datenflut:* Ein CPU-Zeit-Profil liefert andere Einsichten als man es vielleicht gewohnt ist.
+Entwickler müssen umlernen, dass "viel Zeit" im Profil nun tatsächlich "viel CPU" bedeutet - was ja auch Sinn der Sache ist.
+Metriken wie die im Event enthaltene samplingPeriod pro Sample und das biased\-Flag sind neu und werden von Tools erst nach und nach unterstützt werden.
+JMC & jfr tool können die Rohdaten zwar anzeigen, aber für tiefere Analysen (z.B.
+kombinierte Flame Graphs über CPU- und Wall-Zeit) sind eventuell erst noch Werkzeuge im Entstehen.
+
+== Aktueller Stand und Ausblick
+
+Die gute Nachricht: *JEP 509: JFR CPU-Time Profiling* wurde fristgerecht in JDK 25 integriert.
+Markus Grönlund, der Reviewer, gab grünes Licht kurz vor dem Feature-Freeze, obwohl die Zeit knapp war[\[62\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/)[\[65\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/).
+Ein Beweggrund war, dass JDK 25 voraussichtlich eine LTS-Version wird und man diese Innovation den Nutzern nicht weitere drei Jahre vorenthalten wollte[\[66\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/).
+Somit können experimentierfreudige Entwickler ab JDK 25 (Early-Access-Builds sind bereits verfügbar) den CPU-Profiler ausprobieren und Feedback geben.
+
+Aktuell ist das Feature standardmäßig deaktiviert und muss bewusst eingeschaltet werden[\[43\]](https://openjdk.org/jeps/509).
+Es ist davon auszugehen, dass in den Folge-Releases (JDK 26 und 27\) eventuelle Kinderkrankheiten ausgebügelt und das Profiling ggf.
+auf weitere Plattformen portiert wird.
+Im Gespräch sind insbesondere macOS und eventuell Windows - wobei letzteres schwieriger ist, da Windows keinen direkt vergleichbaren Profiling-Timer bietet.
+Für macOS könnte der Mach Kernel ähnliche Mechanismen bereitstellen, hier wird vermutlich die weitere Entwicklung und Nachfrage ausschlaggebend sein[\[60\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/)[\[61\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/).
+
+Auch jenseits der CPU-Zeit-Profilierung tut sich einiges in der Profiling-Landschaft von Java.
+So ist das erwähnte *JEP 518 (Cooperative Sampling)* eine fundamentale Änderung, die nicht nur mehr Sicherheit bringt, sondern auch zukünftige Profiling-Features (wie eben CPU-Profiling) erst ermöglicht hat[\[26\]](https://mostlynerdless.de/blog/2025/07/30/java-25s-new-cpu-time-profiler-the-implementation-2/)[\[42\]](https://mostlynerdless.de/blog/2025/07/30/java-25s-new-cpu-time-profiler-the-implementation-2/).
+Es ist denkbar, dass in Zukunft weitere Ressourcen ähnlich profiliert werden (z.B.
+präzisere Lock-Profiling, kombinierte Perf-Events, User-/Kernel-Time-Unterscheidungen usw.).
+
+Für Anwender bedeutet der neue Profiler vor allem, dass sie nun einen *Bordmittel*\-Werkzeugkasten haben, um Performance-Probleme gezielt anzugehen, ohne auf externe Tools angewiesen zu sein.
+Continuous Profiling im laufenden Betrieb, abgesichert durch die JVM selbst, eröffnet neue Möglichkeiten der Performance-Diagnose in Produktion - ein Trend, der im Cloud-/Microservice-Zeitalter immer wichtiger wird[\[48\]](https://openjdk.org/jeps/509).
+
+== Fazit
+
+Das *neue CPU-Profiling in Java 25* ist ein großartiger Schritt, um die CPU-Nutzung von Java-Anwendungen besser verstehen und optimieren zu können.
+
+Es beseitigt wesentliche Schwächen des bisherigen Profilings, indem es die tatsächlich verbrauchte CPU-Zeit pro Thread misst.
+Dadurch werden CPU-intensive Hotspots sichtbar, die zuvor im Schatten von Wartezeiten verborgen waren - ohne die Risiken und Umwege externer Profiler.
+
+Möglich wurde dies durch Verbesserungen im JVM-Sampling-Mechanismus (*Cooperative Safepoint Sampling*) und durch geschickte Nutzung von Betriebssystem-Features unter Linux.
+
+Die Integration als JFR-Events erlaubt eine vertraute Handhabung mit bestehenden Tools wie JMC, jcmd und jfr.
+In der Praxis lohnt es sich, das neue Profiling einmal auszuprobieren.
+
+Gerade wer bereits mit Async-Profiler arbeitet, wird viele Gemeinsamkeiten feststellen - aber nun in offiziell unterstützter Form.
+Auch für Performance-Analysen wie kontinuierliches Profiling in Produktionsumgebungen ist dies eine willkommene Entwicklung.
+
+Natürlich ersetzt kein Profiling-Tool das Verständnis der Anwendungslogik und deren Performancecharakteristik, aber es liefert uns ein klareres Bild davon, *wo die CPU-Zeit verbraucht wird*.
+
+Vielen Dank Johannes!
+
+== Ressourcen
+
+* *JEP 509: JFR CPU-Time Profiling (Experimental)*
+Enthält Motivation, Design und Beispiele zur Nutzung des Features in JDK 25. 
+https://openjdk.org/jeps/509
+
+* *JEP 518: JFR Cooperative Sampling*
+Beschreibt Umsetzung von Sampling Request und Safepoint Sampling mit Bias Mediation
+https://openjdk.org/jeps/518
+
+* *Johannes Bechberger - Java 25's new CPU-Time Profiler (1)* 
+Teil 1 beschreibt Hintergründe, Unterschiede zum bestehenden Profiler und ein Beispiel.
+https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/
+
+* *Johannes Bechberger - Java 25's new CPU-Time Profiler (2) The Implementation*
+Teil 2 beleuchtet die technischen Interna der Implementierung (Signalhandling, Thread-Queues, Herausforderungen).
+https://mostlynerdless.de/blog/2025/07/30/java-25s-new-cpu-time-profiler-the-implementation-2/
+
+* *Johannes Bechberger - Taming the Bias: Unbiased Safepoint-Based Stack Walking in JFR*
+Blogpost über JEP 518, der die Änderungen am klassischen JFR-Sampler in JDK 25 erläutert.
+Zeigt, wie Safepoint-Sampling ohne Bias umgesetzt wurde und warum das ein wichtiger Baustein für das CPU-Profiling ist.
+https://mostlynerdless.de/blog/2025/05/20/taming-the-bias-unbiased-safepoint-based-stack-walking-in-jfr/
+
+* *Fosdem 2025 Vortrag - "Advancing Java Profiling: Achieving Precision and Stability with JFR, eBPF, and User-Context"*
+Vortrag von Jaroslav Bachorik und Johannes Bechberger.
+Beschreibt die Probleme des bisherigen Profilings und führt in die neueren Entwicklungen (Safepoint-Sampling, eBPF-Ansätze) ein.
+Enthält anschauliche Beispiele und Ergebnisse, wie sie auch in diesem Artikel diskutiert wurden.
+https://fosdem.org/2025/schedule/event/fosdem-2025-4848-advancing-java-profiling-achieving-precision-and-stability-with-jfr-ebpf-and-user-context/
+
+* *Async-Profiler (GitHub)* 
+Das populäre Open-Source-Profiling-Tool,  de-facto Standard für CPU-Profile in Java 
+https://github.com/async-profiler/async-profiler
+
