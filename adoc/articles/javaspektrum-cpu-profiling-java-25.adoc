@@ -313,10 +313,9 @@ Rechenintensive Methoden werden nun korrekt als Hotspots identifiziert, auch wen
 
 Entwickler erhalten ein echtes Abbild der CPU-Auslastung ihrer Anwendung, ähnlich wie bei nativen Linux-Profilern (perf) - jedoch bequem innerhalb der JVM.
 
-=== Erfassung nativer Arbeit
+=== Erfassung rein nativer Arbeit
 
 Da auf *CPU-Zeit* abgestellt wird, erfasst JFR jetzt auch Threads, die lange im nativen Code laufen oder auf JNI-Seite aktiv sind.
-Früher tauchten solche Abschnitte im Profil kaum auf[\[10\]](https://openjdk.org/jeps/509).
 Mit dem CPU-Time Profiler werden auch diese Abschnitte beprobt, sofern sie CPU verbrauchen.
 Insbesondere in C++-basierten Bibliotheken oder beim GC/Compiler-Threadprofiling ist das wertvoll.
 
@@ -373,7 +372,7 @@ Man benötigt zwar keine extra JVM-Flags zum Aktivieren, aber es ist möglich, d
 Im Code-Review wurde vermerkt, dass manche Aspekte (Speichermodell, Thread-Interaktionen) noch nicht perfekt ausgereift sind und nachgebessert werden.
 Für den produktiven Einsatz sollte man also stets im Hinterkopf behalten, dass es noch ein neues Feature ist.
 
-=== *Overhead vs. Präzision
+=== Overhead vs. Präzision
 
 Obwohl das Profiling sehr effizient implementiert ist, verursacht jedes Sampling natürlich einen gewissen Aufwand.
 
@@ -381,33 +380,34 @@ Hohe Samplingraten (z.B. 1000 Hz pro Thread) sind zu vermeiden, da sie selbst si
 Es gilt einen sinnvollen Trade-off zu wählen.
 Allerdings war das bei allen Profilern so - neu ist hier nur, dass man die Rate explizit konfigurieren kann.
 
-* *Interpretation und neue Datenflut:* Ein CPU-Zeit-Profil liefert andere Einsichten als man es vielleicht gewohnt ist.
-Entwickler müssen umlernen, dass "viel Zeit" im Profil nun tatsächlich "viel CPU" bedeutet - was ja auch Sinn der Sache ist.
-Metriken wie die im Event enthaltene samplingPeriod pro Sample und das biased\-Flag sind neu und werden von Tools erst nach und nach unterstützt werden.
-JMC & jfr tool können die Rohdaten zwar anzeigen, aber für tiefere Analysen (z.B.
-kombinierte Flame Graphs über CPU- und Wall-Zeit) sind eventuell erst noch Werkzeuge im Entstehen.
+=== Interpretation und neue Informationen
 
+Ein CPU-Zeit-Profil liefert andere Einsichten als man es vielleicht gewohnt ist.
+Entwickler müssen umlernen, dass "viel Zeit" im Profil nun tatsächlich "viel CPU" bedeutet - was ja auch Sinn der Sache ist.
+
+Metriken wie die im Event enthaltene `samplingPeriod` pro Sample und das `biased` Flag sind neu und werden von Tools erst nach und nach unterstützt werden.
+
+JMC & jfr tool können die Rohdaten zwar anzeigen, aber für tiefere Analysen (z.B. kombinierte Flame Graphs über CPU- und Wall-Zeit) sind eventuell erst noch Werkzeuge im Entstehen.
+
+////
 == Aktueller Stand und Ausblick
 
-Die gute Nachricht: *JEP 509: JFR CPU-Time Profiling* wurde fristgerecht in JDK 25 integriert.
-Markus Grönlund, der Reviewer, gab grünes Licht kurz vor dem Feature-Freeze, obwohl die Zeit knapp war[\[62\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/)[\[65\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/).
-Ein Beweggrund war, dass JDK 25 voraussichtlich eine LTS-Version wird und man diese Innovation den Nutzern nicht weitere drei Jahre vorenthalten wollte[\[66\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/).
-Somit können experimentierfreudige Entwickler ab JDK 25 (Early-Access-Builds sind bereits verfügbar) den CPU-Profiler ausprobieren und Feedback geben.
+Die gute Nachricht: *JEP 509: JFR CPU-Time Profiling* wurde in letzter Minute in JDK 25 integriert.
+Somit können experimentierfreudige Entwickler den CPU-Profiler ausprobieren und Feedback geben.
 
-Aktuell ist das Feature standardmäßig deaktiviert und muss bewusst eingeschaltet werden[\[43\]](https://openjdk.org/jeps/509).
-Es ist davon auszugehen, dass in den Folge-Releases (JDK 26 und 27\) eventuelle Kinderkrankheiten ausgebügelt und das Profiling ggf.
-auf weitere Plattformen portiert wird.
-Im Gespräch sind insbesondere macOS und eventuell Windows - wobei letzteres schwieriger ist, da Windows keinen direkt vergleichbaren Profiling-Timer bietet.
-Für macOS könnte der Mach Kernel ähnliche Mechanismen bereitstellen, hier wird vermutlich die weitere Entwicklung und Nachfrage ausschlaggebend sein[\[60\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/)[\[61\]](https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/).
+Aktuell ist das Feature standardmäßig deaktiviert und muss bewusst eingeschaltet werden.
+Es ist davon auszugehen, dass in den Folge-Releases eventuelle Kinderkrankheiten ausgebügelt und das Profiling ggf. auf weitere Plattformen portiert wird (wenn diese die notwendigen Signale liefern).
+
+Im Gespräch sind insbesondere MacOS und eventuell Windows - wobei letzteres schwieriger ist, da Windows keinen direkt vergleichbaren Profiling-Timer bietet.
+Für MacOS könnte der Mach Kernel ähnliche Mechanismen bereitstellen, hier wird vermutlich die weitere Entwicklung und Nachfrage ausschlaggebend sein.
 
 Auch jenseits der CPU-Zeit-Profilierung tut sich einiges in der Profiling-Landschaft von Java.
-So ist das erwähnte *JEP 518 (Cooperative Sampling)* eine fundamentale Änderung, die nicht nur mehr Sicherheit bringt, sondern auch zukünftige Profiling-Features (wie eben CPU-Profiling) erst ermöglicht hat[\[26\]](https://mostlynerdless.de/blog/2025/07/30/java-25s-new-cpu-time-profiler-the-implementation-2/)[\[42\]](https://mostlynerdless.de/blog/2025/07/30/java-25s-new-cpu-time-profiler-the-implementation-2/).
-Es ist denkbar, dass in Zukunft weitere Ressourcen ähnlich profiliert werden (z.B.
-präzisere Lock-Profiling, kombinierte Perf-Events, User-/Kernel-Time-Unterscheidungen usw.).
+So ist das erwähnte *JEP 518 (Cooperative Sampling)* eine fundamentale Änderung, die nicht nur mehr Sicherheit bringt, sondern auch Profiling-Features, wie eben CPU-Profiling, erst ermöglicht hat.
+Es ist denkbar, dass in Zukunft weitere Ressourcen ähnlich profiliert werden (z.B. präzisere Lock-Profiling, kombinierte Perf-Events, User-/Kernel-Time-Unterscheidungen usw.).
 
-Für Anwender bedeutet der neue Profiler vor allem, dass sie nun einen *Bordmittel*\-Werkzeugkasten haben, um Performance-Probleme gezielt anzugehen, ohne auf externe Tools angewiesen zu sein.
-Continuous Profiling im laufenden Betrieb, abgesichert durch die JVM selbst, eröffnet neue Möglichkeiten der Performance-Diagnose in Produktion - ein Trend, der im Cloud-/Microservice-Zeitalter immer wichtiger wird[\[48\]](https://openjdk.org/jeps/509).
-
+Für Anwender bedeutet der neue Profiler vor allem, dass sie nun einen *Bordmittel*-Werkzeugkasten haben, um Performance-Probleme gezielt anzugehen, ohne auf externe Tools angewiesen zu sein.
+Continuous Profiling im laufenden Betrieb, abgesichert durch die JVM selbst, eröffnet neue Möglichkeiten der Performance-Diagnose in Produktion - ein Trend, der im Cloud-/Microservice-Zeitalter immer wichtiger wird.
+////
 == Fazit
 
 Das *neue CPU-Profiling in Java 25* ist ein großartiger Schritt, um die CPU-Nutzung von Java-Anwendungen besser verstehen und optimieren zu können.
@@ -457,6 +457,6 @@ Enthält anschauliche Beispiele und Ergebnisse, wie sie auch in diesem Artikel d
 https://fosdem.org/2025/schedule/event/fosdem-2025-4848-advancing-java-profiling-achieving-precision-and-stability-with-jfr-ebpf-and-user-context/
 
 * *Async-Profiler (GitHub)* 
-Das populäre Open-Source-Profiling-Tool,  de-facto Standard für CPU-Profile in Java 
+Das populäre Open-Source-Profiling-Tool, de-facto Standard für CPU-Profile in Java 
 https://github.com/async-profiler/async-profiler
 
