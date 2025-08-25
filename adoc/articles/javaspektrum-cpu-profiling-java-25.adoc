@@ -35,7 +35,10 @@ Der JDK Flight Recorder (JFR) bietet z.B. das `ExecutionSampler` Profiling, das 
 Allerdings arbeitet dieser Standard-Profiler mit *CPU-Ausführungszeit* (Wall-Clock-Time) und hat dabei einige Einschränkungen.
 
 === Safepoint-Bias und lückenhafte Stacks
-
+////
+TODO integrate better
+The HotSpot JVM maintains metadata to guide the parsing of stack frames, but that metadata is valid only when a thread is suspended at well-defined code locations known as safepoints. If we sample stacks only at safepoints, however, then we will likely suffer from the safepoint bias problem: We risk losing accuracy, since a frequently-executed span of code might not be anywhere near a safepoint. The safepoint bias problem is well known and thoroughly researched.
+////
 Normalerweise kann ein Stack Trace für Java Threads nur in Safepoints korrekt gelesen werden, das ist z.b. an Methoden-Einsprüngen oder Schleifenanfängen der Fall.
 Da nur ein Teil der Threads zum Profiling-Zeitpunkt in einem Safepoint ist (bzw. darauf gewartet werden muss) haben klassische Profiler ein Abdeckungsproblem (Safepoint Bias) und führen zur Verzerrungen, die echte Quellen von Probleme verstecken können.
 
@@ -315,7 +318,7 @@ Entwickler erhalten ein echtes Abbild der CPU-Auslastung ihrer Anwendung, ähnli
 
 === Erfassung rein nativer Arbeit
 
-Da auf *CPU-Zeit* abgestellt wird, erfasst JFR jetzt auch Threads, die lange im nativen Code laufen oder auf JNI-Seite aktiv sind.
+Es werden auch Threads erfasst, die lange im nativen Code laufen oder auf JNI-Seite aktiv sind.
 Mit dem CPU-Time Profiler werden auch diese Abschnitte beprobt, sofern sie CPU verbrauchen.
 Insbesondere in C++-basierten Bibliotheken oder beim GC/Compiler-Threadprofiling ist das wertvoll.
 
@@ -355,7 +358,7 @@ Es gbit auch ein paar Einschränkungen und (aktuelle) Nachteile:
 
 === Plattformunterstützung
 
-Der CPU-Time Profiler funktioniert zunächst *nur unter Linux*, da nur dort die CPU Timer Events aktiv geliefert werden.
+Der CPU-Time Profiler funktioniert *nur unter Linux*, da nur dort die CPU Timer Events aktiv geliefert werden.
 
 Für Produktionsserver ist das meist ausreichend, da diese überwiegend auf Linux laufen.
 
@@ -369,8 +372,7 @@ Die Funktion ist in JDK 25 als *experimental* gekennzeichnet.
 
 Man benötigt zwar keine extra JVM-Flags zum Aktivieren, aber es ist möglich, dass sich Details noch ändern oder Bugs auftreten.
 
-Im Code-Review wurde vermerkt, dass manche Aspekte (Speichermodell, Thread-Interaktionen) noch nicht perfekt ausgereift sind und nachgebessert werden.
-Für den produktiven Einsatz sollte man also stets im Hinterkopf behalten, dass es noch ein neues Feature ist.
+Für den produktiven Einsatz sollte man stets im Hinterkopf behalten, dass es noch ein neues Feature ist.
 
 === Overhead vs. Präzision
 
@@ -444,6 +446,10 @@ https://mostlynerdless.de/blog/2025/06/11/java-25s-new-cpu-time-profiler-1/
 * *Johannes Bechberger - Java 25's new CPU-Time Profiler (2) The Implementation*
 Teil 2 beleuchtet die technischen Interna der Implementierung (Signalhandling, Thread-Queues, Herausforderungen).
 https://mostlynerdless.de/blog/2025/07/30/java-25s-new-cpu-time-profiler-the-implementation-2/
+
+* *Johannes Bechberger - Java 25's new CPU-Time Profiler (3) Queue Sizing*
+Teil 3 diskutiert Anforderungen an die zentrale Sample Request Queue.
+TODO https://mostlynerdless.de/?p=2222&preview=1&_ppp=8d81153944
 
 * *Johannes Bechberger - Taming the Bias: Unbiased Safepoint-Based Stack Walking in JFR*
 Blogpost über JEP 518, der die Änderungen am klassischen JFR-Sampler in JDK 25 erläutert.
