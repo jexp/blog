@@ -2,16 +2,16 @@
 
 == Zukunft der Kolumne "Effective Java"
 
-Zuerst eine Information in eigener Sache - da meine Arbeitslast in den letzten 12 Monaten zu stark angewachsen ist, kann ich dem Anspruch den ich für die Kolumne "Effective Java" habe, nicht mehr voll gerecht werden.
+Zuerst eine Information in eigener Sache - da meine Arbeitslast in den letzten 12 Monaten zu stark angewachsen ist, kann ich dem Anspruch, den ich für die Kolumne "Effective Java" habe, nicht mehr voll gerecht werden.
 Daher habe ich mich schweren Herzens entschlossen, den Staffelstab für die Autorschaft weiterzugeben.
 
-In 13 Jahren haben wir viele Themen behandelt, die effizientere Java Entwicklung unterstützen von Garbage Kollektoren, über Datenstrukturen, Profiling und asynchrone Vearbeitung bis zu Kommandozeilentools.
-Ich hoffe Sie hatten genau wie ich beim Schreiben, viel Spass beim Lesen der Kolumne.
-Für mich war es immer eine gute Gelegenheit tiefer in spannende Themen einzutauchen und diese hoffentlich verständlich darzustellen und zu erklären.
+In 13 Jahren haben wir viele Themen behandelt, die effizientere Java Entwicklung unterstützen - von Garbage Kollektoren, über Datenstrukturen, Profiling und asynchrone Verarbeitung bis zu Kommandozeilentools.
+Ich hoffe, Sie hatten genau wie ich beim Schreiben viel Spass beim Lesen der Kolumne.
+Für mich war es immer eine gute Gelegenheit, tiefer in spannende Themen einzutauchen und diese hoffentlich verständlich darzustellen und zu erklären.
 
-Die Kolumne wird von meine Freunden und Kollegen Michael Simons und Martin Junghanns weitergeführt, die Sie ja in der Vergangenheit schon als Gastautoren lesen konnten.
+Die Kolumne wird von meinen Freunden und Kollegen Michael Simons und Martin Junghanns weitergeführt, die Sie ja in der Vergangenheit schon als Gastautoren lesen konnten.
 
-Bleiben Sie immer neugierig auf die spannenden neuen Entwicklungen in der JVM - mit Valhalla und der Finalisierung der Vektor API kommen ja wichtige Meilensteine auf uns zu, und halten Sie ihre Java Programme effizient.
+Bleiben Sie immer neugierig auf die spannenden neuen Entwicklungen in der JVM - mit Valhalla und der Finalisierung der Vektor API kommen ja wichtige Meilensteine auf uns zu, und halten Sie Ihre Java Programme effizient.
 
 Alles Gute, Michael Hunger
 
